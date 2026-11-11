@@ -1,37 +1,32 @@
-# Read-only repositories
+# Read-only (reference) repositories
 
 Status: draft, design only. Written 2026-11-11 on branch `readonly-repos`. Nothing is built.
 
+Naming: the UI says "read-only" and shows an `ro` badge. The file, the database and the code say `reference`.
+
 ## Decisions (owner, 2026-11-11)
 
-1. **Read-only is read-only.** GrayMoon makes no modification to a read-only repository: no commit, no stage, no branch, no push, no PR. This includes the Workspace repository of a read-only Workspace.
-2. **Read-only repositories are part of a Feature.** They are not left out.
-3. **The Workspace flag comes first.** Marking the Workspace read-only makes every repository in it read-only. This is the first step and the first way to turn read-only on or off. The per-repository flag is the second step.
-4. **Git Changes shows, but does not act.** Files changed from outside GrayMoon are visible on the Changes page. They cannot be staged or committed, and Commit All skips those repositories.
+1. **Read-only is read-only.** GrayMoon makes no modification to a read-only repository: no commit, no stage, no branch, no push, no PR.
+2. **Nothing goes to origin.** Fetch and pull are the only traffic with origin.
+3. **The Workspace flag comes first.** Marking the Workspace read-only makes every Source repository in it read-only. It is the first step and the first way to turn read-only on or off. The per-repository flag is the second step.
+4. **The Workspace repository is never read-only.** GrayMoon must be able to update the definition there, and the user must be able to commit and push it.
+5. **A repository must be clean to become read-only.** Unpushed commits or uncommitted changes refuse the change, with a message that the repository must be clean. The check is live and covers Feature worktrees.
+6. **Git Changes shows, but does not act.** Files changed from outside GrayMoon are visible on the Changes page. They cannot be staged or committed. The user has two ways out: undo the changes, or switch the repository off read-only and then commit.
+7. **The commit is recorded.** The commit a read-only repository is on is written to `graymoon.json`. A Workspace restored from the definition gets the repository at that commit, still read-only.
+8. **Read-only repositories are part of a Feature.**
+9. **The JSON property is `reference`.**
+10. **Badge and switch.** A small `ro` badge sits next to the branch name or tag on the Repositories page. The mode is changed in the footer of the branch dialog.
 
 ## Phases
 
-- **Phase 1 - Workspace flag.** `workspace.readOnly` in `graymoon.json`, `Workspaces.IsReadOnly` in the database, one switch on the Workspaces page. Every repository of the Workspace, including the Workspace repository, is read-only. All filters are built against the effective value, so phase 2 adds no new filter.
-- **Phase 2 - Repository flag.** `repositories[].readOnly`, `WorkspaceRepositories.IsReadOnly`, the per-repository switch, mixed Workspaces (some repositories read-only, some not). The dependency-graph question ("What the request did not cover", item 2) only exists in a mixed Workspace, so it belongs to this phase.
+- **Phase 1 - Workspace flag.** `workspace.reference` in `graymoon.json`, `Workspaces.IsReference` in the database, one switch in the footer of the Workspace branch dialog, recorded commits, restore. Every Source repository is read-only; the Workspace repository is not. All filters are built against the effective value, so phase 2 adds no new filter.
+- **Phase 2 - Repository flag.** `repositories[].reference`, `WorkspaceRepositories.IsReference`, the per-repository switch, mixed Workspaces. The dependency-graph question (see "Not yet decided", item 2) only exists in a mixed Workspace, so it belongs to this phase.
 
 ## Problem
 
 GrayMoon treats every Source repository as something the user develops in. Some repositories are in a Workspace only so their source is on disk next to the others: to read, to search, to give an AI tool or CodeGraph the full picture. Today these repositories are picked up by every workspace-wide operation: Create Branch makes a branch in them, Prepare Workspace switches and pushes them, Update Dependencies commits to them, Push pushes them.
 
 The only protection today is being checked out on a tag (`IsOnTag` / `CheckedOutTag`). That is not the same thing: a tag checkout is frozen at one commit, cannot pull, and the protection disappears the moment the user switches to a branch.
-
-## Idea
-
-A Source repository can be marked **read-only** in a Workspace. A read-only repository:
-
-- is cloned, fetched and synced like any other repository,
-- can pull changes from origin on its current branch,
-- can be switched to another branch or tag by the user, one repository at a time,
-- is never changed by a workspace-wide operation (an orchestrator): no branch is created, switched, committed, pushed or merged there.
-
-The flag is carried in `graymoon.json` next to the repository, so everyone who restores the Workspace gets the same read-only set.
-
-A Workspace can be marked read-only as a whole. Then every repository in it is read-only, including repositories added later and the Workspace repository. This is built first (phase 1).
 
 ## Behavior
 
@@ -42,9 +37,10 @@ A Workspace can be marked read-only as a whole. Then every repository in it is r
 | What it is | State of the checkout (changes with a checkout) | Setting of the repository in the Workspace (stays until switched off) |
 | Scope | Per context (Workspace or one Feature) | Per Workspace, the same in every context |
 | Pull | No | Yes, on the current branch |
-| Manual switch of branch or tag (per repository) | Yes | Yes |
+| Manual switch of branch or tag (per repository) | Yes | Yes (assumed, see "Not yet decided", item 1) |
 | Workspace-wide operations | Excluded | Excluded |
-| Stored in `graymoon.json` | `tag` + `commit` pin, file-owned | `readOnly`, database-owned |
+| Stage, commit | Possible | Never |
+| Stored in `graymoon.json` | `tag` + `commit` | `reference` + `branch` + `commit` |
 
 A read-only repository can also be on a tag. Then both apply: no pull (there is no branch), and it stays read-only after the user leaves the tag.
 
@@ -52,8 +48,8 @@ A read-only repository can also be on a tag. Then both apply: no pull (there is 
 
 - Sync, Quick Fetch, branch and tag refresh, hook-driven state updates.
 - Pull (the incoming side of Sync Commits), per repository and as part of the workspace-wide pull.
-- Switch Branch and tag checkout from the repository row. Checking out a tag records the tag pin as today.
-- Everything that only reads: Open in, the diff viewer, CodeGraph `include`, AI evidence collection, the dependency graph display.
+- Switch Branch and tag checkout from the repository row.
+- Everything that only reads: Open in, the diff viewer, CodeGraph `include`, the dependency graph display.
 
 ### Refused or skipped
 
@@ -68,118 +64,165 @@ Workspace-wide operations skip the repository without an error, the same way the
 | Push, Push Synchronized, Push Updated, set upstream | skipped | disabled |
 | Undo Push Commits | skipped | disabled |
 | Sync Commits | pull only | pull only |
-| Return to Default | skipped | open question 3 |
+| Return to Default | skipped | manual switch only, no cleanup offered |
 | Update Branch (merge default into the branch) | n/a | disabled |
 | Create PR, bulk Merge PRs and their return follow-ups | skipped | disabled |
-| Commit All, stage, unstage, commit (Git Changes) | skipped | not offered, see "Git Changes" |
-| Create / Repair Feature | included, detached, no Feature branch, see "Features" | n/a |
+| Commit All, stage, unstage, commit (Git Changes) | skipped | not offered |
+| Create / Repair Feature | included, detached, no Feature branch | n/a |
 
-### Pull details
+### Turning read-only on
+
+A repository must be clean before it can be marked read-only. Otherwise work would be stranded: GrayMoon would never commit or push it.
+
+- Clean means: no uncommitted changes, no unpushed commits on the current branch, and the branch has an upstream (a local branch that was never pushed counts as unpushed).
+- The check is live, through the Worker, when the user confirms. The stored counters can be stale. A repository whose state cannot be read is treated as not clean.
+- It covers every context: the Workspace checkout and each Feature worktree of the repository.
+- When the check fails nothing is changed. The message names each repository and what is in the way, for example "Billing must be clean: 2 unpushed commits on `feature/x`".
+- For the Workspace flag every Source repository must be clean. One repository that is not clean refuses the whole change, and the message lists all of them. The Workspace repository is not checked.
+- Turning read-only off needs no check.
+- Later states are not prevented. A file changed from outside is shown on the Changes page. A commit made with git outside GrayMoon is shown as outgoing and never pushed.
+
+### Pull
 
 - Pull is fast-forward only. A read-only repository should never have local commits; when it has (made outside GrayMoon), the pull is refused for that repository with a message, never merged or rebased.
+- A pull that fails because of local changes says so: "Billing has local changes. Undo them, or switch read-only off and commit."
 - Outgoing commits on a read-only repository are shown, but never counted in "push recommended", the Push button counter, or the notification panel.
 - Incoming commits on a read-only repository do count: the notification panel and the pull counter include them.
 
 ### Git Changes
 
-Decided: a read-only repository is shown on the Changes page, because files can be changed from outside GrayMoon and the user should see that. GrayMoon does not act on them.
+A read-only repository is shown on the Changes page, because files can be changed from outside GrayMoon and the user should see that. GrayMoon does not act on them.
 
-- The repository and its changed files are listed, with a lock mark on the repository node. The diff viewer works.
+- The repository and its changed files are listed, with the `ro` badge on the repository node. The diff viewer works.
 - Stage and unstage are not offered for its files or folders. A "stage all" on a parent node skips them.
-- Commit and Commit All skip the repository. The commit dialog lists only repositories that can be committed; when read-only repositories with changes were left out, it says how many.
+- Commit and Commit All skip the repository. When read-only repositories with changes were left out, the commit dialog says how many.
 - The AI commit message collects no evidence from read-only repositories.
-- A file staged from outside GrayMoon is shown as staged, and stays that way. GrayMoon neither commits nor unstages it.
-- The Worker commands (`StageGitChangesCommand`, `UnstageGitChangesCommand`, `CommitGitChangesCommand`) are refused in the App service path (`IWorkspaceGitChangesOperations`), not only hidden in the page.
-- Discard is a modification too. It is open question 2.
+- A file staged from outside GrayMoon is shown as staged, and stays that way.
+- The refusal is in the App service path (`IWorkspaceGitChangesOperations`), not only hidden in the page.
+- The two ways out are stated on the repository node: undo the changes, or switch read-only off and commit. Whether "undo" is a Discard button in GrayMoon is item 3 of "Not yet decided".
 
-In a read-only Workspace (phase 1) this means the Changes page is a viewer: no stage, no commit, no commit box.
+In a read-only Workspace only the Workspace repository can be staged and committed on the Changes page.
 
 ### Features
 
-Decided: a read-only repository is part of a Feature. A Feature is a set of worktrees, one per repository, each on the Feature branch. A read-only repository must not get a Feature branch, but its source is in the Feature folder: that is the whole purpose (AI tools and CodeGraph run in the Feature root).
+A read-only repository is part of a Feature. A Feature is a set of worktrees, one per repository, each on the Feature branch. A read-only repository does not get a Feature branch, but its source is in the Feature folder: that is the purpose (AI tools and CodeGraph run in the Feature root).
 
-Handle it like a tag-pinned repository. The Feature gets a detached worktree at the commit the Workspace checkout is on (`BaseCommitSha` from the same `GetHeadCommits` snapshot), with no Feature branch, no PR, no parent branch. Remove Feature and Roll back have no branch to delete for it.
+It is handled like a tag-pinned repository. The Feature gets a detached worktree at the commit the Workspace checkout is on (`BaseCommitSha` from the same `GetHeadCommits` snapshot), with no Feature branch, no PR, no parent branch. Remove Feature and Roll back have no branch to delete for it.
 
-Consequence: a detached worktree cannot pull. Git also refuses to check out, in the Feature worktree, the branch that the Workspace checkout is on. So "pull" for a read-only repository in a Feature means "move the detached worktree to `origin/<branch>`" (`git fetch`, then `git checkout --detach origin/<branch>`). This is open question 1.
+A detached worktree cannot pull, and git refuses to check out, in the Feature worktree, the branch that the Workspace checkout is on. So "pull" for a read-only repository in a Feature would mean "move the detached worktree to `origin/<branch>`". See "Not yet decided", item 4.
 
-In a read-only Workspace every repository is read-only, so a Feature there is a second, detached copy of the sources with no Feature branch anywhere. It is still useful as a separate folder for an AI tool, but "Create Feature" could be offered under another label there, or not at all. This is open question 5.
+In a read-only Workspace a Feature has a Feature branch in the Workspace repository only; every Source is a detached copy. That is still a complete Feature: the definition can be changed, committed and pushed on the Feature branch.
 
 ### The Workspace as a whole
 
-Decided, and built first. `workspace.readOnly: true` makes every repository read-only, the Workspace repository included:
+`workspace.reference: true` makes every Source repository read-only:
 
 - effective read-only = Workspace flag OR repository flag,
 - a repository added later is read-only without any further step,
-- the per-repository switch is shown checked and disabled, with the reason,
-- workspace-wide write actions (Create Branch, Prepare Workspace, Update, Push, New Pull Request, Commit All) are hidden or disabled for the whole Workspace instead of running over an empty set,
-- what is left is Sync, Pull, per-repository Switch Branch and tag checkout, and everything that reads.
-
-The Workspace repository (Workspace role) is covered too, with one exception. See the next section.
+- the per-repository switch (phase 2) is shown on and disabled, with the reason,
+- workspace-wide write actions stay available, but they act on the Workspace repository only. In a Workspace without a Workspace repository they are disabled, because nothing is writable.
 
 ### The Workspace repository
 
-Decided: in a read-only Workspace the Workspace repository is read-only like the others. GrayMoon creates no branch, commit, push or PR there, and the Changes page does not stage or commit its files.
+The Workspace repository is never read-only. GrayMoon writes `graymoon.json` (membership, profile, the flag, recorded commits, version files), the managed `.gitignore` section and `codegraph.json` there, and those changes must be committed and pushed like today.
 
-One exception cannot be avoided: the definition files. GrayMoon itself writes `graymoon.json` (membership, profile, tag pins, version files), the managed `.gitignore` section and `codegraph.json` into the Workspace repository, and setting the read-only flag is itself a write to `graymoon.json`. Without that write the flag could not be carried in the file.
-
-- GrayMoon keeps writing these three files in a read-only Workspace. They are never committed by GrayMoon (true today as well). They show up on the Changes page as changes that cannot be staged there; the owner commits them with git outside GrayMoon.
-- A user who only consumes a read-only Workspace normally causes no such write: Restore does not rewrite a definition that already matches, and nothing else changes membership or profile. The one case is a tag checkout, which records a tag pin in the file. Confirming this exception is open question 6.
-- Phase 2: the Workspace repository never carries the per-repository flag (it is not listed in `repositories[]`). It is read-only only through the Workspace flag.
+- It never carries the flag and is not covered by the Workspace flag.
+- Branch, commit, push, PR and Feature branch all work for it in a read-only Workspace.
+- It is not part of the clean check.
 
 ## `graymoon.json`
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "workspace": {
-    "profile": { "type": "dotNetDependency", "versioning": "gitVersion", "ci": "githubActions" },
-    "readOnly": true
+    "profile": { "type": "basic", "versioning": "none", "ci": "none" },
+    "reference": true
   },
   "repositories": [
-    { "name": "Billing", "repositoryUrl": "https://github.com/acme/Billing.git", "connectorUrl": "https://github.com" },
-    { "name": "Platform", "repositoryUrl": "https://github.com/acme/Platform.git", "connectorUrl": "https://github.com", "readOnly": true }
+    {
+      "name": "Billing",
+      "repositoryUrl": "https://github.com/acme/Billing.git",
+      "connectorUrl": "https://github.com",
+      "branch": "main",
+      "commit": "3f2a9c0d5e7b1a4c6d8e0f1a2b3c4d5e6f7a8b9c"
+    },
+    {
+      "name": "Platform",
+      "repositoryUrl": "https://github.com/acme/Platform.git",
+      "connectorUrl": "https://github.com",
+      "tag": "v4.2.0",
+      "commit": "9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a"
+    }
   ]
 }
 ```
 
-- `repositories[].readOnly` and `workspace.readOnly`: optional bool, written only when true (`JsonIgnoreCondition.WhenWritingDefault`), so existing files do not change.
-- Schema `version` stays 1. An older GrayMoon ignores the unknown property and treats the repository as writable. It also drops the property when it rewrites the file. This is acceptable for an optional property, but worth a line in the release notes.
-- Use the lenient bool converter (`LenientBooleanJsonConverter`, today used for `codegraph`), and make its error message name the property.
+With `workspace.reference` the repositories need no flag of their own. In phase 2 a single repository carries `"reference": true`.
 
-### Ownership: database-owned, not file-owned
+### The flag
 
-Tag pins are file-owned: there is no database copy, so they only work when the Workspace has a Workspace repository. The read-only flag should be database-owned:
+- `workspace.reference` and `repositories[].reference`: optional bool, written only when true, so existing files do not change.
+- Database-owned: `Workspaces.IsReference` and `WorkspaceRepositories.IsReference` (INTEGER NOT NULL DEFAULT 0), one new strict migration step. It must work without a Workspace repository, and the filters run against the database, several of them in SQL.
+- `BuildFromDatabaseAsync` writes it, Restore reads it, drift detection compares it. `WorkspaceManifestDrift` gets a list of repositories whose flag differs; the Workspace flag is reported with the profile fields.
+- Use the lenient bool converter (`LenientBooleanJsonConverter`) and make its error message name the property.
 
-- it must work for a Workspace that has no Workspace repository,
-- every orchestrator filter runs against the database, and several run inside SQL (`WorkspaceRepositoryLinkListQueryService` counters); reading a file through the Worker there is not possible,
-- it is shareable definition data like membership, not local checkout state.
+### The recorded commit
 
-So:
+Decided: the commit of each read-only repository is recorded, and Restore puts the repository back at that commit.
 
-- New column `WorkspaceRepositories.IsReadOnly` (INTEGER NOT NULL DEFAULT 0) and `Workspaces.IsReadOnly` (same). One new strict migration step, idempotent.
-- `BuildFromDatabaseAsync` writes both flags. `WriteAuthoritativeManifestAsync` needs no copy step for them.
-- Restore reads both flags into the database.
-- Drift detection compares them. `WorkspaceManifestDrift` gets a list of repositories whose flag differs (and the Workspace flag joins `ChangedProfileFields` or gets its own entry). The drift banner then offers the existing two directions: write the database to disk, or take the file.
-- `IsDefinitionRewriteRequiredAsync` compares serialized manifests, so it picks the flag up without a change, once Restore has imported it.
+Today only a tag checkout is recorded (`tag` + `commit`, `WorkspaceDefinitionTagPin`). A read-only repository on a branch gets the same treatment with `branch` + `commit`:
+
+- `commit`: the full hash HEAD is on.
+- `branch`: the branch that is checked out. Without it Restore could only make a detached checkout, and a detached checkout cannot pull. With it Restore creates the local branch at the recorded commit, tracking `origin/<branch>`. When origin has moved on, the repository shows incoming commits and the user decides when to pull.
+- On a tag the existing `tag` + `commit` pin is used, unchanged.
+- An entry is valid with `tag` + `commit`, with `branch` + `commit` (read-only repositories only), or with none of them.
+
+When it is written:
+
+- when read-only is turned on (the clean check has just read HEAD),
+- after a pull, a manual branch switch or tag checkout through GrayMoon,
+- when a Sync or a hook finds the repository on another commit (pulled or switched with git outside GrayMoon).
+
+These are the places that record tag pins today (`WorkspaceBranchOperations.SetRepositoryTagPinAsync`, `WorkspaceGitService.RecordCheckedOutTagPinsAsync`), plus the pull and the hook sync.
+
+Ownership: file-owned, like tag pins. There is no database copy, rewrites keep it (`WorkspaceRepositoryTagPins.CopyOnto` is extended), drift ignores it. It is recorded from the special Workspace context only, never from a Feature.
+
+Consequences:
+
+- Every pull of a read-only repository changes `graymoon.json`. The change shows up in the Workspace repository on the Changes page, and the owner commits it when the new state should be shared. This is the reason the Workspace repository cannot be read-only.
+- Recording needs a Workspace repository. Without one the flag still works from the database, but there is no file to record into and nothing to restore from.
+- Turning read-only off removes `branch` + `commit` from the entry. A tag pin stays.
+
+### Restore
+
+- The Worker checks a freshly cloned read-only repository out at the recorded commit (`SyncRepositoryCommand.CheckoutPinnedCommitAsync` is extended): `branch` + `commit` gives a local branch at that commit with its upstream set; `tag` + `commit` works as today.
+- A recorded commit that does not exist in the clone fails the sync for that repository and removes the clone, like an invalid tag pin today.
+- The flags are imported into the database before the first Sync, so no operation sees the repository as writable in between.
+- The repository stays read-only. Restore never turns the flag off.
+
+### Schema version
+
+An older GrayMoon rejects a `commit` without a `tag` as an invalid tag pin, so it could not read the file at all, and the message would be misleading. A file that contains `reference` or `branch` is therefore written with `"version": 2`; an older GrayMoon then reports "Workspace definition schema 2 is newer than this GrayMoon". A file without them stays at version 1 and keeps working everywhere.
 
 ## Design
 
 ### One predicate, not sixty edits
 
-`IsOnTag` / `CheckedOutTag` is tested in about 280 places in 87 files, many of them the same sentence written again (`!wr.IsOnTag`, `string.IsNullOrWhiteSpace(link.CheckedOutTag)`, and SQL forms of it). Adding `|| IsReadOnly` next to each one would repeat the pattern that the review rules warn about.
+`IsOnTag` / `CheckedOutTag` is tested in about 280 places in 87 files, many of them the same sentence written again (`!wr.IsOnTag`, `string.IsNullOrWhiteSpace(link.CheckedOutTag)`, and SQL forms of it). Adding `|| IsReference` next to each one would repeat the pattern that the review rules warn about.
 
 Proposal: introduce two named questions and move the call sites to them.
 
-- **"May a workspace-wide operation change this repository?"** False when on a tag or read-only. This replaces most `IsOnTag` tests.
+- **"May GrayMoon change this repository?"** False when on a tag or read-only. This replaces most `IsOnTag` tests.
 - **"Can this repository pull?"** False only when on a tag (no branch). Read-only does not matter.
 
 `IsOnTag` stays for what is really about the tag: the tag badge, `HasNewerTag`, tag pins, detached-HEAD handling in the state writer.
 
-Read-only is per Workspace and the tag is per context, so the first question takes both: the link (or Workspace) for read-only, the context state for the tag. The Feature-context scoping rules apply unchanged: read the tag from the context the operation runs in.
+Read-only is per Workspace and the tag is per context, so the first question takes both: the link and the Workspace for read-only, the context state for the tag. The Feature-context scoping rules apply unchanged: read the tag from the context the operation runs in. The Workspace-role link always answers "not read-only".
 
 ### Enforce in the service path, not only in the page
 
-The existing rule says "filter at the call site, and the service path leaves tags untouched". For read-only the service-side check matters more, because the REST endpoints (`WorkspaceOperationsEndpoints`) and the notification panel start the same operations without the Repositories page. A repository id that still reaches push, commit, branch create or update is skipped there and reported as skipped, not as a failure.
+The existing rule says "filter at the call site, and the service path leaves tags untouched". For read-only the service-side check matters more, because the REST endpoints (`WorkspaceOperationsEndpoints`) and the notification panel start the same operations without the Repositories page. A repository id that still reaches push, commit, stage, branch create or update is skipped there and reported as skipped, not as a failure.
 
 ### Places that need the change
 
@@ -193,51 +236,45 @@ Found by following the tag checks. Each is a place where a read-only repository 
 - **Return to Default and PRs**: `WorkspaceSyncHandler` (`ClassifyRepository`, unattended batch), `WorkspaceRepositories.ReturnToDefault.cs`, `.BulkMerge.cs`, `.PullRequests.cs`, `PRBadge`.
 - **Counters and notifications**: `WorkspaceRepositoryLinkListQueryService` (header counters `Unmatched`, `Push`, `OutOfDateFiles`, `CreatablePr`, `Lowest`; `Incoming` must keep read-only repositories), `WorkspacePendingActionsService`, `NotificationPanelRepoSets` in `UiRaceGuards.cs`.
 - **Features**: `WorkspaceFeatureOperations` (Create, Repair, Remove, Roll back all branch on `PinnedTag == null`), `FeatureBranchPolicy` / `FeatureBranchGuard` (expected branch is null for a read-only repository), `WorkspaceBranchOccupancyService`.
-- **Manifest**: `WorkspaceManifest` records, `WorkspaceManifestFile` (parse, serialize), `WorkspaceManifestService` (build, drift), `RestoreDefinitionEvaluator` and `WorkspaceRepositoryOperations` (restore import).
+- **Definition**: `WorkspaceManifest` records, `WorkspaceManifestFile` (parse, serialize, version), `WorkspaceDefinitionTagPin` and `WorkspaceRepositoryTagPins` (the `branch` + `commit` form), `WorkspaceManifestService` (build, drift), `RestoreDefinitionEvaluator` and `WorkspaceRepositoryOperations` (restore import), Worker `SyncRepositoryCommand` (checkout at the recorded commit).
 - **Row and DTO**: `WorkspaceRepositoryLink`, `WorkspaceRepositoryLinkListItemDto` and its mapper (including `WithBranchOverride`), `WorkspaceRepositoriesRow.razor`, `CommitsBadge`, `DivergenceBadge`.
 - **Git Changes**: `IWorkspaceGitChangesOperations` commit / stage / unstage, Commit All, the AI commit message scope.
 
 ### UI
 
-- Repositories grid: a lock icon next to the name, and a "Read-only" entry in the row menu to switch it. Write badges (push, update, PR) render as inactive, like on a tag.
-- Search filter: `readonly:yes` / `readonly:no` in `FilterSearchExpression`.
-- Workspace repositories modal (membership): a read-only checkbox per repository, so a repository can be added as read-only from the start and is never touched in between.
-- Workspaces page (profile): a "Read-only Workspace" switch.
-- Header counter "Read-only (n)" next to "Tagged (n)".
+- Repositories grid: a small `ro` badge next to the branch name or tag, with the tooltip "Read-only repository". Write badges (push, update, PR) render as inactive, like on a tag.
+- Branch dialog (`BranchModal`): the mode is changed in the footer, for example a "Read-only" switch on the left of the footer buttons. The dialog changes the mode of what it was opened for: opened for the Workspace it sets the Workspace flag (phase 1), opened for one repository it sets that repository's flag (phase 2). In a read-only Workspace the per-repository dialog shows the switch on and disabled, with the reason.
+- Turning the switch on runs the clean check first; a refusal is shown in the dialog and the switch stays off.
+- Workspaces page: shows that a Workspace is read-only (the same `ro` badge).
+- Search filter `ro:yes` / `ro:no` in `FilterSearchExpression`, and a header counter "Read-only (n)" next to "Tagged (n)". Both matter in phase 2 only.
 - Setting or clearing the flag writes the definition to disk (`SyncDefinitionToDiskAsync`), like a membership change.
 
-## What the request did not cover
+## Not yet decided
 
-1. **Features.** Whether a read-only repository is in a Feature at all, and in what form. See "Features" above and open question 2.
-2. **Dependency graph.** A read-only repository can produce packages that writable repositories consume. Its local GitVersion is a version the user will never publish. If it stays a normal dependency source, consumers show "unmatched dependencies" against a version that does not exist in the registry, Update writes that version into their `.csproj`, and Push Synchronized waits for a package that never arrives. Proposal: a read-only repository keeps its place in the level graph (display and ordering) but is never a version source: edges pointing at it are not counted as unmatched, are not updated, and are not waited for. The same applies to version-file tokens that name a read-only repository. This needs a check of how a tag-pinned source is treated today, because the same question applies there.
-3. **Local changes in a read-only repository.** The files are not write-protected, and a build or an editor can change them. Decided: they are visible on the Changes page and cannot be staged or committed. A pull can then fail on a changed file; the message must say that the repository has local changes, since the user cannot fix it by committing in GrayMoon.
-4. **GrayMoon's own writes into a repository.** Git hooks are installed in every repository (`.git/hooks`, not tracked): keep them, the state updates depend on them. Version-file update and `.csproj` update write tracked files: skip. Package restore writes only ignored files: allow, since the code must build to be read with tooling.
-5. **Hard protection at git level.** GrayMoon can only restrict its own operations. A `git push` from a terminal still works. Optional extra: set `remote.origin.pushurl` to an invalid value in a read-only repository so that any push fails. This changes repository config, must be undone when the flag is cleared, and is easy to forget. Not proposed for the first version.
-6. **Switching the flag on a repository that is not clean.** Marking a repository read-only while it has outgoing commits, uncommitted changes or an open PR. Proposal: allow it and show a warning that lists what is left behind; do not clean up.
-7. **Switching the flag while Features exist.** An existing Feature has a Feature branch in that repository. Proposal: the flag applies at once to all operations (the Feature branch stays, nothing pushes it); Repair Feature does not convert it. Converting is a separate, explicit step, or not offered.
-8. **Clone depth.** Read-only repositories are candidates for a shallow or blobless clone to save disk space and time. Out of scope, but the flag makes it possible later.
-9. **CI, PR and Actions pages.** A read-only repository has no PR of the user and its workflow runs are not the user's. Proposal: the Actions page and the PR column skip read-only repositories, which also saves GitHub API calls on every refresh.
-10. **REST and automation.** `WorkspaceOperationsEndpoints` must return the skipped repositories with a reason, so an automation does not read a skip as success for that repository.
-11. **Workspace merge and membership replace.** `ReplaceRepositoriesCoreAsync` and `MergeRepositoriesAsync` recreate link rows; the flag must survive both.
-12. **Old GrayMoon with a new file.** See "`graymoon.json`": the flag is lost on a rewrite by an older version.
+1. **Manual switch of branch or tag.** The first request allows the user to change branch or tag per repository; a later one lists "change branches" among what GrayMoon cannot do. The note assumes: per-repository Switch Branch and tag checkout stay allowed (they are needed to choose what is on disk, and they update the recorded commit), every workspace-wide branch change is excluded.
+2. **Dependency graph (phase 2).** A read-only repository can produce packages that writable repositories consume. Its local GitVersion is a version the user will never publish. If it stays a normal dependency source, consumers show "unmatched dependencies" against a version that does not exist in the registry, Update writes that version into their `.csproj`, and Push Synchronized waits for a package that never arrives. Proposal: a read-only repository keeps its place in the level graph (display and ordering) but is never a version source. How a tag-pinned source is treated today must be checked first; the same question applies there.
+3. **Discard on the Changes page.** "Undo the changes" is one of the two ways out. Proposal: offer Discard for a read-only repository, as the only action there, because it puts the repository back to the recorded state and unblocks a pull. The strict reading of "GrayMoon makes no modification" would leave undo to git outside GrayMoon.
+4. **Read-only worktree in a Feature: movable or fixed?** Is "move to `origin/<branch>`" wanted as its pull, or is a fixed snapshot for the life of the Feature better (reproducible)?
+5. **"Commits ahead" in the clean check.** The note checks commits ahead of the upstream (unpushed). If "ahead of the parent" also means a pushed branch that is ahead of the default branch, the check must refuse that too; then a read-only repository can only be on a branch with no work of its own.
+6. **Workspace flag and the repository flags (phase 2).** When the Workspace flag is cleared, do repositories keep their own flag (proposed: yes, the Workspace flag never writes the repository flags)?
+7. **Recorded commit without a Workspace repository.** Nothing is recorded there (proposed). The alternative is to require a Workspace repository before read-only can be turned on.
 
-## Open questions
+## Smaller points
 
-Closed by the decisions above: the Workspace repository in a read-only Workspace (read-only), whether a read-only repository is in a Feature (yes), stage and commit on the Changes page (no), and whether the Workspace flag is in the first version (it is the first version).
-
-1. **Read-only worktree in a Feature: movable or fixed?** It is a detached worktree. Is "move to `origin/<branch>`" wanted as its pull, or is a fixed snapshot for the life of the Feature better (reproducible)?
-2. **Discard on the Changes page.** Discard changes the working tree, so by "GrayMoon makes no modification" it is not offered (proposed). Without it the only way to clear a file changed by accident is git outside GrayMoon, and a pull stays blocked until then.
-3. **Manual switch of branch or tag.** The first request allows the user to change branch or tag per repository; the later wording lists "change branches" among what GrayMoon cannot do. The note assumes: per-repository Switch Branch and tag checkout stay allowed, every workspace-wide branch change is excluded. Per-repository Return to Default is then a manual switch as well; it only differs by the cleanup it offers, which would not be offered.
-4. **Workspace flag and the repository flags (phase 2).** When the Workspace flag is cleared, do repositories keep their own flag (proposed: yes, the Workspace flag never writes the repository flags), or does clearing it make everything writable?
-5. **Features in a read-only Workspace.** Offer Create Feature there (a detached copy of all sources, no branch), or hide it?
-6. **Definition files in the Workspace repository.** GrayMoon writes `graymoon.json`, the managed `.gitignore` section and `codegraph.json` even when the Workspace is read-only, and never commits them (proposed, see "The Workspace repository"). The alternative is to refuse every definition change while the flag is on, except the flag itself.
-7. **Naming.** "Read-only" suggests that files cannot change. "Reference repository" says what it is for. The JSON property name is fixed once shipped.
+- **GrayMoon's own files in a repository.** Git hooks (`.git/hooks`, not tracked) stay installed; the state updates depend on them. Version-file and `.csproj` updates write tracked files: skipped. Package restore writes only ignored files: allowed.
+- **Hard protection at git level.** GrayMoon can only restrict its own operations; `git push` from a terminal still works. Setting `remote.origin.pushurl` to an invalid value would stop that, but it changes repository config and must be undone when the flag is cleared. Not proposed for the first version.
+- **Open PR when the flag is turned on.** A PR whose branch is fully pushed does not block. It is no longer shown or acted on.
+- **Existing Features when the flag is turned on.** A pushed Feature branch stays as it is; nothing pushes it again. Repair Feature does not convert it to a detached worktree.
+- **CI, PR and Actions pages.** They skip read-only repositories, which also saves GitHub API calls on every refresh.
+- **REST and automation.** `WorkspaceOperationsEndpoints` returns the skipped repositories with a reason.
+- **Workspace merge and membership replace.** `ReplaceRepositoriesCoreAsync` and `MergeRepositoriesAsync` recreate link rows; the flag must survive both.
+- **Clone depth.** Read-only repositories are candidates for a shallow or blobless clone later. Out of scope.
 
 ## Constraints
 
-- Feature-context scoping: read-only comes from the Workspace link, the tag comes from the context the operation runs in. No new write to the shared link from a Feature.
+- Feature-context scoping: read-only comes from the Workspace and the link, the tag comes from the context the operation runs in. No new write to the shared link from a Feature.
 - A skipped repository is reported as skipped, with the reason. It is never a failure and never silent.
 - The flag is captured when the operation is queued, with the repository set. A change of the flag during a run does not retarget it.
 - New database columns have a default; the migration is a new strict step.
-- GrayMoon stays CI-agnostic in the wait logic; read-only only removes repositories from the set.
-- When built: update `docs/architecture/01`, `03`, `05`, `06` (the tag-pinned section becomes "repositories excluded from workspace-wide operations"), the tag-pinned rule in `AGENTS.md` and `CLAUDE.md`, and add tests that seed a read-only repository with outgoing commits and unmatched dependencies and assert that each operation leaves it unchanged.
+- Recording a commit never fails the pull, switch or sync that caused it; a failed write is reported and the next Sync records it.
+- When built: update `docs/architecture/01`, `03`, `05`, `06` (the tag-pinned section becomes "repositories GrayMoon does not change"), the tag-pinned rule in `AGENTS.md` and `CLAUDE.md`, and add tests that seed a read-only repository with outgoing commits, local changes and unmatched dependencies and assert that each operation leaves it unchanged.

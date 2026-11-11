@@ -23,7 +23,7 @@ Classification (must / should / optional) and the order of work for all of these
 | [connector-token-failure-handling](ideas/connector-token-failure-handling.md) | Classify connector token failures instead of showing "unknown" errors. | Draft, analysis only |
 | [git-changes-large-changeset-scale](ideas/git-changes-large-changeset-scale.md) | Folder summaries, chunked Worker transfer, deltas for very large change sets. | Closed for now |
 | [push-continue-waiting](ideas/push-continue-waiting.md) | "Continue waiting" on a failed push level: resume the package wait without pushing the finished levels again. | Not started |
-| [read-only-repositories](ideas/read-only-repositories.md) | Mark a Source repository (or a whole Workspace) read-only: it can pull and be switched by hand, but workspace-wide operations never change it. Flag carried in `graymoon.json`. | Draft, design only |
+| [read-only-repositories](ideas/read-only-repositories.md) | Mark a Workspace (later a single Source repository) read-only: GrayMoon can pull and switch it by hand but never commits, pushes or branches there. Carried in `graymoon.json` as `reference`, with the commit each repository is on. | Draft, design only |
 | [pr-description-commit-history](ideas/pr-description-commit-history.md) | Read commit bodies as a fallback for PR descriptions. | Not started |
 | [ai-generation-lane-decoupling](ideas/ai-generation-lane-decoupling.md) | Gate the New Pull Request AI button separately from the dialog's busy state. | Deliberately not built |
 
