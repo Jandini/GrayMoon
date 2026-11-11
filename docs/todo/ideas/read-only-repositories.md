@@ -19,22 +19,22 @@ This is **one GrayMoon orchestration feature for both developers and non-develop
 
 1. **Read-only means no GrayMoon development writes.** No commit, Feature-branch creation, tracked dependency/version-file rewrite, push, PR or destructive branch cleanup for a reference Source repository. Manual local stage/unstage and explicit, selected Undo are allowed; no automatic stage, commit, push or bulk discard.
 2. **Nothing is published to origin.** Fetch/pull are the only normal origin interactions for reference Source repositories; GrayMoon never pushes them.
-3. **The Workspace flag comes first.** `workspace.reference` makes every Source repository reference (phase 1); an optional per-repository flag adds mixed Workspaces later (phase 2).
+3. **Workspace default and repository state are independent.** `workspace.reference` means the default for *new* Source repositories. `repositories[].reference` is the actual state of each existing Source repository, with explicit `false` allowed even when the default is `true`. The Workspace default does not override existing repository choices.
 4. **The Workspace repository is always writable.** It may be branched, committed, pushed and included in PRs normally; neither flag makes it reference.
 5. **Enabling reference warns on local edits, blocks on unpushed commits.** Check live state of the Workspace checkout and every existing Feature worktree. Staged/unstaged file changes produce a warning but do not block. Unpushed commits or a local branch without an upstream block activation; do not push/reset/stash automatically.
 6. **Git Changes supports local change management.** Show diffs; allow manual stage/unstage and explicit individual Undo; never commit a reference repository or include it in Commit All or automatic workspace-wide staging.
-7. **The commit is recorded.** The selected Workspace checkout branch/tag and full commit are written to `graymoon.json`; Restore reproduces that checkout with reference status intact.
+7. **Manifest reproducibility.** Record the default for new Source repositories, the explicit reference state of every existing Source repository, and the checked-out branch/tag and full commit of each reference repository in `graymoon.json`. Restore imports states before syncing and reproduces the saved reference revisions; this reflects the committed manifest snapshot, not subsequent changes in another user's Workspace.
 8. **Feature reference worktrees are fixed snapshots.** Include them in the Feature as detached worktrees at the commit captured on creation, without Feature branches, and do not refresh them automatically or introduce a new refresh operation. Show the originating branch or tag and short hash, without representing the detached worktree as actually checked out on that branch.
 9. **The dependency graph stays complete.** Reference repositories retain normal discovery, version/package relationships and dependency levels. They are skipped only as write/publish targets; missing packages required from them are surfaced as real unmet dependencies, not silently ignored.
 10. **A mode switch is locked during relevant orchestration.** Disable it while an orchestrator is queued/running for the Workspace, and enforce this atomically in the service path. No mid-run retargeting.
 11. **Safe manual branch switches.** Warn about local edits and proceed only when Git can preserve them. Never force-checkout, stash or discard to bypass a conflict. A blocked repository must not unnecessarily abort independent work on others.
-12. **The JSON property is `reference`.** Show an `ro` badge next to the source branch/tag, and put the switch in the branch dialog footer.
+12. **Two distinct settings surfaces.** Edit Workspace displays the derived none/mixed/all read-only state, offers batch changes, and controls the default for new Source repositories. A repository's Branch dialog can change **only that selected repository**. No read-only numeric counter is needed; the `ro` badge remains.
 13. **GrayMoon is not an AI sandbox.** Read-only is a GrayMoon orchestration policy, not a guarantee that outside tools cannot change the repository.
 
 ## Phases
 
-- **Phase 1 - Workspace flag.** `workspace.reference` in `graymoon.json`, `Workspaces.IsReference` in the database, one switch in the footer of the Workspace branch dialog, recorded commits, restore. Every Source repository is read-only; the Workspace repository is not. All filters are built against the effective value, so phase 2 adds no new filter.
-- **Phase 2 - Repository flag.** `repositories[].reference`, `WorkspaceRepositories.IsReference`, the per-repository switch, mixed Workspaces. The full dependency graph is retained in both phases; Phase 2 exercises mixed writable/reference execution plans.
+- **Phase 1 - Workspace default and batch action.** Store `workspace.reference` as the default for newly added Source repositories (database field e.g. `Workspaces.ReferenceDefault`), show its controls in **Edit Workspace**, and support applying all/none to existing Source repositories with safety validation. Restore preserves the Workspace default and fixed reference revisions. The Workspace repository stays writable; use a per-repository eligibility policy from the outset.
+- **Phase 2 - Individual states and mixed Workspaces.** Persist `repositories[].reference` and `WorkspaceRepositories.IsReference` for each Source, with both `true` **and** `false` explicitly representable. Add the per-repository Branch dialog switch, derived none/mixed/all Workspace summary, and manifest round-trip tests. Phase 1 definitions without per-repository flags import each Source at the saved Workspace default. The dependency graph remains complete in both phases.
 
 ## Problem
 
@@ -141,12 +141,18 @@ A reference repository is **not removed from dependency discovery or graph plann
 
 ### The Workspace as a whole
 
-`workspace.reference: true` makes every Source repository read-only:
+**The Workspace-level setting is a default, not a permanent override.** Two independently persisted facts are required:
 
-- effective read-only = Workspace flag OR repository flag,
-- a repository added later is read-only without any further step,
-- the per-repository switch (phase 2) is shown on and disabled, with the reason,
-- workspace-wide write actions stay available, but they act on the Workspace repository only. In a Workspace without a Workspace repository they are disabled, because nothing is writable.
+- `workspace.reference` is the **default read-only state for newly added Source repositories**. Changing only this setting does not change existing repositories.
+- `repositories[].reference` is the **actual read-only state of each existing Source repository**; `false` must remain valid even when the Workspace default is `true`. For an existing Source, eligibility depends on its own saved state, not `workspace.reference || repository.reference`.
+
+**Edit Workspace** displays a three-state none/mixed/all summary computed from current Source states. This aggregate is not stored separately and shows no numeric count. The user may choose batch **Make all read-only** or **Make all writable**; these actions update actual Source flags with the usual validation and may set the default for new additions to the same choice. If the user wants to change *only* the future default, offer an explicit distinct action or confirmation option. A tri-state summary alone cannot represent both dimensions.
+
+The repository **Branch dialog** controls only the selected Source repository. For example, starting with 20 reference Source repositories and `workspace.reference: true`, unchecking `Authentication` changes only that repository to writable: 19 remain reference, Edit Workspace shows mixed, and newly added repositories still default to reference. The Workspace default must never force the per-repository switch on or disable it.
+
+When unchecking Workspace-wide read-only, distinguish **Make existing Source repositories writable** from **Change only the default for future repositories**. Never silently erase individual choices. Batch activation follows the unpushed-commit checks and is atomic; relevant orchestration locks apply. A Workspace with zero Sources has no aggregate, but still has a configurable future default.
+
+Workspace-wide write operations stay available for all eligible writable Sources and the Workspace repository; the Workspace repository is excluded from Source calculations, toggles, and inheritance, and is always writable.
 
 ### The Workspace repository
 
@@ -170,6 +176,7 @@ The Workspace repository is never read-only. GrayMoon writes `graymoon.json` (me
       "name": "Billing",
       "repositoryUrl": "https://github.com/acme/Billing.git",
       "connectorUrl": "https://github.com",
+      "reference": true,
       "branch": "main",
       "commit": "3f2a9c0d5e7b1a4c6d8e0f1a2b3c4d5e6f7a8b9c"
     },
@@ -177,21 +184,24 @@ The Workspace repository is never read-only. GrayMoon writes `graymoon.json` (me
       "name": "Platform",
       "repositoryUrl": "https://github.com/acme/Platform.git",
       "connectorUrl": "https://github.com",
-      "tag": "v4.2.0",
-      "commit": "9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a"
+      "reference": false,
+      "branch": "develop"
     }
   ]
 }
 ```
 
-With `workspace.reference` the repositories need no flag of their own. In phase 2 a single repository carries `"reference": true`.
+The saved Workspace is **mixed**: `Billing` is reference at a recorded commit, `Platform` is explicitly writable, and **future** Sources default to reference. A user restoring this committed definition receives these same settings, not an implicit all-read-only override. The Workspace repository always remains writable.
 
 ### The flag
 
-- `workspace.reference` and `repositories[].reference`: optional bool, written only when true, so existing files do not change.
-- Database-owned: `Workspaces.IsReference` and `WorkspaceRepositories.IsReference` (INTEGER NOT NULL DEFAULT 0), one new strict migration step. It must work without a Workspace repository, and the filters run against the database, several of them in SQL.
-- `BuildFromDatabaseAsync` writes it, Restore reads it, drift detection compares it. `WorkspaceManifestDrift` gets a list of repositories whose flag differs; the Workspace flag is reported with the profile fields.
-- Use the lenient bool converter (`LenientBooleanJsonConverter`) and make its error message name the property.
+- `workspace.reference` is the future **Source repository default** (missing defaults to `false` for legacy definitions). Its database field should convey this meaning, e.g. `Workspaces.ReferenceDefault`.
+- `repositories[].reference` is the **current individual Source state**. Write both `true` and `false` explicitly for every Source in Phase 2 version-2 definitions; omitting `false` would lose an intentional override when the default is `true`.
+- Existing Phase 1 manifests with no per-repository values import each Source with the Workspace default; legacy manifests with neither field import as writable. Once imported, existing Source flags are independent of later changes to the default.
+- Database: Workspace default and per-link `WorkspaceRepositories.IsReference` (booleans NOT NULL DEFAULT 0) with strict, phase-appropriate migrations. The Workspace-role link never becomes reference.
+- `BuildFromDatabaseAsync` writes the Workspace default and individual Source values, Restore imports them **before the first Sync**, and drift detection compares both kinds of state. Rewrites, merges, membership replacement and Feature operations must preserve their distinction; `WithBranchOverride` must carry per-link state.
+- Use `LenientBooleanJsonConverter` with property-specific error messages and no silent coercion of invalid values.
+- **Snapshot, not live coordination:** the same **committed manifest revision** reproduces saved modes and recorded reference revisions. A different user's later pulls, local edits, or Feature changes are not automatically synchronized. Writable repositories keep their existing restore behavior; the design does not promise a byte-identical copy of another user's uncommitted state.
 
 ### The recorded commit
 
@@ -239,13 +249,13 @@ An older GrayMoon rejects a `commit` without a `tag` as an invalid tag pin, so i
 
 Proposal: introduce two named questions and move the call sites to them.
 
-- **"May GrayMoon make a development write to this repository?"** False when on a tag or effectively reference. This guards commits, branches, tracked version/dependency updates, pushes, PRs and publication.
+- **"May GrayMoon make a development write to this repository?"** False when on a tag or when the Source link's **actual** `IsReference` is true. The Workspace default is applied when creating new links, not OR-ed into this check. This guards commits, branches, tracked version/dependency updates, pushes, PRs and publication.
 - **"May GrayMoon manage local changes here?"** Allow explicit stage/unstage and selected Undo for reference repositories, subject to normal Git safety checks; this is not permission to commit.
 - **"Can this checkout pull?"** False on a tag or detached Feature snapshot; a reference Source checkout on an ordinary branch can pull if Git can safely fast-forward.
 
 `IsOnTag` stays for what is really about the tag: the tag badge, `HasNewerTag`, tag pins, detached-HEAD handling in the state writer.
 
-Read-only is per Workspace and the tag is per context, so the first question takes both: the link and the Workspace for read-only, the context state for the tag. The Feature-context scoping rules apply unchanged: read the tag from the context the operation runs in. The Workspace-role link always answers "not read-only".
+Reference mode is per Workspace-Source link; tag or detached state is context-dependent. Read the actual Source link flag for write eligibility, and read the relevant Feature or Workspace context for tag handling. Do not reapply the Workspace future default to existing links. The Workspace-role link always answers "not read-only".
 
 ### Enforce in the service path, not only in the page
 
@@ -270,11 +280,12 @@ Found by following the tag checks. Each is a place where a read-only repository 
 ### UI
 
 - Repositories grid: a small `ro` badge next to the branch name or tag, with the tooltip "Read-only repository". Write badges (push, update, PR) render as inactive, like on a tag.
-- Branch dialog (`BranchModal`): the mode is changed in the footer, for example a "Read-only" switch on the left of the footer buttons. The dialog changes the mode of what it was opened for: opened for the Workspace it sets the Workspace flag (phase 1), opened for one repository it sets that repository's flag (phase 2). In a read-only Workspace the per-repository dialog shows the switch on and disabled, with the reason.
+- **Edit Workspace:** tri-state none/mixed/all visual based on existing Source flags (no count), explicit batch actions, and the saved default for future Source additions. Changing the default only is distinguishable from updating existing Sources.
+- **Branch dialog (`BranchModal`):** the footer Read-only checkbox changes **only the selected Source repository**. It is never forced on or disabled merely because the Workspace default is read-only; no Workspace-wide toggle is here.
 - Turning the switch on runs the live outgoing-commit check first. Dirty-file warnings do not prevent the toggle; unpushed commits, absent upstream or unreadable Git state do. Report all affected contexts.
 - Disable the Read-only switch while any relevant orchestration is queued or running for that Workspace; enforce the same lock in the service/API path, not only in Razor. Other Workspaces remain independent.
-- Workspaces page: shows that a Workspace is read-only (the same `ro` badge).
-- Search filter `ro:yes` / `ro:no` in `FilterSearchExpression`, and a header counter "Read-only (n)" next to "Tagged (n)". Both matter in phase 2 only.
+- Workspaces page: may show the derived none/mixed/all read-only summary; do not imply that a mixed Workspace is wholly read-only.
+- Search filter `ro:yes` / `ro:no` in `FilterSearchExpression` may be introduced in Phase 2; do not add a read-only numeric counter.
 - Setting or clearing the flag writes the definition to disk (`SyncDefinitionToDiskAsync`), like a membership change.
 
 ## Not yet decided
@@ -282,7 +293,7 @@ Found by following the tag checks. Each is a place where a read-only repository 
 The following genuinely remain to be decided; the Feature snapshot, local staging/Undo, dirty-file warnings, missing-package graph inclusion and in-flight toggling questions were settled in discussion.
 
 1. **Published commits ahead of the parent/default branch.** The agreed activation gate checks for *unpublished* commits relative to upstream, across all contexts. Should a branch that is fully pushed but ahead of its default/parent also block reference mode? Proposed: no; published branches are valid versions to inspect.
-2. **Workspace flag versus repository flags (phase 2).** When `workspace.reference` is turned off, do existing `repositories[].reference` flags remain? Proposed: yes; Workspace toggle never overwrites each repository's choice.
+2. **Default-only change UX.** The design now settles that the Workspace default and the actual per-repository state are separate and stored in the manifest. The exact Edit Workspace wording for changing only the future default versus applying a batch action can be finalized during implementation; no action may silently overwrite existing individual settings.
 3. **No Workspace repository.** The database-level reference flag can work without one, but there's no `graymoon.json` in which to record an exact reproducible selected commit. Proposed: permit reference mode with a clear limitation; restore-by-definition requires a Workspace repository.
 4. **Diagnostics depth.** Decide whether the first implementation must explicitly say "required package is missing; its producer is read-only" or whether existing precise missing-package diagnostics are sufficient. In either case a missing package must be surfaced as an error, never success.
 
@@ -294,6 +305,7 @@ The following genuinely remain to be decided; the Feature snapshot, local stagin
 - **Local changes:** selected stage/unstage and explicit selected Undo allowed, but no reference commits, automatic staging, mass discard, push or PR.
 - **Activation:** staged/unstaged edits warn and allow; unpushed commits or a missing upstream block. Check the Workspace checkout and existing Feature worktrees.
 - **Running orchestrators:** lock the mode switch Workspace-wide during relevant queued/running work; release after the run fully finishes or stops. Serialize launch/toggle to prevent races.
+- **Workspace settings and manifest Restore:** derived none/mixed/all Workspace status; individual Branch-dialog toggle; independent default for new Sources; version-2 manifest persists both true and false per-Source flags, and Restore imports them before Sync.
 
 ## Smaller points
 
@@ -313,4 +325,4 @@ The following genuinely remain to be decided; the Feature snapshot, local stagin
 - Treat orchestration launch and mode changes as mutually exclusive **per Workspace**, with a shared service-level guard. While relevant orchestration is queued/running, refuse mode changes to the Workspace or any of its Source repositories (even through REST/automation). The switch unlocks after the run fully finishes, fails, or is cancelled and stopped. The run uses its originally captured eligibility and is not retargeted mid-flight. Independent Workspaces are unaffected.
 - New database columns have a default; the migration is a new strict step.
 - Recording a commit never fails the pull, switch or sync that caused it; a failed write is reported and the next Sync records it.
-- When built: update `docs/architecture/01`, `03`, `05`, `06` and tag-pinned guidance in `AGENTS.md` and `CLAUDE.md`. Tests must cover: a reference repo with local edits (warning + manual stage/unstage/Undo); unpushed commits (activation refused); fixed Feature snapshots and source-label metadata; safe branch-switch conflicts; service-side commit/push rejection; full graph with writable consumer and reference producer; absent registry packages; and mode-toggle/orchestrator concurrency. No reference repository may be committed or pushed by GrayMoon.
+- When built: update `docs/architecture/01`, `03`, `05`, `06` and tag-pinned guidance in `AGENTS.md` and `CLAUDE.md`. Tests must cover: a reference repo with local edits (warning + manual stage/unstage/Undo); unpushed commits (activation refused); fixed Feature snapshots and source-label metadata; safe branch-switch conflicts; service-side commit/push rejection; full graph with writable consumer and reference producer; absent registry packages; and mode-toggle/orchestrator concurrency. Also test: a Workspace default of `true` with one explicit per-repository `false` survives serialization and Restore; changing the default alone does not modify existing Source states; toggling one Source does not modify its siblings. No reference repository may be committed or pushed by GrayMoon.
