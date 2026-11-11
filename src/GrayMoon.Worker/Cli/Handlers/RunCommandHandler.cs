@@ -228,6 +228,7 @@ builder.Services.AddSingleton<ICommandHandler<EnsureGitChangesWatchersRequest, E
         builder.Services.AddSingleton<RefsHookSyncCommand>();
         builder.Services.AddSingleton<INotifySyncHandler, HookSyncDispatcher>();
 
+        builder.Services.AddSingleton<IWorkerInstallProbe, WorkerInstallProbe>();
         builder.Services.AddHostedService<SignalRConnectionHostedService>();
         builder.Services.AddHostedService<HookListenerHostedService>();
         builder.Services.AddHostedService<MainJobBackgroundService>();

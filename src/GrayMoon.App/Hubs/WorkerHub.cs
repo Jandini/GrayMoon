@@ -119,6 +119,13 @@ public sealed class WorkerHub(
         return Task.CompletedTask;
     }
 
+    /// <summary>Invoked by the worker when its install is damaged (a native library failed to load). The App then refuses normal commands.</summary>
+    public Task ReportInstallDamage(string reason)
+    {
+        connectionTracker.ReportInstallDamage(Context.ConnectionId, reason);
+        return Task.CompletedTask;
+    }
+
     /// <summary>Invoked by the worker with an unsolicited Git Changes status snapshot for one repository
     /// (watcher-driven or post-mutation refresh). Enqueues immediately; persistence and broadcast happen
     /// on <see cref="WorkspaceGitChangesWriteQueue"/>'s background worker.</summary>

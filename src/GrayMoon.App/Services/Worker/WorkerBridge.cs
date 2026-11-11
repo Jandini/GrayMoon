@@ -45,7 +45,7 @@ public sealed class WorkerBridge(
             return NotConnectedMessage;
         return connectionTracker.State == WorkerConnectionState.VersionMismatch
             ? WorkerVersionPolicy.MismatchMessage(connectionTracker.WorkerSemVer, connectionTracker.AppSemVer)
-            : null;
+            : connectionTracker.InstallDamage is { } damage ? WorkerVersionPolicy.DamagedInstallMessage(damage) : null;
     }
 
     private void EndSelfUpdateIfStillConnected()
@@ -70,6 +70,13 @@ public sealed class WorkerBridge(
                 "Refused {Command}: Worker version {WorkerVersion} does not match App version {AppVersion}",
                 command, connectionTracker.WorkerSemVer, connectionTracker.AppSemVer);
             return new WorkerCommandResponse(false, null, WorkerVersionPolicy.MismatchMessage(connectionTracker.WorkerSemVer, connectionTracker.AppSemVer));
+        }
+
+        // A damaged install fails every repository call one by one; refuse once with the reinstall message instead.
+        if (connectionTracker.InstallDamage is { } damage && !WorkerVersionPolicy.IsAllowedOnVersionMismatch(command))
+        {
+            logger.LogDebug("Refused {Command}: the Worker install is damaged ({Damage})", command, damage);
+            return new WorkerCommandResponse(false, null, WorkerVersionPolicy.DamagedInstallMessage(damage));
         }
 
         var isSelfUpdate = command == WorkerHubMethods.SelfUpdate;

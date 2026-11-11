@@ -35,7 +35,8 @@ public sealed class SignalRConnectionHostedService(
     CommandJobCancellationRegistry cancellationRegistry,
     IWorkerSecretProvider workerSecretProvider,
     IOptions<WorkerOptions> options,
-    ILogger<SignalRConnectionHostedService> logger) : IHostedService, IAsyncDisposable
+    ILogger<SignalRConnectionHostedService> logger,
+    IWorkerInstallProbe? installProbe = null) : IHostedService, IAsyncDisposable
 {
     private readonly WorkerOptions _options = options.Value;
     private readonly CommandRequestIntake _intake = new(cancellationRegistry, logger);
@@ -58,10 +59,29 @@ public sealed class SignalRConnectionHostedService(
         {
             await _connection.InvokeAsync(WorkerHubMethods.ReportSemVer, workerSemVer, cancellationToken);
             logger.LogInformation("Reported worker SemVer: {SemVer}", workerSemVer);
+            await ReportInstallDamageAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to report SemVer to hub");
+        }
+    }
+
+    /// <summary>Tells the App once per connection that the install is damaged, so it refuses commands with one reinstall message instead of letting each one fail on its own.</summary>
+    private async Task ReportInstallDamageAsync(CancellationToken cancellationToken)
+    {
+        var damage = installProbe?.Check();
+        if (damage is null || _connection is null)
+            return;
+
+        logger.LogError("The Worker install is damaged: {Damage}. Reinstall the Worker.", damage);
+        try
+        {
+            await _connection.InvokeAsync(WorkerHubMethods.ReportInstallDamage, damage, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to report the damaged install to hub");
         }
     }
 

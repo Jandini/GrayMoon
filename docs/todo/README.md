@@ -11,10 +11,9 @@ Classification (must / should / optional) and the order of work for all of these
 | Note | Open work | Status |
 |---|---|---|
 | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) | Worker `index.lock` retry and timeout tiers (Phase 3, needs a repro first); run correlation id. | Data-loss bug fixed; hardening open |
-| [worker-damaged-install-probe](defects/worker-damaged-install-probe.md) | No startup probe reports a damaged Worker install once. | Not built, deferred |
 | [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, folders and pages than the rules name; five silent catches in the Worker are listed as open. | Partly built |
 | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Desktop: move the signing secrets to the `production` environment and run the release workflow from a branch and a stable tag. | Owner action |
-| [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Three fixes lack the regression test that proves them (serial cancel dispatch, context flip in the tooltip load, hub attach after load). | Partly built |
+| [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Two fixes lack the regression test that proves them (context flip in the tooltip load, hub attach after load). | Partly built |
 
 ## `ideas/` - proposals and design notes, nothing is committed to
 

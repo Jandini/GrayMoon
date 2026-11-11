@@ -76,6 +76,10 @@
                             {
                                 <p class="small text-danger mt-3 mb-0">The Worker update failed. Install the Worker manually with the command above.</p>
                             }
+                            @if (WorkerConnectionTracker.InstallDamage is { } installDamage)
+                            {
+                                <p class="small text-danger mt-3 mb-0">The Worker install is damaged (@installDamage). Install the Worker again with the command above.</p>
+                            }
                             @if (ShowUnsecuredWorkerNotice)
                             {
                                 <p class="small text-warning mt-3 mb-0">Reinstall the Worker to finish securing GrayMoon.</p>

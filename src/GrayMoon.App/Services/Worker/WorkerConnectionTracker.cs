@@ -19,6 +19,7 @@ public sealed class WorkerConnectionTracker
     private readonly object _lock = new();
     private readonly List<string> _connectionIds = [];
     private readonly Dictionary<string, string> _workerVersions = new();
+    private readonly Dictionary<string, string> _installDamage = new();
     private readonly string? _appSemVer;
     private WorkerConnectionState _state = WorkerConnectionState.Offline;
     private bool _selfUpdateInProgress;
@@ -93,6 +94,29 @@ public sealed class WorkerConnectionTracker
             lock (_lock)
                 return _installFailed;
         }
+    }
+
+    /// <summary>
+    /// What the active Worker connection reported as damaged in its install (a native library that would not load), or null.
+    /// While set, <see cref="WorkerBridge"/> refuses every command except the update and diagnostics, as for a version mismatch.
+    /// </summary>
+    public string? InstallDamage
+    {
+        get
+        {
+            lock (_lock)
+                return _connectionIds.Count == 0 ? null : _installDamage.GetValueOrDefault(_connectionIds[^1]);
+        }
+    }
+
+    public void ReportInstallDamage(string connectionId, string reason)
+    {
+        RaiseIfChanged(() =>
+        {
+            _installDamage.TryGetValue(connectionId, out var previous);
+            _installDamage[connectionId] = reason;
+            return previous != reason;
+        });
     }
 
     /// <summary>This App's informational version, compared with the Worker's by <see cref="WorkerVersionPolicy"/>.</summary>
@@ -233,6 +257,7 @@ public sealed class WorkerConnectionTracker
         {
             _connectionIds.Remove(connectionId);
             _workerVersions.Remove(connectionId);
+            _installDamage.Remove(connectionId);
             return ApplyConnectionState();
         });
     }
