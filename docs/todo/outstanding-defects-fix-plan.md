@@ -32,7 +32,7 @@ Written 2026-11-11 on branch `outstanding-bugs`. Covers every note in `docs/todo
 | 16 | No startup probe for a damaged Worker install | worker-damaged-install-probe | Optional (cause already fixed) | M |
 | 17 | Post-commit status refresh failure not logged | silent-catch-blocks | Done 2026-11-11 | XS |
 | 18 | Missing tests: serial cancel dispatch, context flip, hub attach | review-fix-test-gaps (rows 2, 3, 5) | Optional | M-L |
-| 19 | Convention scans narrower than the rules | convention-test-coverage | Optional (do with 7-9) | M |
+| 19 | Convention scans narrower than the rules | convention-test-coverage | Done 2026-11-11 (the two scans named below; the rest of the note stays open) | M |
 | 20 | Worker commit hardening C, D, E, F | commit-all-partial-commit-race (Phase 3) | Optional (needs repro) | L |
 | 21 | Correlation id per commit run; fan-out audit; 240 s status scan timeout | commit-all-partial-commit-race (Other) | Optional | S-M |
 | 22 | "Continue waiting" on a failed push level | moved to `ideas/push-continue-waiting.md` | Not a defect | - |
@@ -177,7 +177,7 @@ Reclassified to Optional on 2026-11-11: the only known cause is closed and it ha
 
 - **17**: `StageAndCommitCommand` line 58, log at debug or warning. One line; do it with 9.
 - **18**: the three remaining test gaps. The context-flip test needs the tooltip load extracted from the page or a component harness; the hub-attach test needs the same. Worth doing when those pages are next refactored, not on their own.
-- **19**: widen the convention scans together with the fixes they guard: the best-effort scan to `Hubs`, `Services/Connectors`, `Services/Features` and the Worker with items 7-9; the link-setter scan (`SyncStatus`, `OutgoingCommits`, `IncomingCommits`, `GitVersion`) on its own. Each scan starts with an explicit exception list and one deliberately wrong sample string.
+- **19**: widen the convention scans together with the fixes they guard: the best-effort scan to `Hubs`, `Services/Connectors`, `Services/Features` and the Worker with items 7-9; the link-setter scan (`SyncStatus`, `OutgoingCommits`, `IncomingCommits`, `GitVersion`) on its own. Each scan starts with an explicit exception list and one deliberately wrong sample string. Done 2026-11-11: both scans are widened (the Worker scan covers the whole project). The link-setter scan found four more writers, all detached rows or new rows, now on the allowed list. The catch scan found 22 silent catches: one got a log line (`SyncRepositoryCommand`, branch lists), 16 are listed with the reason they may stay silent, and five are listed as `OPEN` and described in the note. A filter that only lists exception types is treated as a typed catch. Still open in the note: the page-state scan, the context-read scan, and the App folders the catch scan does not reach.
 - **20**: Phase 3 Worker hardening. The note itself says no log shows C-F happening. Keep the note; build a repro for D and E first, as it says.
 - **21**: correlation id per commit run (small, useful for the next incident); audit of `MultiSelect`, `Discard`, `BulkSectionAction` fan-outs for shared scoped services (read-only audit, half a day); the 240 s status scan timeout needs its own investigation.
 - **22**: "Continue waiting" is a feature, not a defect. Moved to `docs/todo/ideas/push-continue-waiting.md` on 2026-11-11.

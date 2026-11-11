@@ -1,15 +1,26 @@
 # Convention tests cover less than the rules they enforce
 
-Status: not built. The rules in `AGENTS.md` read as applying everywhere; the tests under `src/GrayMoon.App.Tests/Conventions/`, `src/GrayMoon.Worker.Tests/Conventions/` and `WorkspacePageJobDisciplineTests` check a narrower set, so a new violation outside that set passes.
+Status: partly built. On 2026-11-11 two scans were widened: the shared-link scan now also guards `SyncStatus`, `OutgoingCommits`, `IncomingCommits` and `GitVersion`, and the best-effort catch scan now covers `Services/Connectors`, `Services/Features`, `Hubs` and the whole Worker (see `docs/architecture/06-developer-extension-guide.md`, "Convention tests"). What is below is still open.
+
+The rules in `AGENTS.md` read as applying everywhere; the tests under `src/GrayMoon.App.Tests/Conventions/`, `src/GrayMoon.Worker.Tests/Conventions/` and `WorkspacePageJobDisciplineTests` check a narrower set, so a new violation outside that set passes.
 
 ## Gaps
 
 | Rule | What the test checks today | What is not checked |
 |---|---|---|
 | Page state only on the dispatcher | Four fields of the Repositories page (`_slots`, `_linkByRepoId`, `prByRepositoryId`, `repoSyncStatus`). | Other page fields the markup reads; the Actions and Git Changes pages. |
-| Feature contexts do not write the shared link | The `BranchHasUpstream`, `BranchName` and `CheckedOutTag` setters. | `SyncStatus`, `OutgoingCommits`, `IncomingCommits` and `GitVersion` on `WorkspaceRepositoryLink`. |
-| Best-effort steps report | `catch` blocks in `Services/Workspaces` and `Services/Git`. | Every other folder in the App, and the Worker (the five catches the review named are fixed; about 20 more bare catches outside those two folders, most of them parse fallbacks, are to be listed and decided when this scan is widened). |
+| Best-effort steps report | `catch` blocks in `Services/Workspaces`, `Services/Git`, `Services/Connectors`, `Services/Features` and `Hubs` of the App, and in the Worker. | Every other folder in the App (`Components`, `Repositories`, `Api`, the other `Services` folders). |
 | Context captured before the work starts | Every `RequireSelectedContextId()` that is not a capture into a local must be on an explicit list of reads made before the first `await`. | Direct reads of `_selectedContextId` and `_isFeatureContext` after an `await` in an event handler. The list is kept by hand; nothing proves a listed read is before the first `await`. |
+
+## Silent catches the widened scan found and left in place
+
+`BestEffortCatchConventionTests` lists these with a reason that starts with `OPEN`. Each returns "nothing" for a read that failed, with no log line, so the user sees a wrong result and no cause. None was seen to happen; confirm with a test before fixing.
+
+| Where | What is hidden |
+|---|---|
+| `CsProjFileParser` (Worker), three catches | A project file that cannot be read or parsed is dropped from the project scan, or reported as "not updated" / "nothing to update". The class has no logger. |
+| `GitWorktreeService.VisitResidueEntries` (Worker) | A folder that cannot be listed counts as empty in the residue scan after a worktree removal. |
+| `WorkspaceFileSearchService` (Worker) | A workspace folder that cannot be listed gives an empty Files search result. |
 
 ## Fix plan
 

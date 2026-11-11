@@ -24,10 +24,17 @@ internal static class LibGit2SharpConfigReader
     /// Throws <see cref="PathUnderRemovalException"/> while a removal covers the folder.
     /// </summary>
     public static (bool Handled, string? Value) TryGetString(string repositoryPath, string key, IRepositoryAccess? access, CancellationToken ct)
+        => TryGetString(repositoryPath, key, access, Environment.GetEnvironmentVariable, ct);
+
+    /// <summary>
+    /// The same read with the environment supplied by the caller. A test passes its own lookup here: setting a
+    /// <c>GIT_CONFIG_*</c> variable on the test process would break every git process a parallel test starts.
+    /// </summary>
+    internal static (bool Handled, string? Value) TryGetString(string repositoryPath, string key, IRepositoryAccess? access, Func<string, string?> environment, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        if (RedirectingEnvironment.Any(name => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name))))
+        if (RedirectingEnvironment.Any(name => !string.IsNullOrEmpty(environment(name))))
             return (false, null);
 
         IRepositoryAccessLease? lease = null;
