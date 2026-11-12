@@ -1015,3 +1015,13 @@ Not committed (base `0efada9c`).
 **Not tested**
 
 - Nothing was looked at in a browser. No test renders the row or the level header.
+
+### Gate and section 11 as done (2026-11-12)
+
+Not committed (base `0a9fe3d4`).
+
+- **Gate (section 10):** items 1 to 3 are run and recorded in the test log ("Reference-mode gate"). All suites pass, both `Long` runs included. The gate is **not passed**: the manual smoke is not run, and four required tests are covered only in part (listed in the log).
+- **One test added for the mapping:** `CreateFeatureParentBranchTests.Create_holds_a_read_only_repository_as_a_detached_snapshot_of_its_commit`. Before it, no test created a Feature from a read only Source; the snapshot tests seeded the row.
+- **Section 11, done:** `docs/architecture/01` (read only repositories, definition file, Feature snapshot), `03` (columns of strict step 19, schema version 2, recorded revision, drift), `04` (the `reference-mode` structural operation, activation check, pull-only, archive check), `05` (the operation table and where the state is set), `06` (section 11: ask the policy, checklist for a new operation), `07` (padlock and bulk actions in Changes), `AGENTS.md` and `CLAUDE.md` (new section "Read only repositories"). The Desktop README bullet was written earlier.
+- **Section 11, not done:** deleting the idea note, this plan, the inventory and the test log and removing the row in `docs/todo/README.md`. That is for when the feature ships, after the gate.
+- `.cursor/rules` has no twin of the tag rule, so nothing was changed there.

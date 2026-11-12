@@ -372,6 +372,7 @@ The Workspace name is the folder on this computer. It is not written to `graymoo
 - `codegraph`, `ai` and tag pins are file-owned: rewrites keep them and drift ignores them. Drift compares only repositories, connectors and profile; it also ignores a leftover name and `versionFiles`.
 - When the Workspace repository is synced in the special context, its `versionFiles` are imported into the database (file wins); entries of repositories not in this Workspace are skipped on import and preserved on write.
 - When a Source repository is checked out on a tag in the special context, the tag and its commit are pinned in the file (not committed); leaving the tag through GrayMoon clears the pin. A fresh clone of a pinned Source is checked out at the pinned commit.
+- The read only state of Source repositories and the default for new ones are database-owned and compared by drift. For a read only repository on a branch the file also records `branch` and `commit` (file-owned, like a tag pin); a fresh clone is checked out on that branch at that commit.
 - Nothing machine-local (the Workspace name, paths, IDs, credentials, the pinned AI provider) is ever written.
 
 The full schema and write rules are in 03.
@@ -436,6 +437,21 @@ HasNewerTag
 ```
 
 and blocks inappropriate push/update/commit workflows until the user returns to a branch.
+
+### Read only repositories
+
+A Source repository can be read only in a Workspace (in code: a reference repository, `WorkspaceRepositoryLink.IsReference`). GrayMoon still fetches, pulls and syncs it and reads its projects for the dependency graph, but never commits, pushes or updates it. The Workspace repository is never read only.
+
+- **Where it is set.** Edit Workspace has a "Read only repositories" section: Make all read only, Make all writable, and the switch "New repositories are read only" (the default for repositories added later; it changes no existing repository). One repository is changed with the Lock / Unlock button in the Switch Branch dialog.
+- **Turning it on is checked.** GrayMoon inspects the Workspace checkout and every Feature worktree of the repository. Unpushed commits, or a branch whose upstream state cannot be read, refuse the change for all selected repositories and nothing is written. Uncommitted changes are a warning only. Turning it off needs no check.
+- **What the user sees.** A padlock after the repository name on Repositories, in the Switch Branch dialog title and in the Changes tree. The commits badge of a read only row offers pull only. Actions on all repositories leave read only repositories out and name them in one sentence; an action on one named repository is refused with "Repository is read only.".
+- **Pull.** A pull is fast-forward only and never pushes. A branch with local commits is refused.
+- **Changes.** A read only repository is never committed. Staging, unstaging and discarding one named repository still work; Stage All, Unstage All, Discard All and Commit leave it out.
+- **Features.** A read only Source joins a new Feature as a snapshot: a detached worktree at the commit the Workspace checkout had, with no Feature branch. Every checkout in a snapshot is refused. A Source made read only later keeps its existing Feature branches; the flag stops the writes.
+- **Search and lists.** The search box takes `ro:yes` and `ro:no`. The Workspaces list has a Read only column (None, Some, All).
+- **Definition file.** The state, and for a read only repository the branch and commit it is at, are written to `graymoon.json` (version 2) and applied by Restore Workspace. See 03, section 4A.
+
+A repository archived on the provider is a different state: the provider decided it, and only Push reads it (a push of an archived repository is left out of a bulk push and refused for one repository). Edit Workspace and the Switch Branch dialog suggest making an archived repository read only. GrayMoon asks the provider whether a repository marked archived still is, when the Repositories page opens and before a push.
 
 ### Update branch from default
 
@@ -930,6 +946,7 @@ A Feature keeps every repository on its Feature branch (the Feature name), or de
 - Creating a branch is refused ("A Feature keeps every repository on its Feature branch. To work on another branch, create another Feature or use the Workspace.").
 - Switch Branch hides New Branch, blocks other local and remote branches, shows the own branch as "This Feature", and allows tag checkout only for tag-pinned repositories.
 - Return to Default is refused. Fetch, branch delete, set upstream and Update Branch from Default stay available; delete warns that branches are shared by the Workspace and all Features.
+- A read only Source is held as a snapshot (detached at the commit the Feature was created from, no Feature branch). Every checkout in it is refused ("Repository is a read only snapshot in this Feature."), and Remove Feature treats an unchanged snapshot as nothing to lose.
 - A repository moved off its Feature branch outside GrayMoon shows an "off feature branch" badge; clicking it opens Switch Branch with "Return to Feature branch". Drift is a warning only.
 
 ### 22C. Optional CodeGraph integration

@@ -187,6 +187,7 @@ rollback-feature             WorkspaceFeatureOperations (Feature Status Roll bac
 remove-external-worktree     WorkspaceExternalWorktreeOperations
 refresh-workspace            WorkspaceCheckoutRefresh (waits for a free slot)
 enable-workspace-repository  WorkspaceRepositoryOperations
+reference-mode               WorkspaceReferenceOperations (read only on / off for one or all repositories, and the default)
 legacy TryStart              treated as structural; also REST WorkspaceCommandHttp.RunExclusiveAsync
 ```
 
@@ -199,6 +200,16 @@ This protects multi-step orchestration from overlapping writes and Git operation
 `BackgroundJobService` is not the lock itself. It attaches UI/circuit job handles and overlays to process-wide operations.
 
 `IWorkspaceLockedOperation.RunBackgroundableAsync(work)` marks a phase of a locked operation as backgroundable: while it runs the overlay shows Background instead of Abort, and Background cancels only that phase's token (section 5F).
+
+### Read only mode changes
+
+A change of the read only state is structural, so it and any other operation of the Workspace exclude each other: the change is refused while an operation holds the lock of any context, and no operation starts while the change runs. An operation that is already running keeps the eligibility it loaded; it is not retargeted.
+
+`WorkspaceReferenceOperations.ChangeAsync` runs: the activation check (`ReferenceActivationChecker`: the Workspace checkout and every Feature worktree of each repository, repositories in parallel up to `WorkspaceOptions.MaxParallelOperations`, the checkouts of one repository one after the other), then the database write, then the definition file, then the recorded branch and commit. A blocked repository refuses the whole change before anything is written. Without a Worker, turning read only on is refused. The Worker's git output of the check reaches the operation's terminal like any other operation's.
+
+A pull of a read only repository is sent with `pullOnly` (`CommitSyncRepositoryRequest`): the Worker runs `git pull --ff-only`, refuses a branch with local commits before pulling, reports `localChangesBlockPull` when local changes are in the way, never pushes, and returns the commit it arrived at.
+
+`ArchivedRepositoryVerifier` is not an operation and takes no lock: for repositories marked archived it asks the provider once per opened Repositories page and before a push plan or a push, and clears the mark when the provider says the repository is no longer archived.
 
 ### 3A. Lock-free Feature background work
 

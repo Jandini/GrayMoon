@@ -233,6 +233,7 @@ TotalFileConfigRepos
 HasSelfFileVersionToken
 TotalFileLines
 RepositoryType
+IsReference                bool, default false: read only in this Workspace (strict step 19); never true for Role = Workspace
 ```
 
 It also owns one-to-one or one-to-many current projections such as PR, Actions, Git status, and Git change entries.
@@ -273,6 +274,7 @@ CiProvider                 WorkspaceCiProvider: None (0) | GitHubActions (1)
 ManagedFeatureStorageRoot  max 1000
 ManifestDriftDetectedAt    nullable DateTime (TEXT)
 PinnedAiProviderId         nullable, max 32 (claude | codex | cursor)
+ReferenceDefault           bool, default false: new Source repositories start read only (strict step 19)
 Repositories               navigation to WorkspaceRepositoryLink
 ```
 
@@ -294,18 +296,23 @@ Repositories               navigation to WorkspaceRepositoryLink
 
 When a Workspace has a Workspace-role repository, its root holds `graymoon.json`, the shareable definition of the Workspace. Only `IWorkspaceManifestFile` (`GrayMoon.Common/Manifest/WorkspaceManifestFile`, singleton in App and Worker) names, serializes or parses the file; the App's `WorkspaceManifestService` reads and writes it through the Worker (`WorkspaceRepositoryFileAccess`, Worker `WriteRepositoryFile`: temp file + move, `onlyIfChanged`, rejects absolute, `..` and `.git` paths). It is never committed by GrayMoon; changes appear in Git Changes.
 
-### Schema (`WorkspaceManifest`, `version` 1)
+### Schema (`WorkspaceManifest`, `version` 1 or 2)
 
 ```text
-version            int, key "version" (WorkspaceManifestFile.SchemaVersion = 1); a value > 1 is rejected:
-                   "Workspace definition schema N is newer than this GrayMoon"
+version            int, key "version" (WorkspaceManifestFile.MaxSchemaVersion = 2); a value > 2 is rejected:
+                   "Workspace definition schema N is newer than this GrayMoon".
+                   Written as 2 when the file holds any reference or branch, else 1, whatever the caller asks for;
+                   reference or branch in a version 1 file is rejected
 workspace          required object. The local Workspace name is not stored. A leftover name is ignored
                    and omitted the next time the file is written.
 workspace.profile  { type: basic|dotNetDependency, versioning: none|gitVersion, ci: none|githubActions }
                    missing -> basic / none / none
 connectors[]       { type: "github", url: normalized web root } - GitHub connectors of Source repositories only; NuGet never written
-repositories[]     { name, repositoryUrl (CloneUrl as stored), connectorUrl, tag?, commit? }
-                   Source role only, never the Workspace repository itself
+workspace.reference  bool?, lenient; the read only default for new Source repositories. Omitted when null
+repositories[]     { name, repositoryUrl (CloneUrl as stored), connectorUrl, reference?, tag?, branch?, commit? }
+                   Source role only, never the Workspace repository itself.
+                   reference: bool?, lenient. Written (true or false, on every entry, with workspace.reference)
+                   only when the default is on or a Source is read only; an entry without it takes workspace.reference
 codegraph          bool?, lenient (true/false or "true"/"false"), omitted when null
 versionFiles[]     { repository (folder name of a Source or the Workspace repo), path ("/" separators), pattern [lines] }
                    omitted when empty
@@ -315,8 +322,8 @@ ai                 { providers: [ { provider: claude|codex|cursor|<unknown kept>
 ### Ownership
 
 ```text
-DB-owned    workspace.profile, connectors, repositories (name/url/connector), versionFiles
-File-owned  codegraph, ai, repositories[].tag / commit pins   (no DB copy; kept on every rewrite; ignored by drift)
+DB-owned    workspace.profile, workspace.reference, connectors, repositories (name/url/connector/reference), versionFiles
+File-owned  codegraph, ai, repositories[].tag / branch / commit pins   (no DB copy; kept on every rewrite; ignored by drift)
 Never       anything local: the Workspace name (folder), pinned AI provider, credentials, paths, local ids
 ```
 
@@ -330,6 +337,15 @@ Never       anything local: the Workspace name (folder), pinned AI provider, cre
 ### Tag pins
 
 `WorkspaceDefinitionTagPin`: `tag` plus the full 40 or 64 hex `commit`, both or neither. Recorded in the file only when a Source repository in the special context is checked out on a tag through GrayMoon or a Sync finds it on a tag (`WorkspaceBranchOperations.SetRepositoryTagPinAsync`, `WorkspaceGitService.RecordCheckedOutTagPinsAsync`); cleared when the user leaves the tag through GrayMoon. The Worker's `SyncRepositoryCommand.CheckoutPinnedCommitAsync` checks a freshly cloned Source out at the pinned commit read from the root's `graymoon.json`; an invalid pin or missing commit fails the sync and removes the clone.
+
+### Read only state and the recorded revision
+
+`WorkspaceDefinitionRevisionPin.TryNormalize` decides which pin forms are valid: none, `tag` + `commit`, or `branch` + `commit` on an entry that is read only. `branch` with `tag`, `branch` without `commit`, and `branch` + `commit` on a writable entry are errors that name the repository.
+
+- `BuildFromDatabaseAsync` writes `workspace.reference` and every `repositories[].reference`. `WorkspaceRepositoryRevisionPins.CopyOnto` carries `branch` + `commit` from the file onto entries the database marks read only and drops them for the others; a tag pin is always carried.
+- `SetRepositoryReferenceRevisionsAsync` records the branch and commit of a read only repository. It is called after a mode change, after a pull of a read only repository and after a manual switch of one, in the special context only. It returns a result and never throws: recording never fails the pull or switch that caused it; the next one records again.
+- `IWorkspaceManifestFile.ReadPinnedRevision` gives the Worker the commit and branch of an entry. `SyncRepositoryCommand.CheckoutPinnedCommitAsync` checks a freshly cloned read only Source out with `git checkout -B <branch> <commit>` and sets the upstream when `origin/<branch>` exists. A missing commit removes the clone and fails that repository's sync.
+- Restore (`RestoreDefinitionEvaluator`, `WorkspaceRepositoryOperations.RestoreIntoWorkspaceAsync`) sets `Workspaces.ReferenceDefault` and each link's `IsReference` before the first Sync. A folder that already exists and has unpushed commits is kept writable (`ReferenceImportGuard`) and the Workspaces page shows the warning.
 
 ### Writing
 
@@ -351,8 +367,9 @@ Never       anything local: the Workspace name (folder), pinned AI provider, cre
 `DetectDriftAsync` (special context only; throws for a Feature context) compares the parsed file with the database:
 
 ```text
-compared   repositories by normalized URL (added / removed names), connectors by normalized URL, profile type / versioning / ci
-ignored    a leftover workspace.name, versionFiles, codegraph, ai, tag pins
+compared   repositories by normalized URL (added / removed names), connectors by normalized URL, profile type / versioning / ci,
+           the read only state of each repository (ChangedReference) and the default (ReferenceDefaultChanged)
+ignored    a leftover workspace.name, versionFiles, codegraph, ai, tag pins, the recorded branch and commit
 drift      a missing or unparsable file counts as drift, with the reason
 ```
 
@@ -912,6 +929,9 @@ WorktreePath       Workspace-role repository: the Feature root {ManagedFeatureSt
 BaseCommitSha      HEAD of the Workspace checkout when the Feature was created
 ParentBranchName   Workspace branch at creation, from the same GetHeadCommits snapshot (null when on a tag or detached)
 PinnedTag          tag the Workspace checkout was on, if any (worktree is detached)
+IsReferenceSnapshot  bool, default false (strict step 19): the Source was read only when the Feature was created; the
+                   worktree is detached at BaseCommitSha with no Feature branch and ParentBranchName is null
+SourceBranchName   branch the Workspace checkout was on, for a snapshot that is not on a tag; display only (max 200)
 State              Pending | Ready | NeedsRepair | Removing | Removed
 CreatedAt
 LastError

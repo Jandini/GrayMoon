@@ -462,6 +462,42 @@ update branch from default
 
 Tagged repositories are intentionally protected from mutating workflows: a repository checked out on a tag (including a Workspace tag pin in `graymoon.json`) is never a candidate for Push, Sync Commits, Update Dependencies, Return to Default, Prepare Workspace branch work, or bulk Merge PRs... return-to-default follow-ups. Those operations leave the tag checkout untouched rather than failing it.
 
+### Read only repositories and the operation policy
+
+Whether an operation runs on a repository is decided in one place, `RepositoryOperationPolicy` (`GrayMoon.Application/Repositories/Policy`). The table is its rule table. "all" is an action on several repositories (a repository that is not allowed is skipped and named), "one" is an action on one named repository (it is refused with a message).
+
+```text
+operation                              on a tag   read only   snapshot in a Feature
+Sync (Workspace), Fetch                yes        yes         yes
+Sync from a row, Sync of a level       no         yes         yes
+Refresh projects, Restore packages     no         yes         yes
+Pull                                   no         yes (fast-forward only)   no
+Switch Branch (one repository)         yes        yes         no
+Checkout in all repositories           yes        no          no
+Create branch                          yes        no          no
+Return to Default                      no         one: plain switch to the default branch; all: no   no
+Return to Default cleanup              no         no          no
+Delete local branch                    yes        yes         no
+Delete remote branch / forced delete   yes        no          no
+Update Branch from Default             no         no          no
+Update dependencies, version files     no         no          no
+Commit by GrayMoon (after an update)   no         no          no
+Commit in Changes                      yes        no          no
+Push                                   no         no          no     (also no for a repository archived on the provider)
+Set upstream                           yes        no          no
+Undo push                              no         no          no
+Create / merge pull request            no         no          no
+Run workflow                           yes        no          no
+Stage, unstage, discard                yes        one: yes; all: no         one: yes; all: no
+Create Feature branch                  no (detached at the tag)   no (snapshot)   no
+```
+
+The Workspace repository is never read only: the read only columns do not apply to it. The archived rule does.
+
+Messages: "Repository is on a tag; checkout a branch first.", "Repository is pinned to a tag. Checkout a branch before pushing.", "Repository is read only.", "Repository is a read only snapshot in this Feature.", "Repository is archived on the provider. Pushes are rejected.". A bulk action reports its skips in one sentence built by `RepositorySkipSummary` (read only, tag and archived repositories counted apart); skips are shown as information and never in place of an error or a warning. The REST responses carry them in `Skipped` with the reason by name.
+
+Read only is set in Edit Workspace ("Read only repositories": Make all read only, Make all writable, "New repositories are read only") and with Lock / Unlock in the Switch Branch dialog; both call `IWorkspaceReferenceOperations` (`SetAllAsync`, `SetRepositoryAsync`, `SetDefaultAsync`). Turning it on is refused, for every selected repository, when one of them has unpushed commits or an unreadable upstream state in the Workspace checkout or in a Feature worktree; uncommitted changes are a warning. The search box takes `ro:yes` and `ro:no`; the Workspaces list shows None, Some or All; the definition banner names repositories whose read only state differs from `graymoon.json`; the Restore Workspace preview has a Read only row.
+
 Switch Branch marks branches held elsewhere (`WorkspaceBranchOccupancyService`, `BranchOccupancyKind`): **Current**, **Feature** (checked out by a Feature), **Workspace** (held by the special Workspace checkout), **Worktree** (an external worktree). Checkout is allowed only for unoccupied or current branches; an ordinary delete only for unoccupied ones. Deleting a Feature-held branch opens Remove Feature; deleting an external-worktree branch runs `AnalyzeExternalWorktreeCleanupAsync` with an inline confirmation (a dirty worktree needs a second confirmation) and `RemoveExternalWorktreeAsync`. Delete errors show the server's error text. The Tags-tab entry point passes the repository id so badges appear there too.
 
 ### Feature branch guard

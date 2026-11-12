@@ -193,6 +193,52 @@ public sealed class CreateFeatureParentBranchTests
     }
 
     [Fact]
+    public async Task Create_holds_a_read_only_repository_as_a_detached_snapshot_of_its_commit()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.BranchName = "develop";
+            link.DefaultBranchName = "main";
+            link.IsReference = true;
+        });
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
+        {
+            commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graymoon-api"] = "abc123def456abc123def456abc123def456abc1",
+            },
+            branches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["graymoon-api"] = "develop",
+            },
+        });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.CreateFeatureAsync(ctx.WorkspaceId, "feature/payments", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+        Assert.True(result.Success, result.Error);
+
+        // No Feature branch: the worktree is detached at the commit of the snapshot.
+        var createCall = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CreateGitWorktree);
+        var args = System.Text.Json.JsonSerializer.SerializeToElement(createCall.Args);
+        Assert.True(args.GetProperty("detach").GetBoolean());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, args.GetProperty("branchName").ValueKind);
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.WorkspaceFeatureRepositories
+            .SingleAsync(r => r.WorkspaceFeatureContextId == result.ContextId!.Value.Value);
+        Assert.True(row.IsReferenceSnapshot);
+        Assert.Equal("develop", row.SourceBranchName);
+        Assert.Equal("abc123def456abc123def456abc123def456abc1", row.BaseCommitSha);
+        Assert.Null(row.ParentBranchName);
+        Assert.Null(row.PinnedTag);
+    }
+
+    [Fact]
     public async Task GetParentBranchNames_maps_RepositoryId_and_ignores_special_Workspace()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();

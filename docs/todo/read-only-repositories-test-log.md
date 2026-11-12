@@ -574,3 +574,56 @@ One Razor file changed. Build: 0 warnings, 0 errors. App tests: 4642 passed. Oth
 - `dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj --no-build`: 446 passed.
 - Worker and the Long runs: not run (no Worker change).
 - Browser: not run. M1-M13: not run.
+
+## Reference-mode gate (plan section 10) - 2026-11-12
+
+Tree: `0a9fe3d4` plus uncommitted changes (the documentation of section 11 and one new test). Windows 11, from the repository root.
+
+### 1. Full command list
+
+| Command | Result |
+|---|---|
+| `dotnet build GrayMoon.slnx` | 0 warnings, 0 errors |
+| `dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj --no-build` | 446 passed |
+| `dotnet test src/GrayMoon.Worker.Tests/GrayMoon.Worker.Tests.csproj --no-build` | 1034 passed, 1 skipped (the same skip as the baseline) |
+| `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build` | 4814 passed |
+| `dotnet test src/GrayMoon.Worker.Tests/GrayMoon.Worker.Tests.csproj --no-build --filter "Category=Long"` | 2 passed |
+| `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build --filter "Category=Long"` | 2 passed |
+
+After the run one test was added (`Create_holds_a_read_only_repository_as_a_detached_snapshot_of_its_commit`). Build again: 0 warnings, 0 errors. App: 4815 passed. App `Long`: 2 passed. Common and Worker were not run again (no change there).
+
+### 2. Characterization tests of 0A
+
+All in `Policy/Characterization` pass in the App run above. The ones changed on purpose are listed under "0D" and "B.20" (the convention test lost its two OPEN entries).
+
+### 3. Mapping of the required tests (idea note, "Constraints")
+
+| Required | Test | Covered |
+|---|---|---|
+| Local edits: warning | `ReferenceActivationTests.Uncommitted_changes_are_a_warning_and_never_hide_a_block`; `ReferenceRestoreTests.An_imported_folder_with_only_uncommitted_changes_stays_read_only` | yes |
+| Local edits: manual stage and unstage | `ReferenceRepositoryEnforcementTests.Staging_and_unstaging_in_a_read_only_repository_stay_possible` | yes |
+| Local edits: manual Undo (discard) | `RepositoryOperationPolicyMatrixTests.A_reference_repository_answers_as_the_design_says` (the rule only) | in part: discard has no service, the page calls the Worker client; no test drives the page |
+| Unpushed commits: activation refused | `ReferenceActivationTests.Unpushed_commits_block_and_are_counted`, `Unpushed_commits_in_the_Workspace_checkout_block_and_name_the_repository`; `WorkspaceReferenceOperationsTests.One_blocked_repository_refuses_the_whole_change_and_nothing_is_written` | yes |
+| Absent upstream: activation refused | `ReferenceActivationTests.A_branch_without_upstream_passes_only_when_its_commit_is_on_the_remote`, `A_branch_whose_upstream_state_is_unknown_blocks`, `An_unknown_ahead_count_blocks` | yes, with the decided difference: no upstream passes when the commit is on the remote |
+| Fully pushed branch ahead of default: allowed, no extra warning | `ReferenceActivationTests.A_clean_branch_level_with_its_upstream_passes_without_a_message` | in part: the rule does not read the default branch, so no test sets "ahead of default" |
+| Switch of a read only repository to another branch: allowed, stays read only, no commit or push | `WorkspaceReferenceOperationsTests.A_manual_switch_of_a_read_only_repository_records_the_branch_and_commit`; Worker `CommitSyncPullOnlyTests.A_checkout_reports_the_commit_it_arrived_at` | yes |
+| Feature worktree with unpublished commits: activation refused | `ReferenceActivationTests.Unpushed_commits_in_a_Feature_worktree_block_although_the_Workspace_checkout_is_clean` | yes |
+| Fixed Feature snapshots and provenance | `CreateFeatureParentBranchTests.Create_holds_a_read_only_repository_as_a_detached_snapshot_of_its_commit` (new); `ReferenceRepositoryEnforcementTests.A_Feature_refuses_every_checkout_in_a_read_only_snapshot`, `A_state_write_keeps_a_read_only_snapshot_without_a_branch_and_in_sync`, `A_snapshot_has_no_expected_branch_and_is_never_off_its_Feature_branch`, `Removing_a_Feature_treats_an_unchanged_snapshot_as_nothing_to_lose` | yes; "a pull in the Workspace does not move the snapshot" has no test of its own |
+| Safe checkout conflicts | Worker `CommitSyncPullOnlyTests.A_checkout_blocked_by_local_changes_says_so_and_changes_nothing`, `Local_changes_to_an_incoming_file_block_the_pull_and_stay_as_they_are`, `Local_changes_that_do_not_touch_the_incoming_files_do_not_block_the_pull` | yes |
+| Service-side write rejection | `ReferenceRepositoryEnforcementTests` (push, Git Changes commit, branch create, Workspace checkout, pull requests, Return to Default, workspace commit); `RepositorySkipReportingTests` | yes |
+| Complete graph with read only producers | `ReferenceRepositoryEnforcementTests.The_projects_of_a_read_only_repository_are_still_scanned_but_it_is_never_an_update_target` | yes |
+| Graph: missing registry packages | `DotNet_synchronized_push_is_refused_when_a_required_package_has_no_registry`, `Push_lane_reports_a_level_error_and_stops_when_a_required_package_has_no_registry` (not specific to read only) | in part: no test has a read only producer whose package is missing from the registry |
+| Mode toggle against a running operation | `WorkspaceReferenceOperationsTests.The_change_is_refused_while_an_operation_holds_the_lock_of_a_context` | yes |
+| Operation against a running mode toggle | `OperationLockCharacterizationTests.Rest_write_is_refused_with_409_while_a_workspace_operation_runs` (any structural operation) | in part: no test starts the mode change itself and then an operation |
+| Default true with one writable Source survives serialization and Restore | Common `WorkspaceManifestReferenceTests.A_default_of_true_with_one_writable_repository_round_trips`; `ReferenceRestoreTests.A_default_of_true_with_one_writable_repository_is_previewed_and_restored_as_mixed` | yes |
+| Changing only the default changes no Source | `WorkspaceRepositoryReplaceTests.Changing_only_the_read_only_default_changes_no_repository`; `WorkspaceReferenceOperationsTests.A_default_only_change_touches_no_repository_and_asks_the_Worker_nothing` | yes |
+| Toggling one Source changes no sibling | `WorkspaceReferenceOperationsTests.Toggling_one_of_twenty_repositories_changes_no_sibling_and_not_the_default` | yes |
+| GrayMoon never commits or pushes a read only Source | Worker `CommitSyncPullOnlyTests.A_local_commit_alone_is_never_pushed`, `A_branch_with_a_local_commit_is_refused_and_neither_side_moves`; `ReferenceRepositoryEnforcementTests.A_push_leaves_the_read_only_repository_out_and_pushes_the_writable_one`, `A_Git_Changes_commit_in_a_read_only_repository_is_refused_before_the_Worker` | yes |
+
+### 4. Manual smoke M1-M13
+
+Not run. It is for the owner to run.
+
+### 5. Result
+
+**The gate is not passed.** Open: the manual smoke (item 4), and the four rows marked "in part" above (discard through the page, "ahead of default", a read only producer with a package missing from the registry, an operation started while a mode change runs). The automated suites all pass.
