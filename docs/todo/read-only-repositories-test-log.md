@@ -545,3 +545,17 @@ One Razor line changed. Build: 0 warnings, 0 errors. App tests: 4642 passed. Oth
 ## Lock / Unlock button and title badge (Appendix B.16) - 2026-11-12
 
 One Razor file changed. Build: 0 warnings, 0 errors. App tests: 4642 passed. Other suites not run again. No new test; nothing was looked at in a browser.
+
+### B.17 Padlock in place of the `readonly` badge (2026-11-12)
+
+- `dotnet build GrayMoon.slnx`: 0 warnings, 0 errors.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4642 passed.
+- Common, Worker and the Long runs: not run (only Razor markup in the App changed).
+- Browser: not run. M1-M13: not run.
+
+### B.18 Keyhole, white hover underline (2026-11-12)
+
+- `dotnet build GrayMoon.slnx`: 0 warnings, 0 errors.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4642 passed.
+- Common, Worker and the Long runs: not run (only Razor markup and CSS in the App changed).
+- Browser: not run. M1-M13: not run.

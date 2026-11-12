@@ -48,6 +48,10 @@
                     <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
                         <strong>@repositoryDisplayName</strong>
                     </a>
+                    @if (Link.IsReference || Link.IsReferenceSnapshot)
+                    {
+                        <ReferenceLockIcon AdditionalClass="text-muted" Title="@(Link.IsReferenceSnapshot ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)" />
+                    }
                     @if (isWorkspaceRepository)
                     {
                         <span class="badge workspace-role-badge text-nowrap">Workspace</span>
@@ -79,6 +83,10 @@
             {
                 <span class="repo-name-cell">
                     <strong>@repositoryDisplayName</strong>
+                    @if (Link.IsReference || Link.IsReferenceSnapshot)
+                    {
+                        <ReferenceLockIcon AdditionalClass="text-muted" Title="@(Link.IsReferenceSnapshot ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)" />
+                    }
                     @if (isWorkspaceRepository)
                     {
                         <span class="badge workspace-role-badge text-nowrap">Workspace</span>
@@ -127,7 +135,7 @@
         <td class="col-branch">
             @if (Link.IsReferenceSnapshot)
             {
-                // A read-only snapshot in a Feature: where the Source was, that it is read-only, and the commit it stays at.
+                // A read-only snapshot in a Feature: where the Source was and the commit it stays at.
                 var snapshotSource = Link.IsOnTag ? Link.CheckedOutTag : Link.FeatureSourceBranchName;
                 var snapshotCommit = string.IsNullOrEmpty(Link.HeadCommit) ? null : Link.HeadCommit[..Math.Min(7, Link.HeadCommit.Length)];
                 <div class="branch-container">
@@ -142,7 +150,6 @@
                             @snapshotSource<span class="text-muted"> (source)</span>
                         }
                     </span>
-                    <span class="badge bg-secondary ms-1 text-nowrap flex-shrink-0" title="@RepositoryBadgeTitles.ReferenceSnapshot">readonly</span>
                     @if (snapshotCommit is not null)
                     {
                         <span class="text-muted small font-monospace ms-1" title="@Link.HeadCommit">@snapshotCommit</span>
@@ -157,10 +164,6 @@
                           title="Repository is pinned to a tag. Click to switch.">
                         <i class="bi bi-tag me-1" aria-hidden="true"></i>@Link.CheckedOutTag
                     </span>
-                    @if (Link.IsReference)
-                    {
-                        <span class="badge bg-secondary ms-1 text-nowrap flex-shrink-0" title="@RepositoryBadgeTitles.Reference">readonly</span>
-                    }
                 </div>
             }
             else if (!string.IsNullOrEmpty(Link.BranchName))
@@ -169,10 +172,6 @@
                     <span class="branch-inner @(ActionsDisabled ? "branch-inner--disabled" : "")"
                           @onclick="HandleBranchClick"
                           title="Click to switch branch">@Link.BranchName</span>
-                    @if (Link.IsReference)
-                    {
-                        <span class="badge bg-secondary ms-1 text-nowrap flex-shrink-0" title="@RepositoryBadgeTitles.Reference">readonly</span>
-                    }
                 </div>
             }
             else

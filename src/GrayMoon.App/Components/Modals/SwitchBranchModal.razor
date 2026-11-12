@@ -25,10 +25,10 @@
                         <span class="modal-title__primary">Branch</span>
                         @if (!string.IsNullOrEmpty(RepositoryName))
                         {
-                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@RepositoryName">@RepositoryName</span>
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" style="flex: 0 1 auto;" title="@RepositoryName">@RepositoryName</span>
                             @if (_reference)
                             {
-                                <span class="badge bg-secondary text-nowrap flex-shrink-0" title="@(IsFeatureContext ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)">readonly</span>
+                                <ReferenceLockIcon AdditionalClass="text-muted fs-6" Title="@(IsFeatureContext ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)" />
                             }
                         }
                     </h5>
@@ -614,7 +614,7 @@
                                 }
                                 else
                                 {
-                                    <i class="bi @(_reference ? "bi-unlock" : "bi-lock") me-1" aria-hidden="true"></i>
+                                    <ReferenceLockIcon Open="@_reference" AdditionalClass="me-1" />
                                 }
                                 @ReferenceButtonText(_reference)
                             </button>

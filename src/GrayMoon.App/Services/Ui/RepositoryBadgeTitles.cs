@@ -1,7 +1,7 @@
 namespace GrayMoon.App.Services.Ui;
 
 /// <summary>
-/// Tooltips of the <c>archived</c> and <c>ro</c> badges. Both states stop writes, so each tooltip says who decided:
+/// Tooltips of the <c>archived</c> badge and the read only padlock. Both states stop writes, so each tooltip says who decided:
 /// the provider (archived) or the user in GrayMoon (read-only).
 /// </summary>
 public static class RepositoryBadgeTitles

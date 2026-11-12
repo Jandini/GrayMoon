@@ -961,3 +961,29 @@ Asked for by the owner. Not committed (base `ee992ac0`). This replaces the butto
 - Only the button uses the words lock and unlock. The state is still called read only everywhere else (badge `readonly`, Edit Workspace, messages, `ro:` search). A rename of the state to Locked / Unlocked was discussed and is not decided.
 
 **Not tested:** markup only; nothing was looked at in a browser.
+
+### B.17 Padlock in place of the `readonly` badge (2026-11-12)
+
+Asked for by the owner. Not committed (base `e0528057`). This replaces B.14 and the title badge of B.16.
+
+- Workspace repositories: a read only repository shows a padlock right after its name in the Repository column. The `readonly` badge beside the branch name is gone (branch, tag and Feature snapshot rows). The tooltip is unchanged (`RepositoryBadgeTitles.Reference` / `ReferenceSnapshot`).
+- Switch Branch dialog: the title shows the same padlock after the repository name in place of the badge. The name no longer grows to fill the title, so the padlock sits next to it.
+- The padlock is a new component, `Components/Shared/ReferenceLockIcon.razor` (inline SVG, 1em, current text color). The Bootstrap Icons padlock is narrow (10 of 16 units wide); this one has a body 12 units wide. `Open` draws an open shackle. The Lock / Unlock button uses it too.
+- Not changed: the `readonly` badge in the Git Changes tree, and the search field `ro:yes` / `ro:no`.
+
+**Not tested**
+
+- The icon as markup. Nothing was looked at in a browser.
+
+### B.18 Keyhole, white hover underline (2026-11-12)
+
+Asked for by the owner. Not committed (base `e0528057`).
+
+- `ReferenceLockIcon`: the body has a small keyhole. It is cut out of the shape (even-odd fill), so it shows the background behind the icon.
+- Workspace repositories, Repository column: on hover the underline of the repository name was blue. Cause: `app.css` has `.table tbody td a:not(.badge):hover` (added in #513), which is more specific than the `.repo-link` color rule; the name stayed white because it is a `<strong>`, but the underline takes the color of the link. Fix: the `.repo-link:hover` rule in `WorkspaceRepositories.razor.css` sets `color: inherit !important` too. Not caused by the padlock.
+- The rule `.cursor/rules/no-default-blue-links.mdc` (in `C:\Workspace\GrayMoon`, outside this repository) now says that an override must cover `:hover` and that hover must be checked.
+- Not checked: links of other grids (Repositories, Actions) for the same hover color.
+
+**Not tested**
+
+- Nothing was looked at in a browser.
