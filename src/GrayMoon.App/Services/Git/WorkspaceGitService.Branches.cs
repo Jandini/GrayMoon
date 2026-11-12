@@ -147,6 +147,25 @@ public sealed partial class WorkspaceGitService
         if (links.Count == 0)
             return BranchCreationOutcome.Empty;
 
+        // A reference repository gets no new branch. It is left out here, not in the page, so REST and Prepare
+        // Workspace cannot reach it either.
+        var eligibility = await _operationPolicy.PartitionAsync(
+            workspaceId,
+            contextId,
+            GrayMoon.Application.Repositories.Policy.RepositoryOperation.CreateBranch,
+            links.Select(wr => wr.RepositoryId).ToList(),
+            cancellationToken: cancellationToken);
+        if (eligibility.Skipped.Count > 0)
+        {
+            var skippedIds = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+            links = links.Where(wr => !skippedIds.Contains(wr.RepositoryId)).ToList();
+            _logger.LogInformation(
+                "Create branch left out {SkippedCount} repositories of workspace {WorkspaceId}: {Repositories}",
+                eligibility.Skipped.Count, workspaceId, string.Join(", ", eligibility.Skipped.Select(skip => skip.RepositoryName)));
+            if (links.Count == 0)
+                return BranchCreationOutcome.Empty with { Skipped = eligibility.Skipped };
+        }
+
         // Read before the state writes below clear the tag on these tracked links.
         var leavingTagRepositoryIds = links
             .Where(wr => !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
@@ -303,7 +322,10 @@ public sealed partial class WorkspaceGitService
         return new BranchCreationOutcome(
             links.Select(l => l.RepositoryId).ToHashSet(),
             new Dictionary<int, string?>(checkedOutBranchByRepoId),
-            new Dictionary<int, string>(errors));
+            new Dictionary<int, string>(errors))
+        {
+            Skipped = eligibility.Skipped,
+        };
     }
 
     /// <summary>

@@ -22,4 +22,11 @@ public sealed class CommitSyncRepositoryRequest : WorkspaceCommandRequest
     /// <summary>Optional Feature parent branch for ahead/behind; see <see cref="SyncRepositoryRequest.DivergenceBaseBranch"/>.</summary>
     [JsonPropertyName("divergenceBaseBranch")]
     public string? DivergenceBaseBranch { get; set; }
+
+    /// <summary>
+    /// For a read-only repository: only take incoming commits by fast-forward. Nothing is merged and nothing is
+    /// pushed; a branch with commits of its own is refused before the pull.
+    /// </summary>
+    [JsonPropertyName("pullOnly")]
+    public bool PullOnly { get; set; }
 }

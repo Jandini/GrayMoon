@@ -163,9 +163,29 @@ public sealed class RemoveFeatureRepositoryPlan
     public string? Warning { get; init; }
 
     /// <summary>
+    /// True when the Feature holds this repository as a read-only snapshot: detached at
+    /// <see cref="BaseCommitSha"/>, with no Feature branch to delete.
+    /// </summary>
+    public bool IsReferenceSnapshot { get; init; }
+
+    /// <summary>The commit the Feature repository was created at.</summary>
+    public string? BaseCommitSha { get; init; }
+
+    /// <summary>
+    /// True for a read-only snapshot whose HEAD is still the commit it was created at. Nothing was added to it, so
+    /// removing it loses nothing; how far that commit is from the default branch says nothing about that.
+    /// An unknown HEAD is never treated as unchanged.
+    /// </summary>
+    public bool IsUnchangedReferenceSnapshot =>
+        IsReferenceSnapshot
+        && HeadCommit is { Length: > 0 } head
+        && BaseCommitSha is { Length: > 0 } baseCommit
+        && string.Equals(head, baseCommit, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The branch Remove actually deletes for this repository: the Feature's own name, or null for a
-    /// tag-pinned repository (no branch is ever deleted for it). Set regardless of what the worktree
-    /// is currently checked out to (09 SB-2).
+    /// tag-pinned repository or a read-only snapshot (no branch is ever deleted for it). Set regardless of what
+    /// the worktree is currently checked out to (09 SB-2).
     /// </summary>
     public string? FeatureBranchName { get; init; }
 
@@ -216,7 +236,9 @@ public sealed class RemoveFeatureRepositoryPlan
     /// commits ahead of the default branch still need an explicit force delete.
     /// </summary>
     public bool NeedsForceDeleteAuthorization(bool pullRequestStatusUnknown) =>
-        (EffectiveAheadOfDefault ?? 0) > 0
+        // A read-only snapshot has no Feature branch, so there is no branch delete to authorize.
+        !IsReferenceSnapshot
+        && (EffectiveAheadOfDefault ?? 0) > 0
         && (pullRequestStatusUnknown || !LocalBranchCoveredByMergedPullRequest);
 
     /// <summary>

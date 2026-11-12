@@ -35,6 +35,18 @@ public sealed class CommitSyncRepositoryResponse
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 
+    /// <summary>Pull-only: git refused the fast-forward because local changes would be overwritten. Nothing was changed.</summary>
+    [JsonPropertyName("localChangesBlockPull")]
+    public bool LocalChangesBlockPull { get; set; }
+
+    /// <summary>Pull-only: the branch has commits that are not on its remote branch, so nothing was pulled.</summary>
+    [JsonPropertyName("hasLocalCommits")]
+    public bool HasLocalCommits { get; set; }
+
+    /// <summary>Full sha of HEAD after the command. Null when it could not be read.</summary>
+    [JsonPropertyName("commit")]
+    public string? Commit { get; set; }
+
     /// <summary>Full post-pull state, so the app replaces every count the pull changed instead of only the two it used to report.</summary>
     [JsonPropertyName("state")]
     public RepositoryStateSnapshot? State { get; set; }

@@ -1,9 +1,30 @@
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Components.Pages;
 
 public sealed partial class WorkspaceActions
 {
+    /// <summary>True when a workflow may be started or run again in the row's repository. A read-only repository takes no runs.</summary>
+    private bool AllowsWorkflowRun(WorkspaceActionRow row, RepositoryOperationScope scope) =>
+        row.Link.Allows(RepositoryOperation.RunWorkflow, _isFeatureContext, scope);
+
+    /// <summary>For a run the user asked for on one row: false, with the reason shown on the row, when the repository takes no runs.</summary>
+    private bool TryAllowWorkflowRun(WorkspaceActionRow row)
+    {
+        var decision = RepositoryOperationPolicy.Evaluate(
+            RepositoryOperation.RunWorkflow,
+            RepositoryOperationScope.Individual,
+            row.Link.ToPolicySubject(_isFeatureContext));
+        if (decision.IsAllowed)
+            return true;
+
+        row.ErrorMessage = decision.Message;
+        StateHasChanged();
+        return false;
+    }
+
     /// <summary>Refreshes the row until the given workflow shows as running with a run id, or max attempts (GitHub listing lag after dispatch/rerun).</summary>
     private async Task<bool> TryRefreshUntilWorkflowLineRunningAsync(
         WorkspaceActionRow row,
@@ -236,6 +257,7 @@ public sealed partial class WorkspaceActions
     internal async Task RerunWorkflowAsync(WorkspaceActionRow row, WorkflowActionLine line)
     {
         if (line.Action?.RunId == null) return;
+        if (!TryAllowWorkflowRun(row)) return;
 
         var latchKey = GetLineLatchKey(line);
         if (!TryBeginRerunLatch(row, line)) return;
@@ -359,6 +381,7 @@ public sealed partial class WorkspaceActions
     {
         if (line.Action?.WorkflowId == null) return;
         if (IsLineRunningForBranch(row, line)) return;
+        if (!TryAllowWorkflowRun(row)) return;
 
         var latchKey = line.Action.WorkflowId.Value;
         if (!TryBeginRunLatch(row, latchKey)) return;

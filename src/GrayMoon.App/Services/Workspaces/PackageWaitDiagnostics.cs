@@ -273,7 +273,8 @@ internal static class PackageWaitDiagnostics
                 producerLink?.Repository?.OrgName,
                 producerLink?.Repository?.RepositoryName,
                 inOperation,
-                expectation);
+                expectation,
+                IsReference: producerLink is { IsReference: true } && producerLink.Role != WorkspaceRepositoryRole.Workspace);
 
             if (!result.TryGetValue(key, out var existing) || diagnostic.ProducerLevel < existing.ProducerLevel)
                 result[key] = diagnostic;
@@ -468,7 +469,9 @@ internal sealed record PackageProducerDiagnostic(
     string? Owner,
     string? RepositoryName,
     bool InCurrentOperation,
-    PackageExpectationKind Expectation);
+    PackageExpectationKind Expectation,
+    // The producer is a read-only (reference) repository: GrayMoon never pushes it, so it never publishes the package.
+    bool IsReference = false);
 
 internal sealed record PackageWorkflowDiagnostic(
     string WorkflowStatus,

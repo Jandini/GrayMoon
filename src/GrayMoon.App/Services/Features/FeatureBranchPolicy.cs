@@ -25,12 +25,22 @@ public static class FeatureBranchPolicy
     public const string PinnedToTagMessage =
         "This repository is pinned to a tag in this Feature. Use the Workspace to check out a branch.";
 
+    public const string ReferenceSnapshotMessage =
+        "This repository is a read-only snapshot in this Feature and stays at the commit the Feature was created from. Use the Workspace to check out a branch or a tag.";
+
     /// <summary>
     /// The branch a Feature's repository is expected to be on: the Feature's own name for a
     /// non-pinned repository, or null for a repository pinned to a tag (no branch is expected).
     /// </summary>
     public static string? ExpectedBranch(string featureName, string? pinnedTag)
-        => pinnedTag is null ? featureName : null;
+        => ExpectedBranch(featureName, pinnedTag, isReferenceSnapshot: false);
+
+    /// <summary>
+    /// As <see cref="ExpectedBranch(string, string?)"/>, for a repository the Feature may hold as a reference
+    /// snapshot: a snapshot is detached at the commit the Source had, so no branch is expected for it either.
+    /// </summary>
+    public static string? ExpectedBranch(string featureName, string? pinnedTag, bool isReferenceSnapshot)
+        => pinnedTag is null && !isReferenceSnapshot ? featureName : null;
 
     /// <summary>
     /// True when a repository has drifted off its expected Feature branch: there is an expected
@@ -47,13 +57,18 @@ public static class FeatureBranchPolicy
     /// recorded state for the repository (<paramref name="hasRecordedState"/>); before the first sync a
     /// blank branch means "unknown", not "detached".
     /// </summary>
-    public static string? GetOffFeatureBranch(string? featureName, string? pinnedTag, string? currentBranch, bool hasRecordedState)
+    public static string? GetOffFeatureBranch(
+        string? featureName,
+        string? pinnedTag,
+        string? currentBranch,
+        bool hasRecordedState,
+        bool isReferenceSnapshot = false)
     {
         if (featureName is null)
             return null;
         if (string.IsNullOrEmpty(currentBranch) && !hasRecordedState)
             return null;
-        var expected = ExpectedBranch(featureName, pinnedTag);
+        var expected = ExpectedBranch(featureName, pinnedTag, isReferenceSnapshot);
         return IsOffFeatureBranch(expected, string.IsNullOrEmpty(currentBranch) ? null : currentBranch) ? expected : null;
     }
 
@@ -67,7 +82,8 @@ public static class FeatureBranchPolicy
         string? expectedBranch,
         string? pinnedTag,
         string? target,
-        bool isTag)
+        bool isTag,
+        bool isReferenceSnapshot = false)
     {
         switch (action)
         {
@@ -76,6 +92,9 @@ public static class FeatureBranchPolicy
             case FeatureBranchAction.ReturnToDefault:
                 return ReturnToDefaultMessage;
             case FeatureBranchAction.Checkout:
+                // A snapshot stays at the commit the Feature was created from, whatever the target.
+                if (isReferenceSnapshot)
+                    return ReferenceSnapshotMessage;
                 if (isTag)
                     return pinnedTag is not null ? null : TagNotPinnedMessage;
                 if (expectedBranch is null)

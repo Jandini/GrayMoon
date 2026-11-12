@@ -121,6 +121,9 @@ public sealed class AiGenerationTests
                 new WorkspaceAiProviderPins(fixture.Factory),
                 Options.Create(new GitChangesOptions()),
                 Options.Create(new AiGenerationOptions()),
+                new GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService(
+                    fixture.Factory,
+                    NullLogger<GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>.Instance),
                 NullLogger<WorkspaceAiGenerationOperations>.Instance),
         };
         harness.ManifestContent = Definition(await manifestService.BuildFromDatabaseAsync(workspace.WorkspaceId) with { Ai = ai });

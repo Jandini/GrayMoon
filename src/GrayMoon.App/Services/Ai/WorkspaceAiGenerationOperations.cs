@@ -5,6 +5,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Services.Worker;
 using GrayMoon.Application.Ai;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Common.Ai;
 using GrayMoon.Common.Git;
@@ -27,6 +28,7 @@ public sealed class WorkspaceAiGenerationOperations(
     WorkspaceAiProviderPins pins,
     IOptions<GitChangesOptions> gitChangesOptions,
     IOptions<AiGenerationOptions> aiOptions,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
     ILogger<WorkspaceAiGenerationOperations> logger) : IWorkspaceAiGenerationOperations
 {
     public async Task<AiProviderMenu> GetProvidersAsync(int workspaceId, CancellationToken cancellationToken)
@@ -87,10 +89,23 @@ public sealed class WorkspaceAiGenerationOperations(
         if (scope.Repositories.Count == 0)
             return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, "There is nothing to commit.");
 
-        var repositories = scope.Repositories
+        // The message describes what will be committed. A read-only repository is never committed, so its changes
+        // are not read, whatever the caller listed.
+        var eligibility = await operationPolicy.PartitionAsync(
+            scope.WorkspaceId,
+            scope.ContextId,
+            RepositoryOperation.CommitGitChanges,
+            scope.Repositories.Select(r => r.RepositoryId).ToList(),
+            cancellationToken: cancellationToken);
+        var leftOut = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+        var described = scope.Repositories.Where(r => !leftOut.Contains(r.RepositoryId)).ToList();
+        if (described.Count == 0)
+            return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, "There is nothing to commit: the repositories with changes are read-only.");
+
+        var repositories = described
             .Select(r => new GitEvidenceRepositoryScope { RepositoryId = r.RepositoryId })
             .ToList();
-        var branches = scope.Repositories.ToDictionary(r => r.RepositoryId, r => r.BranchName);
+        var branches = described.ToDictionary(r => r.RepositoryId, r => r.BranchName);
 
         var run = await RunAsync(
             GitEvidenceKind.Commit,

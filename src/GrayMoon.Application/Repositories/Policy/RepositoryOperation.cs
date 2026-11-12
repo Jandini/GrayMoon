@@ -78,6 +78,8 @@ public enum RepositoryOperationOutcome
     Skipped,
 }
 
+/// <summary>Why a repository was refused or skipped. Written by name in REST responses.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<RepositoryOperationReason>))]
 public enum RepositoryOperationReason
 {
     None,

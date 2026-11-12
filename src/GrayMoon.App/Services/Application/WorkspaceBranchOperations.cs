@@ -213,7 +213,7 @@ public sealed class WorkspaceBranchOperations(
                 && featureRepository.State is WorkspaceFeatureRepositoryState.Ready or WorkspaceFeatureRepositoryState.NeedsRepair
                 && featureView.FeatureName is { } featureName)
             {
-                AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag));
+                AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag, featureRepository.IsReferenceSnapshot));
             }
         }
 
@@ -952,7 +952,10 @@ public sealed class WorkspaceBranchOperations(
         return BranchHttpOutcome.Problem(err, 500);
     }
 
-    /// <summary>A pinned-tag repository that moves to another tag in a Feature keeps its pin on the new tag. A repository without a pin is never given one.</summary>
+    /// <summary>
+    /// A pinned-tag repository that moves to another tag in a Feature keeps its pin on the new tag. A repository
+    /// without a pin is never given one, and a reference snapshot keeps the tag it was taken at.
+    /// </summary>
     private async Task UpdateFeaturePinnedTagAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceRepositoryId,
@@ -963,7 +966,8 @@ public sealed class WorkspaceBranchOperations(
         await db.WorkspaceFeatureRepositories
             .Where(r => r.WorkspaceFeatureContextId == contextId.Value
                         && r.WorkspaceRepositoryId == workspaceRepositoryId
-                        && r.PinnedTag != null)
+                        && r.PinnedTag != null
+                        && !r.IsReferenceSnapshot)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.PinnedTag, tagName), cancellationToken);
     }
 

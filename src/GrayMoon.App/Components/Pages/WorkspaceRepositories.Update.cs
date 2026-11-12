@@ -111,7 +111,10 @@ public sealed partial class WorkspaceRepositories
                     includeDepsInCommitMessage: includeDepsInCommitMessage));
 
             if (updateResult.Success)
+            {
                 SafeInvoke(() => ClearRepositoryErrorsFor(updateResult.SyncedRepoIds));
+                ShowSkippedRepositories(updateResult.Skipped);
+            }
         }, new PageJobOptions
         {
             RefreshOnCancel = true,

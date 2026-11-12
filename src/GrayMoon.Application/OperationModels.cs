@@ -12,10 +12,9 @@ public sealed record OperationResult(
     IReadOnlyDictionary<int, string>? LevelErrors = null)
 {
     /// <summary>
-    /// Repositories the policy left out of the run, with the reason. Recorded and logged only: not shown to the user
-    /// and not part of the REST response.
+    /// Repositories the policy left out of the run, with the reason. Part of the REST response and shown
+    /// to the user as information.
     /// </summary>
-    [JsonIgnore]
     public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
 
     /// <summary>
@@ -112,10 +111,9 @@ public sealed record RemoveFeatureRepositoryReport(
 public sealed record DependencyUpdateRunResult(bool Success, IReadOnlySet<int> SyncedRepoIds)
 {
     /// <summary>
-    /// Repositories the policy left out of the run, with the reason. Recorded and logged only: not shown to the user
-    /// and not part of the REST response.
+    /// Repositories the policy left out of the run, with the reason. Part of the REST response and shown
+    /// to the user as information.
     /// </summary>
-    [JsonIgnore]
     public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
 
     public static DependencyUpdateRunResult Ok(IReadOnlySet<int>? syncedRepoIds = null)
@@ -138,8 +136,7 @@ public sealed record UpdateAndPushResult(bool Pipelined, DependencyUpdateRunResu
 
     public bool Success => Update.Success && (Push?.Success ?? true);
 
-    /// <summary>Repositories the policy left out of either lane. Recorded and logged only.</summary>
-    [JsonIgnore]
+    /// <summary>Repositories the policy left out of either lane.</summary>
     public IReadOnlyList<RepositorySkip> Skipped => [.. Update.Skipped, .. Push?.Skipped ?? []];
 }
 
@@ -157,9 +154,12 @@ public sealed record PrepareWorkspaceResult(
     UpdateAndPushExecutionResult? Combined = null,
     bool PushPending = false)
 {
-    /// <summary>Repositories the policy left out of the dependency update. Recorded and logged only.</summary>
-    [JsonIgnore]
-    public IReadOnlyList<RepositorySkip> Skipped => Update?.Skipped ?? [];
+    /// <summary>Repositories the policy left out of the branch stage (reference repositories).</summary>
+    public IReadOnlyList<RepositorySkip> BranchSkipped { get; init; } = [];
+
+    /// <summary>Repositories the policy left out of any stage, each named once.</summary>
+    public IReadOnlyList<RepositorySkip> Skipped =>
+        [.. BranchSkipped.Concat(Update?.Skipped ?? []).Concat(Combined?.Skipped ?? []).DistinctBy(skip => skip.RepositoryId)];
 
     public const string BranchesStoppedMessage =
         "Prepare Workspace stopped: branches could not be created in all selected repositories. No dependency updates or pushes were started.";
@@ -191,8 +191,26 @@ public static class OperationProgressExtensions
     /// goes to <paramref name="showWarning"/> (to <paramref name="showError"/> when the caller has no warning
     /// surface, so it is never dropped).
     /// </summary>
-    public static void ShowRepoErrors(this OperationResult result, Action<string> showError, Action<string>? showWarning = null)
+    /// <param name="showInformation">
+    /// Receives the sentence that names the repositories the run left out (read-only, on a tag). Only called when
+    /// there is no error and no warning to report, so it never replaces one. Without it skips are not shown.
+    /// </param>
+    public static void ShowRepoErrors(
+        this OperationResult result,
+        Action<string> showError,
+        Action<string>? showWarning = null,
+        Action<string>? showInformation = null)
     {
+        if (showInformation != null
+            && result.Success
+            && !result.HasWarnings
+            && result.RepoErrors is not { Count: > 0 }
+            && RepositorySkipSummary.Describe(result.Skipped) is { } skipped)
+        {
+            showInformation(skipped);
+            return;
+        }
+
         if (result.HasWarnings)
         {
             (showWarning ?? showError)(result.WarningSummary ?? string.Join(Environment.NewLine, result.Warnings!));

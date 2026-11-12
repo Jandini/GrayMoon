@@ -233,3 +233,69 @@ Tests changed on purpose (each asserted the old behavior and passed against it b
 - `RepositoryPolicySubjectSourceTests`: the Feature update run now names what the Feature has on a tag and not what the Workspace has.
 
 Not run for 0D: Common and Worker tests (no file of theirs changed), the manual smoke list.
+
+## Phase 1, first group (WP1, WP4-WP7) - 2026-11-12
+
+Base: commit `d0f00d30` plus uncommitted changes (69 changed or new files). Windows 11, git 2.56.0.windows.4, .NET SDK 10.0.401. Not committed.
+
+Commands, from the repository root:
+
+```powershell
+dotnet build GrayMoon.slnx
+dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj
+dotnet test src/GrayMoon.Worker.Tests/GrayMoon.Worker.Tests.csproj
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj
+dotnet test src/GrayMoon.Worker.Tests/GrayMoon.Worker.Tests.csproj --filter "Category=Long"
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --filter "Category=Long"
+```
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 393 passed, 0 failed |
+| Worker tests | 1023 passed, 0 failed, 1 skipped (`GitVersionParityTests.Default_tip_version_matches_a_fresh_checkout_when_the_repo_is_on_a_Feature_branch_and_origin_moved_on`, the same test as the baseline) |
+| App tests | 4308 passed, 0 failed, 0 skipped |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once, not five times.
+
+New tests:
+
+- `GrayMoon.App.Tests/Policy/ReferenceRepositoryEnforcementTests` (16): push, pull-only flag per repository, Git Changes commit refused before the Worker (Workspace and Feature snapshot), stage and unstage still sent, the Workspace-role repository exempt, bulk create branch, Workspace-wide checkout, pull request create and merge, Feature checkout guard, state write of a snapshot, snapshot branch expectations, Remove Feature plan, commit target planner.
+- `GrayMoon.App.Tests/Policy/RepositorySkipReportingTests` (+3): the skip summary sentence and how `ShowRepoErrors` reports it.
+- `GrayMoon.Worker.Tests/CommitSyncPullOnlyTests` (8): fast-forward pull, local commit refused and never pushed, the same commit pushed without `pullOnly`, compatible and conflicting local changes, checkout `commit` and the local-changes refusal. New scenario `GitScenarios.CloneBehindRemote`.
+
+Test changed on purpose: `RepositorySkipReportingTests.Skips_are_not_part_of_the_REST_response` became `Skips_are_part_of_the_REST_response_with_the_reason_by_name`. It asserted the 0B behavior (skips hidden from REST) and passed against it before the change.
+
+### Not run
+
+- The manual smoke list.
+- Mutation checks.
+- No test was written for: the read-only handling of Prepare Workspace as a whole, the dependency update and version-file skip, the Actions page run and rerun guards, the Git Changes page logic (bulk section actions, Discard All, the `ro` badge), the AI commit message scope, Create Feature with a read-only Source, Remove Feature on a snapshot end to end, and the REST endpoint bodies. These paths are covered by the build only.
+
+## Phase 1, first group: leftovers - 2026-11-12
+
+Base: commit `d0f00d30` plus uncommitted changes. Same machine and commands as the section above. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 393 passed, 0 failed |
+| Worker tests | 1027 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4314 passed, 0 failed, 0 skipped |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once.
+
+New tests:
+
+- `ReferenceRepositoryEnforcementTests` (+3, 19 in all): Return to Default of one read-only repository is a `CheckoutBranch` of the default branch with no `ReturnToDefaultBranch` and no `DeleteBranch` call, even when deletion was asked for; bulk Return to Default names it in `Skipped`; projects are still scanned while the update plan and the dependency sync leave it out.
+- `PackageWaitTimeoutTests` (+3): the timeout message names one or several read-only producers and `Report` passes them on.
+- `InspectWorktreeMainCheckoutTests` (+4, real git): `headOnRemote` is null with an upstream, true for a branch without upstream on a pushed commit, false with a local commit, and tells the two detached cases apart.
+
+### Not run
+
+- The manual smoke list and mutation checks.
+- No test for: the Repositories page code that routes a read-only row to the plain checkout (page logic), `PackageProducerDiagnostic.IsReference` being set from the link and the `ReadOnly` status, `ReturnToDefaultRepositoryPlan.IsReference` from the analysis, and the pipelined run's `Skipped`.

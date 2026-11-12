@@ -88,7 +88,10 @@ public sealed partial class WorkspaceRepositories
                     return;
 
                 if (result.Success)
+                {
                     SafeInvoke(() => ClearRepositoryErrorsFor(result.SyncedRepoIds));
+                    ShowSkippedRepositories(result.Skipped);
+                }
 
                 if (!result.PushPending)
                     return;

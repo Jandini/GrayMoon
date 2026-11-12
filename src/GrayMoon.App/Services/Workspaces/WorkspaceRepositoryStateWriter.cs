@@ -127,8 +127,10 @@ public sealed class WorkspaceRepositoryStateWriter(
             dbContext.WorkspaceRepositoryContextStates.Add(state);
         }
 
-        var previousBranch = StageTracked(context, wr, state, snapshot, options);
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+        var isReferenceSnapshot = !isSpecialWorkspace
+            && (await LoadReferenceSnapshotLinkIdsAsync(contextId, [wr.WorkspaceRepositoryId], cancellationToken)).Count > 0;
+        var previousBranch = StageTracked(context, wr, state, snapshot, options, isReferenceSnapshot);
         if (snapshot.BranchesProbed)
             StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
 
@@ -309,7 +311,8 @@ public sealed class WorkspaceRepositoryStateWriter(
         WorkspaceRepositoryContextState state,
         RepositoryStateSnapshot snapshot,
         RepositoryStateWriteOptions options,
-        string? defaultBranchName)
+        string? defaultBranchName,
+        bool isReferenceSnapshot = false)
     {
         switch (options.SyncStatus)
         {
@@ -340,7 +343,10 @@ public sealed class WorkspaceRepositoryStateWriter(
         // A repository is known once it has a branch or a tag. The GitVersion result is deliberately not part
         // of that: when GitVersion cannot compute a version (an empty repository, a broken config) the row shows
         // the version as unresolved, and the repository and the Workspace carry on as normal.
-        var hasIdentity = !Blank(state.BranchName) || !Blank(state.CheckedOutTag);
+        // A reference snapshot has neither when it was taken from a branch: it is known by its commit.
+        var hasIdentity = !Blank(state.BranchName)
+            || !Blank(state.CheckedOutTag)
+            || (isReferenceSnapshot && !Blank(state.HeadCommit));
         var hasDefaultBranch = !Blank(defaultBranchName);
 
         // A remote that has no branches at all (a freshly created, still empty hosted repository) has no
@@ -513,6 +519,9 @@ public sealed class WorkspaceRepositoryStateWriter(
         var stateByWrl = states.ToDictionary(s => s.WorkspaceRepositoryId);
         var discoversProjects = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects;
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+        var referenceSnapshotLinkIds = isSpecialWorkspace
+            ? []
+            : await LoadReferenceSnapshotLinkIdsAsync(contextId, wrlIds, cancellationToken);
         var staged = new List<(WorkspaceRepositoryLink Wr, WorkspaceRepositoryContextState State, string? PreviousBranch)>();
         var projectBatch = new List<(int RepositoryId, IReadOnlyList<SyncProjectInfo> Projects)>();
 
@@ -536,7 +545,8 @@ public sealed class WorkspaceRepositoryStateWriter(
                 stateByWrl[wr.WorkspaceRepositoryId] = state;
             }
 
-            var previousBranch = StageTracked(context, wr, state, snapshot, options);
+            var previousBranch = StageTracked(
+                context, wr, state, snapshot, options, referenceSnapshotLinkIds.Contains(wr.WorkspaceRepositoryId));
             staged.Add((wr, state, previousBranch));
 
             if (snapshot.BranchesProbed)
@@ -587,18 +597,41 @@ public sealed class WorkspaceRepositoryStateWriter(
             await ReconcilePullRequestsAsync(contextId, workspaceId, staged, isSpecialWorkspace, cancellationToken);
     }
 
+    /// <summary>
+    /// The links, of those given, that the Feature context holds as reference snapshots. A snapshot is detached at
+    /// a commit by design: it has no branch, and one taken from a branch has no tag either.
+    /// </summary>
+    private async Task<HashSet<int>> LoadReferenceSnapshotLinkIdsAsync(
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyCollection<int> workspaceRepositoryIds,
+        CancellationToken cancellationToken) =>
+        (await dbContext.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(row => row.WorkspaceFeatureContextId == contextId.Value
+                && row.IsReferenceSnapshot
+                && workspaceRepositoryIds.Contains(row.WorkspaceRepositoryId))
+            .Select(row => row.WorkspaceRepositoryId)
+            .ToListAsync(cancellationToken))
+        .ToHashSet();
+
     /// <summary>Mutates the tracked context state and, for the special Workspace, the link. Does not save.</summary>
     private static string? StageTracked(
         WorkspaceFeatureContext context,
         WorkspaceRepositoryLink wr,
         WorkspaceRepositoryContextState state,
         RepositoryStateSnapshot snapshot,
-        RepositoryStateWriteOptions options)
+        RepositoryStateWriteOptions options,
+        bool isReferenceSnapshot = false)
     {
         var previousBranch = state.BranchName;
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
 
         ApplyIdentity(state, snapshot);
+
+        // Whatever a probe calls a detached HEAD ("HEAD", a description of the commit), a snapshot has no branch.
+        if (isReferenceSnapshot && snapshot.IdentityProbed)
+            state.BranchName = null;
+
         if (isSpecialWorkspace && snapshot.IdentityProbed)
         {
             MirrorIdentityToLink(wr, state);
@@ -621,7 +654,8 @@ public sealed class WorkspaceRepositoryStateWriter(
                 wr.GitVersion = state.GitVersion;
         }
 
-        var onTag = !string.IsNullOrWhiteSpace(state.CheckedOutTag);
+        // A tag checkout and a reference snapshot are both detached: there is no branch to count commits for.
+        var onTag = !string.IsNullOrWhiteSpace(state.CheckedOutTag) || isReferenceSnapshot;
         if (!onTag)
         {
             if (snapshot.CommitCountsProbed)
@@ -655,7 +689,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         if (!Blank(snapshot.DefaultBranchName))
             wr.DefaultBranchName = snapshot.DefaultBranchName;
 
-        ApplySyncStatus(state, snapshot, options, wr.DefaultBranchName);
+        ApplySyncStatus(state, snapshot, options, wr.DefaultBranchName, isReferenceSnapshot);
         if (isSpecialWorkspace)
             wr.SyncStatus = state.SyncStatus;
 

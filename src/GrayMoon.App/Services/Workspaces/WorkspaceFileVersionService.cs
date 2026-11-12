@@ -38,6 +38,7 @@ public sealed class WorkspaceFileVersionService(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceFileVersionService> logger,
     FileVersionCheckCoalescer fileVersionCheckCoalescer,
+    GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy operationPolicy,
     IOptions<WorkspaceOptions>? workspaceOptions = null)
 {
     /// <summary>
@@ -213,6 +214,16 @@ public sealed class WorkspaceFileVersionService(
         // shared scoped DbContext: the configs are detached (AsNoTracking) and only read here.
         var groups = new Dictionary<string, List<FileUpdateWork>>(StringComparer.OrdinalIgnoreCase);
         var order = 0;
+
+        // A file is never written in a repository that does not take version file updates (on a tag, read-only).
+        // Its version can still be a token value in the files of other repositories.
+        var notWritableRepositoryIds = (await operationPolicy.PartitionAsync(
+                workspaceId,
+                contextId,
+                GrayMoon.Application.Repositories.Policy.RepositoryOperation.UpdateVersionFiles,
+                cancellationToken: cancellationToken))
+            .Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+
         foreach (var cfg in configs)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -220,6 +231,9 @@ public sealed class WorkspaceFileVersionService(
             if (file?.Repository == null) continue;
 
             if (file.IsMissingOnDisk == true)
+                continue;
+
+            if (notWritableRepositoryIds.Contains(file.RepositoryId))
                 continue;
 
             if (selectedRepositoryIds != null && selectedRepositoryIds.Count > 0 && !selectedRepositoryIds.Contains(file.RepositoryId))

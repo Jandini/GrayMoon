@@ -4,6 +4,7 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Orchestration;
@@ -18,6 +19,7 @@ public sealed class WorkspaceBranchHandler(
     IWorkspaceBranchOccupancyService branchOccupancyService,
     IFeatureBranchGuard featureBranchGuard,
     IOptions<WorkspaceOptions> workspaceOptions,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
     ILogger<WorkspaceBranchHandler> logger)
 {
     private int MaxParallelOperations => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
@@ -252,6 +254,27 @@ public sealed class WorkspaceBranchHandler(
             return new WorkspaceBranchBulkResult(0, refused.Count, refused);
         }
 
+        // A Workspace-wide checkout leaves reference repositories where they are. They are neither attempted nor
+        // counted, and come back in Skipped.
+        var eligibility = await operationPolicy.PartitionAsync(
+            workspaceId,
+            contextId,
+            RepositoryOperation.WorkspaceCheckout,
+            workspaceRepositoryIdsByRepositoryId.Keys.ToList(),
+            cancellationToken: cancellationToken);
+        if (eligibility.Skipped.Count > 0)
+        {
+            var skippedIds = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+            workspaceRepositoryIdsByRepositoryId = workspaceRepositoryIdsByRepositoryId
+                .Where(pair => !skippedIds.Contains(pair.Key))
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+            logger.LogInformation(
+                "Workspace checkout of {BranchName} left out {SkippedCount} repositories of workspace {WorkspaceId}: {Repositories}",
+                branchName, eligibility.Skipped.Count, workspaceId, string.Join(", ", eligibility.Skipped.Select(skip => skip.RepositoryName)));
+            if (workspaceRepositoryIdsByRepositoryId.Count == 0)
+                return WorkspaceBranchBulkResult.Empty with { Skipped = eligibility.Skipped };
+        }
+
         var errors = new ConcurrentDictionary<int, string>();
         var occupancyCheckDegraded = false;
 
@@ -336,7 +359,10 @@ public sealed class WorkspaceBranchHandler(
 
         await Task.WhenAll(tasks);
         var failureCount = errors.Count;
-        return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors), occupancyCheckDegraded);
+        return new WorkspaceBranchBulkResult(total - failureCount, failureCount, new Dictionary<int, string>(errors), occupancyCheckDegraded)
+        {
+            Skipped = eligibility.Skipped,
+        };
     }
 
     private static BranchesResponse? TryReadRefreshBody(object? body)
@@ -349,6 +375,9 @@ public sealed record WorkspaceBranchBulkResult(
     IReadOnlyDictionary<int, string> ErrorsByRepositoryId,
     bool OccupancyCheckDegraded = false)
 {
+    /// <summary>Repositories the policy left out (reference repositories). Not attempted and not counted.</summary>
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
     public static WorkspaceBranchBulkResult Empty { get; } = new(0, 0, new Dictionary<int, string>());
 }
 

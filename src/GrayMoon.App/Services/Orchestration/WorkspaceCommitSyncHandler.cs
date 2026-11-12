@@ -83,6 +83,10 @@ public sealed class WorkspaceCommitSyncHandler(
                 where r.WorkspaceFeatureContextId == contextId.Value && l.RepositoryId == repositoryId
                 select r.ParentBranchName
             ).FirstOrDefaultAsync(cancellationToken);
+
+            // A read-only repository only takes incoming commits by fast-forward and is never pushed.
+            var subjects = await operationPolicy.GetSubjectsAsync(workspaceId, contextId, cancellationToken: cancellationToken);
+            var pullOnly = subjects.TryGetValue(repositoryId, out var subject) && subject is { IsReference: true, IsWorkspaceRepository: false };
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -92,7 +96,8 @@ public sealed class WorkspaceCommitSyncHandler(
                 workspaceId,
                 workspaceRoot,
                 workspaceRepositoryName,
-                divergenceBaseBranch
+                divergenceBaseBranch,
+                pullOnly
             };
 
             var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
@@ -180,6 +185,13 @@ public sealed class WorkspaceCommitSyncHandler(
             select new { l.RepositoryId, r.ParentBranchName }
         ).ToDictionaryAsync(x => x.RepositoryId, x => x.ParentBranchName, cancellationToken);
 
+        // A read-only repository only takes incoming commits by fast-forward and is never pushed. Decided per
+        // repository, so one bulk pull mixes both modes.
+        var pullOnlyIds = (await operationPolicy.GetSubjectsAsync(workspaceId, contextId, cancellationToken: cancellationToken))
+            .Where(pair => pair.Value is { IsReference: true, IsWorkspaceRepository: false })
+            .Select(pair => pair.Key)
+            .ToHashSet();
+
         var tasks = repositoryIds.Select(async repositoryId =>
         {
             try
@@ -210,7 +222,8 @@ public sealed class WorkspaceCommitSyncHandler(
                     workspaceId,
                     workspaceRoot,
                     workspaceRepositoryName,
-                    divergenceBaseBranch
+                    divergenceBaseBranch,
+                    pullOnly = pullOnlyIds.Contains(repositoryId)
                 };
 
                 var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);

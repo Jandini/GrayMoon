@@ -404,11 +404,19 @@ public sealed partial class WorkspacePushService(
                 var found = getFoundCount();
                 var waited = DateTime.UtcNow - waitStartedUtc;
                 string[] missing;
+                string[] readOnlyProducers;
                 lock (foundLock)
                 {
                     missing = Enumerable.Range(0, totalDeps)
                         .Where(i => !foundByIndex[i])
                         .Select(i => $"{requiredForLevel[i].PackageId} {requiredForLevel[i].Version}")
+                        .ToArray();
+                    readOnlyProducers = Enumerable.Range(0, totalDeps)
+                        .Where(i => !foundByIndex[i])
+                        .Select(i => producers.GetValueOrDefault(PackageWaitDiagnostics.Key(requiredForLevel[i].PackageId, requiredForLevel[i].Version)))
+                        .Where(producer => producer is { IsReference: true })
+                        .Select(producer => producer!.ProducerRepository)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToArray();
                 }
 
@@ -430,7 +438,7 @@ public sealed partial class WorkspacePushService(
                     Action<int, string>? reportTimeout = registryError == null
                         ? onLevelError
                         : (failedLevel, message) => onLevelError?.Invoke(failedLevel, $"{message} Last registry error: {registryError}");
-                    PackageWaitTimeout.Report(level, reportTimeout, found, totalDeps, waited, missing);
+                    PackageWaitTimeout.Report(level, reportTimeout, found, totalDeps, waited, missing, readOnlyProducers);
                 }
                 run.Diagnostics.FailedLevel = level;
                 run.Diagnostics.FailureCategory = PackageWaitDiagnostics.FailurePackageWaitTimeout;

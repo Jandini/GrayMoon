@@ -34,6 +34,12 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false);
     /// <summary>Pulls from origin. Returns (success, mergeConflict, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the pull (orchestrated flows that already recompute and persist commit counts themselves).</summary>
     Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false);
+    /// <summary>
+    /// Pulls from origin only when the branch can be fast-forwarded: never merges and never rebases. Used for read-only
+    /// repositories. <c>LocalChangesBlock</c> is true when git refused because local changes would be overwritten; the
+    /// working tree is left as it was.
+    /// </summary>
+    Task<(bool Success, bool LocalChangesBlock, string? ErrorMessage)> PullFastForwardOnlyAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false);
     /// <summary>Pushes to origin. When setTracking is true, uses -u so the branch is upstreamed even when there are no commits to push. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default);
     /// <summary>Aborts a merge in progress.</summary>

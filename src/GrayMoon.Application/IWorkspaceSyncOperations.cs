@@ -56,7 +56,9 @@ public sealed record ReturnToDefaultRepositoryPlan(
     bool CanDiscardLocalBranchSafely,
     bool RemoteBranchCanBeDeleted,
     bool RequiresExplicitDiscardConfirmation,
-    string? BlockingReason);
+    string? BlockingReason,
+    // Left out because the repository is read-only (IsOnTag is then true as well: "left out of Return to Default").
+    bool IsReference = false);
 
 /// <summary>Workspace-level Return-to-Default analysis produced by <see cref="IWorkspaceSyncOperations.AnalyzeReturnToDefaultAsync"/>.</summary>
 public sealed record ReturnToDefaultPlan(

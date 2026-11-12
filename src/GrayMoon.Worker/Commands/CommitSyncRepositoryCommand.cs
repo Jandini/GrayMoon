@@ -47,7 +47,9 @@ public sealed class CommitSyncRepositoryCommand(
 
         await git.SetDivergenceBaseBranchAsync(repoPath, request.DivergenceBaseBranch, cancellationToken);
 
-        var integrate = await remoteIntegrate.IntegrateAsync(repoPath, bearerToken, cancellationToken);
+        var integrate = request.PullOnly
+            ? await remoteIntegrate.IntegratePullOnlyAsync(repoPath, bearerToken, cancellationToken)
+            : await remoteIntegrate.IntegrateAsync(repoPath, bearerToken, cancellationToken);
         if (!integrate.Success)
         {
             if (string.IsNullOrWhiteSpace(integrate.Branch))
@@ -61,11 +63,18 @@ public sealed class CommitSyncRepositoryCommand(
                 };
             }
 
-            return await BuildStateResponseAsync(repoPath, request, integrate.Branch, success: false, integrate.MergeConflict, integrate.ErrorMessage, cancellationToken);
+            var refused = await BuildStateResponseAsync(repoPath, request, integrate.Branch, success: false, integrate.MergeConflict, integrate.ErrorMessage, cancellationToken);
+            refused.LocalChangesBlockPull = integrate.LocalChangesBlockPull;
+            refused.HasLocalCommits = integrate.HasLocalCommits;
+            return refused;
         }
 
         var branch = integrate.Branch!;
         var outgoing = integrate.Outgoing;
+
+        // A read-only repository is never pushed, whatever its counts say.
+        if (request.PullOnly)
+            return await BuildStateResponseAsync(repoPath, request, branch, success: true, mergeConflict: false, errorMessage: null, cancellationToken);
 
         if (!outgoing.HasValue || outgoing.Value <= 0)
             return await BuildStateResponseAsync(repoPath, request, branch, success: true, mergeConflict: false, errorMessage: null, cancellationToken);
@@ -111,6 +120,7 @@ public sealed class CommitSyncRepositoryCommand(
             DefaultBranchAhead = state.DefaultBranchAhead,
             HasUpstream = state.HasUpstream,
             ErrorMessage = errorMessage,
+            Commit = state.HeadCommit,
             State = state
         };
     }

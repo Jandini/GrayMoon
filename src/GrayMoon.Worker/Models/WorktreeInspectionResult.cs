@@ -47,4 +47,7 @@ public sealed record WorktreeInspectionResult(
     string? FeatureBranchSha = null,
     int? FeatureBranchAheadOfDefault = null,
     bool? FeatureBranchHasUpstream = null,
-    int? FeatureBranchAheadOfUpstream = null);
+    int? FeatureBranchAheadOfUpstream = null,
+    // True when HEAD is contained in a remote-tracking branch. Probed only when the current branch has no upstream or
+    // HEAD is detached; null otherwise, and when git could not say.
+    bool? HeadOnRemote = null);

@@ -270,6 +270,11 @@ public sealed class WorkspaceFeatureOperations(
                     snapshot.Tags.TryGetValue(repoName, out var pinnedTag);
                     pinnedTag = string.IsNullOrWhiteSpace(pinnedTag) ? null : pinnedTag.Trim();
 
+                    // A read-only Source joins the Feature as a snapshot: detached at the commit it had in the same
+                    // worker snapshot, with no Feature branch. The branch it was on is kept for display only. The
+                    // Workspace repository is never read-only: it always gets a Feature branch.
+                    var isReferenceSnapshot = link.IsReference && link.Role != WorkspaceRepositoryRole.Workspace;
+
                     var row = new WorkspaceFeatureRepository
                     {
                         WorkspaceFeatureContextId = context.WorkspaceFeatureContextId,
@@ -279,8 +284,10 @@ public sealed class WorkspaceFeatureOperations(
                             ? featureRootPath
                             : WorkerPath.Combine(featureRootPath, repoName),
                         BaseCommitSha = sha,
-                        ParentBranchName = pinnedTag == null ? parentBranch : null,
+                        ParentBranchName = pinnedTag == null && !isReferenceSnapshot ? parentBranch : null,
                         PinnedTag = pinnedTag,
+                        IsReferenceSnapshot = isReferenceSnapshot,
+                        SourceBranchName = isReferenceSnapshot && pinnedTag == null ? parentBranch : null,
                         CreatedAt = now,
                         State = WorkspaceFeatureRepositoryState.Pending
                     };
@@ -339,7 +346,7 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             mainRepositoryPath = mainPath,
                             worktreePath = row.WorktreePath,
-                            branchName = FeatureBranchPolicy.ExpectedBranch(name, row.PinnedTag),
+                            branchName = FeatureBranchPolicy.ExpectedBranch(name, row.PinnedTag, row.IsReferenceSnapshot),
                             detach = row.IsDetached,
                             baseCommitSha = row.BaseCommitSha,
                             divergenceBaseBranch = row.ParentBranchName,
@@ -596,6 +603,8 @@ public sealed class WorkspaceFeatureOperations(
                         IsLocked = disk.IsLocked,
                         LockReason = disk.LockReason,
                         Warning = ComposeRemoveWarning(row, live, disk),
+                        IsReferenceSnapshot = row.IsReferenceSnapshot,
+                        BaseCommitSha = row.BaseCommitSha,
                         FeatureBranchName = featureBranchName,
                         CheckedOutBranch = checkedOutBranch,
                         IsOffFeatureBranch = isOffFeatureBranch,
@@ -1627,6 +1636,11 @@ public sealed class WorkspaceFeatureOperations(
     /// </summary>
     private static bool HasNothingUnpushed(RemoveFeatureRepositoryPlan plan)
     {
+        // A read-only snapshot has no branch and no upstream. It has nothing to lose exactly when its HEAD is still
+        // the commit it was created at; the distance of that commit from the default branch is not work.
+        if (plan.IsReferenceSnapshot)
+            return plan.IsUnchangedReferenceSnapshot;
+
         if (plan.EffectiveOutgoingCommits is > 0)
             return false;
         if (plan.EffectiveOutgoingCommits == 0)
@@ -1974,7 +1988,7 @@ public sealed class WorkspaceFeatureOperations(
                         {
                             mainRepositoryPath = mainPath,
                             worktreePath = row.WorktreePath,
-                            branchName = FeatureBranchPolicy.ExpectedBranch(featureName, row.PinnedTag),
+                            branchName = FeatureBranchPolicy.ExpectedBranch(featureName, row.PinnedTag, row.IsReferenceSnapshot),
                             detach = row.IsDetached,
                             baseCommitSha = row.BaseCommitSha,
                             divergenceBaseBranch = row.ParentBranchName,
@@ -2249,7 +2263,7 @@ public sealed class WorkspaceFeatureOperations(
                         repoName, FeatureRepositoryOperationOutcome.Failed, removeResp.Error ?? "RemoveGitWorktree failed."));
                 }
 
-                var branchName = FeatureBranchPolicy.ExpectedBranch(featureName, row.PinnedTag);
+                var branchName = FeatureBranchPolicy.ExpectedBranch(featureName, row.PinnedTag, row.IsReferenceSnapshot);
                 var defaultBranch = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var branchLink)
                     ? branchLink.DefaultBranchName
                     : null;
@@ -2422,7 +2436,7 @@ public sealed class WorkspaceFeatureOperations(
         var featureRowsByLinkId = await db.WorkspaceFeatureRepositories
             .AsNoTracking()
             .Where(r => r.WorkspaceFeatureContextId == contextId.Value)
-            .ToDictionaryAsync(r => r.WorkspaceRepositoryId, r => new { r.BaseCommitSha, r.PinnedTag }, cancellationToken);
+            .ToDictionaryAsync(r => r.WorkspaceRepositoryId, r => new { r.BaseCommitSha, r.PinnedTag, r.IsReferenceSnapshot }, cancellationToken);
 
         // Worktree create can trigger SyncCommand attribution into this Feature context before seed runs,
         // so upsert against any rows Sync already wrote (UNIQUE on context+repo / context+repo+name).
@@ -2440,7 +2454,9 @@ public sealed class WorkspaceFeatureOperations(
             var baseSha = featureRow?.BaseCommitSha;
             // Tag-pinned repositories mirror the Workspace tag identity (detached, no branch, no counts).
             var pinnedTag = featureRow?.PinnedTag;
-            var onTag = pinnedTag != null;
+            // A reference snapshot is detached like a tag pin: no branch, no counts. One taken from a branch has no
+            // tag either; its identity is the commit.
+            var onTag = pinnedTag != null || featureRow?.IsReferenceSnapshot == true;
             if (existingStates.TryGetValue(link.WorkspaceRepositoryId, out var existing))
             {
                 // The row already exists: a Sync or an earlier (interrupted) seed wrote it. Only structure is
@@ -2792,7 +2808,10 @@ public sealed class WorkspaceFeatureOperations(
     /// branch; a null count (unknown) is never treated as zero.
     /// </summary>
     private static bool IsPrMergedOrNeverCreated(RemoveFeatureRepositoryPlan p) =>
-        p.PullRequestMerged == true
+        // A read-only snapshot never has a pull request. It has no pending work while it is unchanged.
+        p.IsReferenceSnapshot
+            ? p.IsUnchangedReferenceSnapshot
+            : p.PullRequestMerged == true
         || (p.EffectiveAheadOfDefault == 0 && p.PullRequestNumber is null or 0 && string.IsNullOrWhiteSpace(p.PullRequestState));
 
     /// <summary>

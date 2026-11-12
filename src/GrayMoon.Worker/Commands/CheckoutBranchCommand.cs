@@ -5,7 +5,7 @@ using GrayMoon.Worker.Services;
 
 namespace GrayMoon.Worker.Commands;
 
-public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse>
+public sealed class CheckoutBranchCommand(IGitService git, IGitRepositoryReader reader) : ICommandHandler<CheckoutBranchRequest, CheckoutBranchResponse>
 {
     public async Task<CheckoutBranchResponse> ExecuteAsync(CheckoutBranchRequest request, CancellationToken cancellationToken = default)
     {
@@ -31,7 +31,8 @@ public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<Che
             return new CheckoutBranchResponse
             {
                 Success = false,
-                ErrorMessage = errorMessage ?? "Failed to checkout branch"
+                ErrorMessage = errorMessage ?? "Failed to checkout branch",
+                LocalChangesBlockCheckout = GitService.IsBlockedByLocalChanges(errorMessage, null)
             };
         }
 
@@ -43,7 +44,8 @@ public sealed class CheckoutBranchCommand(IGitService git) : ICommandHandler<Che
         return new CheckoutBranchResponse
         {
             Success = true,
-            CurrentBranch = currentBranch
+            CurrentBranch = currentBranch,
+            Commit = await reader.GetHeadCommitAsync(repoPath, cancellationToken)
         };
     }
 }

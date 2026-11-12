@@ -42,8 +42,11 @@ public sealed class WorkspaceFeatureRepository
     [MaxLength(200)]
     public string? PinnedTag { get; set; }
 
-    /// <summary>True when the Feature pins this repository to a tag: its worktree is detached and it has no Feature branch.</summary>
-    public bool IsDetached => PinnedTag != null;
+    /// <summary>
+    /// True when the worktree is detached and the repository has no Feature branch: the Feature pins it to a tag, or
+    /// holds it as a reference snapshot.
+    /// </summary>
+    public bool IsDetached => PinnedTag != null || IsReferenceSnapshot;
 
     /// <summary>
     /// True when this Feature holds the repository as a reference snapshot: the Source was a reference repository

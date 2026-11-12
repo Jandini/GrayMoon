@@ -296,7 +296,7 @@ public sealed partial class WorkspaceRepositories
             IReadOnlyList<CreatePullRequestResult> results;
             try
             {
-                results = await PullRequestOperations.CreateAsync(requests, progress, ct);
+                results = await PullRequestOperations.CreateAsync(WorkspaceId, requests, progress, ct);
             }
             catch (OperationCanceledException)
             {

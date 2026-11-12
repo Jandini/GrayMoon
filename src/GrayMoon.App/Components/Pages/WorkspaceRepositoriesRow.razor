@@ -124,7 +124,31 @@
             </td>
         }
         <td class="col-branch">
-            @if (Link.IsOnTag)
+            @if (Link.IsReferenceSnapshot)
+            {
+                // A read-only snapshot in a Feature: where the Source was, that it is read-only, and the commit it stays at.
+                var snapshotSource = Link.IsOnTag ? Link.CheckedOutTag : Link.FeatureSourceBranchName;
+                var snapshotCommit = string.IsNullOrEmpty(Link.HeadCommit) ? null : Link.HeadCommit[..Math.Min(7, Link.HeadCommit.Length)];
+                <div class="branch-container">
+                    <span class="branch-inner branch-inner--disabled"
+                          title="Read-only snapshot. It stays at the commit the Feature was created from; use the Workspace to move the repository.">
+                        @if (Link.IsOnTag)
+                        {
+                            <i class="bi bi-tag me-1" aria-hidden="true"></i>
+                        }
+                        @if (!string.IsNullOrEmpty(snapshotSource))
+                        {
+                            @snapshotSource<span class="text-muted"> (source)</span>
+                        }
+                    </span>
+                    <span class="badge bg-secondary ms-1" title="Read-only repository">ro</span>
+                    @if (snapshotCommit is not null)
+                    {
+                        <span class="text-muted small font-monospace ms-1" title="@Link.HeadCommit">@snapshotCommit</span>
+                    }
+                </div>
+            }
+            else if (Link.IsOnTag)
             {
                 <div class="branch-container">
                     <span class="branch-inner branch-inner--tag"

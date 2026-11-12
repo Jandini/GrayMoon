@@ -240,7 +240,7 @@ public sealed partial class WorkspaceGitChanges
 
         var mode = OfferedCommitMode;
         var targets = _view.Repositories
-            .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount))
+            .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r))
             .ToList();
         if (targets.Count == 0)
         {
@@ -308,7 +308,7 @@ public sealed partial class WorkspaceGitChanges
             if (_disposed || CurrentCommitGenerationKey != key)
                 return;
 
-            var current = (_view?.Repositories ?? []).Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount));
+            var current = (_view?.Repositories ?? []).Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r));
             var scopeChanged = OfferedCommitMode != mode
                                || !string.Equals(fingerprint, AiTextApplyPolicy.CommitScopeFingerprint(mode, current), StringComparison.Ordinal);
             decision = AiTextApplyPolicy.Decide(

@@ -1,6 +1,7 @@
 using GrayMoon.App.Data;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,7 +19,8 @@ public sealed class WorkspaceGitChangesOperations(
     IWorkspaceGitChangesReadService readService,
     IGitChangesWorkerClient workerClient,
     IDbContextFactory<AppDbContext> dbContextFactory,
-    IWorkspaceContextPathResolver pathResolver) : IWorkspaceGitChangesOperations
+    IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceRepositoryOperationPolicy operationPolicy) : IWorkspaceGitChangesOperations
 {
     public async Task<WorkspaceGitChangesView?> GetAsync(
         int workspaceId,
@@ -36,15 +38,26 @@ public sealed class WorkspaceGitChangesOperations(
         return await readService.GetContextAsync(workspaceId, contextId, cancellationToken);
     }
 
-    public Task<GitChangesCommitResult> CommitAsync(
+    /// <summary>
+    /// Commits in one repository. A read-only repository is refused here, so the page, the REST endpoint and any
+    /// later caller get the same answer. Staging and unstaging in it stay possible: they change nothing that is shared.
+    /// </summary>
+    public async Task<GitChangesCommitResult> CommitAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
         string commitMessage,
         bool stageAllFirst,
         CancellationToken cancellationToken)
-        => WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName, workspaceRepositoryName) =>
+    {
+        var decision = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.CommitGitChanges, repositoryId, cancellationToken: cancellationToken);
+        if (!decision.IsAllowed)
+            return Fail<GitChangesCommitResult>(decision.Message ?? "The repository cannot be committed.");
+
+        return await WithResolvedRepo(workspaceId, contextId, repositoryId, cancellationToken, (root, workspaceName, repoName, workspaceRepositoryName) =>
             workerClient.CommitAsync(root, workspaceName, repoName, workspaceRepositoryName, commitMessage, stageAllFirst, cancellationToken));
+    }
 
     public Task<GitChangesMutationResult> StageAsync(
         int workspaceId,

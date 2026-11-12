@@ -49,18 +49,21 @@ public sealed class FeatureBranchGuard(IDbContextFactory<AppDbContext> dbContext
         if (context is null || context.Kind == WorkspaceFeatureContextKind.Workspace || context.FeatureName is null)
             return null;
 
-        var pinnedTag = await db.WorkspaceFeatureRepositories
+        var row = await db.WorkspaceFeatureRepositories
             .AsNoTracking()
             .Where(r => r.WorkspaceFeatureContextId == contextId.Value
                         && r.WorkspaceRepository!.RepositoryId == repositoryId)
-            .Select(r => r.PinnedTag)
+            .Select(r => new { r.PinnedTag, r.IsReferenceSnapshot })
             .FirstOrDefaultAsync(cancellationToken);
+        var pinnedTag = row?.PinnedTag;
+        var isReferenceSnapshot = row?.IsReferenceSnapshot ?? false;
 
         return FeatureBranchPolicy.Evaluate(
             action,
-            FeatureBranchPolicy.ExpectedBranch(context.FeatureName, pinnedTag),
+            FeatureBranchPolicy.ExpectedBranch(context.FeatureName, pinnedTag, isReferenceSnapshot),
             pinnedTag,
             target,
-            isTag);
+            isTag,
+            isReferenceSnapshot);
     }
 }

@@ -52,7 +52,8 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 
-    private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0) ?? 0;
+    /// <summary>Repositories a Commit Staged would commit. A read-only repository's staged files do not count.</summary>
+    private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 && !r.IsReference) ?? 0;
     private int ChangedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
 
     private static readonly IReadOnlySet<string> EmptyPushPackageIds = new HashSet<string>();
@@ -138,11 +139,21 @@ public sealed partial class WorkspaceGitChanges
         }
 
         var targets = (_view?.Repositories ?? [])
-            .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount))
+            .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r))
             .ToList();
 
         if (targets.Count == 0)
         {
+            // Only read-only repositories have something to commit: say why nothing happens.
+            var referenceCount = (_view?.Repositories ?? [])
+                .Count(r => r.IsReference && WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount));
+            if (referenceCount > 0)
+            {
+                ToastService.Show(referenceCount == 1
+                    ? "Nothing to commit: the repository with changes is read-only."
+                    : $"Nothing to commit: the {referenceCount} repositories with changes are read-only.");
+            }
+
             return;
         }
 
@@ -385,7 +396,8 @@ public sealed partial class WorkspaceGitChanges
                         cancellationToken: ct));
                 result.ShowRepoErrors(
                     msg => SafeInvoke(() => ToastService.ShowError(msg)),
-                    warning => SafeInvoke(() => ToastService.ShowWarning(warning)));
+                    warning => SafeInvoke(() => ToastService.ShowWarning(warning)),
+                    skipped => SafeInvoke(() => ToastService.Show(skipped)));
             }
         });
     }
@@ -430,11 +442,28 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var targets = (_view?.Repositories ?? [])
+        var inSection = (_view?.Repositories ?? [])
             .Where(r => unstageStagedSection ? r.StagedCount > 0 : r.ChangedCount > 0)
             .ToList();
 
-        if (targets.Count == 0 || IsJobRunning)
+        // Across several repositories a read-only one is left out. Alone in the section it is the repository the
+        // user means, and its own stage/unstage action does the same.
+        var leftOut = inSection.Count > 1 ? inSection.Where(r => r.IsReference).ToList() : [];
+        var targets = inSection.Except(leftOut).ToList();
+
+        if (IsJobRunning)
+        {
+            return;
+        }
+
+        if (leftOut.Count > 0)
+        {
+            ToastService.Show(leftOut.Count == 1
+                ? $"{leftOut[0].RepositoryName} is read-only and was left out."
+                : $"{leftOut.Count} read-only repositories were left out.");
+        }
+
+        if (targets.Count == 0)
         {
             return;
         }

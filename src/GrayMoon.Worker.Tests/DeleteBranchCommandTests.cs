@@ -61,6 +61,7 @@ public sealed class DeleteBranchCommandTests
         public Task<(bool Success, string? ErrorMessage)> FetchMinimalAsync(string repoPath, string branchName, string? defaultBranchOriginRef, string? bearerToken, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
         public Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
+        public Task<(bool Success, bool LocalChangesBlock, string? ErrorMessage)> PullFastForwardOnlyAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AbortMergeAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct) => throw new NotImplementedException();

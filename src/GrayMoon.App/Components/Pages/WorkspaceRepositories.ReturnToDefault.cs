@@ -1,5 +1,6 @@
 using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Services;
 
 namespace GrayMoon.App.Components.Pages;
@@ -125,7 +126,9 @@ public sealed partial class WorkspaceRepositories
         }
         if (string.IsNullOrWhiteSpace(repositoryName))
             return Task.CompletedTask;
-        if (!IsRepoAllowed(repositoryId, RepositoryOperation.ReturnToDefault))
+        // One named repository: a read-only repository may return to its default branch, a tag checkout may not.
+        var link = TryGetLink(repositoryId);
+        if (link != null && !link.Allows(RepositoryOperation.ReturnToDefault, _isFeatureContext, RepositoryOperationScope.Individual))
         {
             ToastService.Show(TagBlockedActionMessage);
             CloseSwitchBranchModal();
@@ -133,6 +136,9 @@ public sealed partial class WorkspaceRepositories
         }
 
         CloseSwitchBranchModal();
+
+        if (link != null && !Allows(link, RepositoryOperation.ReturnToDefaultCleanup))
+            return SwitchReadOnlyRepositoryToDefaultAsync(repositoryId, currentBranchName, defaultBranch);
 
         // Same overlay as a level or Return all: analysis fetches branch state through the Worker,
         // and that output only reaches the loading-overlay terminal inside a page job.
@@ -160,7 +166,7 @@ public sealed partial class WorkspaceRepositories
 
                 if (repo.IsOnTag)
                 {
-                    SafeInvoke(() => ToastService.Show(TagBlockedActionMessage));
+                    SafeInvoke(() => ToastService.Show(repo.IsReference ? RepositoryOperationPolicy.ReferenceMessage : TagBlockedActionMessage));
                     return;
                 }
 
@@ -248,6 +254,42 @@ public sealed partial class WorkspaceRepositories
                     SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
                 }
             });
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Return to Default on a read-only repository is a plain switch to the default branch. No branch is deleted,
+    /// locally or on the remote, and nothing is discarded, so there is no analysis and no options dialog.
+    /// </summary>
+    private Task SwitchReadOnlyRepositoryToDefaultAsync(int repositoryId, string currentBranchName, string? defaultBranchName)
+    {
+        var jobContextId = RequireSelectedContextId();
+        StartPageJob(ReturningToDefaultMessage(defaultBranchName), async (job, ct) =>
+        {
+            var outcome = await ScopedExecutor.ExecuteAsync<IWorkspaceBranchOperations, BranchHttpOutcome>(
+                svc => svc.ReturnToDefaultAsync(
+                    WorkspaceId, jobContextId, repositoryId, currentBranchName, deleteRemoteBranch: false, allowForceDeleteLocalBranch: false, ct));
+
+            if (outcome.IsSuccessStatus)
+            {
+                SafeInvoke(() => ClearRepositoryError(repositoryId));
+                await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
+            }
+            else
+            {
+                SafeInvoke(() => SetRepositoryError(repositoryId, outcome.ErrorText ?? "Failed to return to default branch."));
+            }
+        },
+        new PageJobOptions
+        {
+            RefreshOnSuccess = false,
+            OnError = ex =>
+            {
+                Logger.LogError(ex, "Error returning to default branch for repository {RepositoryId}", repositoryId);
+                SafeInvoke(() => SetRepositoryError(repositoryId, "An error occurred while returning to default branch. The GrayMoon Worker may be offline."));
+            }
+        });
 
         return Task.CompletedTask;
     }

@@ -204,6 +204,64 @@ public sealed class InspectWorktreeMainCheckoutTests : IDisposable
         Assert.Null(result.AheadOfDefault);
     }
 
+    [Fact]
+    public async Task HeadOnRemote_is_not_probed_when_the_branch_has_an_upstream()
+    {
+        var repo = PushedClone("hor-upstream");
+
+        var result = await InspectMainAsync(repo);
+
+        Assert.True(result.HasUpstream);
+        Assert.Null(result.HeadOnRemote);
+    }
+
+    [Fact]
+    public async Task HeadOnRemote_is_true_for_a_branch_without_upstream_whose_commit_is_on_the_remote()
+    {
+        var repo = PushedClone("hor-pushed");
+        Git(repo, "checkout -q -b local-only");
+
+        var result = await InspectMainAsync(repo);
+
+        Assert.Null(result.Error);
+        Assert.False(result.HasUpstream);
+        Assert.True(result.HeadOnRemote);
+    }
+
+    [Fact]
+    public async Task HeadOnRemote_is_false_for_a_branch_without_upstream_that_has_a_local_commit()
+    {
+        var repo = PushedClone("hor-local");
+        Git(repo, "checkout -q -b local-only");
+        await File.WriteAllTextAsync(Path.Combine(repo, "a.txt"), "1\n");
+        Git(repo, "add a.txt");
+        Git(repo, "commit -q -m local-only");
+
+        var result = await InspectMainAsync(repo);
+
+        Assert.Null(result.Error);
+        Assert.False(result.HasUpstream);
+        Assert.False(result.HeadOnRemote);
+    }
+
+    [Fact]
+    public async Task HeadOnRemote_tells_a_detached_head_on_a_pushed_commit_from_one_with_a_local_commit()
+    {
+        var repo = PushedClone("hor-detached");
+        Git(repo, "checkout -q --detach");
+
+        var pushed = await InspectMainAsync(repo);
+        await File.WriteAllTextAsync(Path.Combine(repo, "a.txt"), "1\n");
+        Git(repo, "add a.txt");
+        Git(repo, "commit -q -m detached-local");
+        var local = await InspectMainAsync(repo);
+
+        Assert.Null(pushed.Branch);
+        Assert.True(pushed.HeadOnRemote);
+        Assert.Null(local.Branch);
+        Assert.False(local.HeadOnRemote);
+    }
+
     private Task<InspectWorktreeResponse> InspectMainAsync(string repo) =>
         _inspect.ExecuteAsync(new InspectWorktreeRequest
         {

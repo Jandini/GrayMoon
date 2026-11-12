@@ -918,7 +918,8 @@
             cancellationToken: ct);
         pushResult.ShowRepoErrors(
             msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); },
-            warning => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(warning)); });
+            warning => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(warning)); },
+                    skipped => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(skipped)); });
     }
 
     private Task OnPullBadgeClickAsync(WorkspaceNotification n, NotificationRepo repo)
@@ -1048,7 +1049,8 @@
                     cancellationToken: ct);
                 result.ShowRepoErrors(
                     msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); },
-                    warning => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(warning)); });
+                    warning => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(warning)); },
+                    skipped => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(skipped)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1105,7 +1107,8 @@
                 var syncOps = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
                 var contextId = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, ct);
                 var result = await syncOps.PullAsync(workspaceId, contextId, repositoryId, job.ToOperationProgress(), ct);
-                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
+                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); },
+                    showInformation: skipped => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(skipped)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1157,7 +1160,8 @@
                 var result = repoIds.Count == 1
                     ? await syncOps.PullAsync(workspaceId, contextId, repoIds[0], job.ToOperationProgress(), ct)
                     : await syncOps.PullLevelAsync(workspaceId, contextId, repoIds, job.ToOperationProgress(), ct);
-                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); });
+                result.ShowRepoErrors(msg => { if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(msg)); },
+                    showInformation: skipped => { if (!_disposed) _ = InvokeAsync(() => ToastService.Show(skipped)); });
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

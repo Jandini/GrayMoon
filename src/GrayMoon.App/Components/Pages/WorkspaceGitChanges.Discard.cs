@@ -264,20 +264,39 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        var targets = (_view?.Repositories ?? []).Where(r => r.ChangedCount > 0).ToList();
-        if (targets.Count == 0 || IsJobRunning)
+        // Undo across all repositories never touches a read-only one; its own Undo action still does.
+        var changed = (_view?.Repositories ?? []).Where(r => r.ChangedCount > 0).ToList();
+        var leftOut = changed.Where(r => r.IsReference).ToList();
+        var targets = changed.Except(leftOut).ToList();
+        if (IsJobRunning)
         {
+            return;
+        }
+
+        if (targets.Count == 0)
+        {
+            if (leftOut.Count > 0)
+            {
+                ToastService.Show("Nothing to undo: the repositories with changes are read-only. Use Undo on the repository itself.");
+            }
+
             return;
         }
 
         var fileCount = targets.Sum(r => r.ChangedCount);
         var message = $"Undo all changes across {targets.Count} repositor{(targets.Count == 1 ? "y" : "ies")} ({fileCount} file{(fileCount == 1 ? "" : "s")})?";
-        var details = new ConfirmDetailGroup[]
+        var details = new List<ConfirmDetailGroup>
         {
             new("Repositories", targets
                 .Select(r => new ConfirmDetailItem(r.RepositoryName, FileCountLabel(r.ChangedCount)))
                 .ToList()),
         };
+        if (leftOut.Count > 0)
+        {
+            details.Add(new("Read-only, left as they are", leftOut
+                .Select(r => new ConfirmDetailItem(r.RepositoryName, FileCountLabel(r.ChangedCount)))
+                .ToList()));
+        }
 
         ShowConfirm(message, () =>
         {

@@ -42,6 +42,13 @@ internal sealed class InspectWorktreeWorkerResponse
     [JsonPropertyName("error")]
     public string? Error { get; set; }
 
+    /// <summary>
+    /// True when HEAD is contained in a remote-tracking branch. Reported only when the branch has no upstream or HEAD
+    /// is detached. Null otherwise, when git could not say, and from an older Worker.
+    /// </summary>
+    [JsonPropertyName("headOnRemote")]
+    public bool? HeadOnRemote { get; set; }
+
     /// <summary>True when the requested Feature branch exists. Null when none was requested, or the Worker is older than this unit (09 SB-2).</summary>
     [JsonPropertyName("featureBranchExists")]
     public bool? FeatureBranchExists { get; set; }

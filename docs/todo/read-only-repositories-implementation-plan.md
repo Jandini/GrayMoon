@@ -402,6 +402,49 @@ Check-in points: after WP1 with WP4-WP7, after WP2-WP3, after WP8-WP9. Each grou
 
 **Check-in.**
 
+### Phase 1, first group as built: WP1, WP4-WP7 (2026-11-12)
+
+Not committed (base `d0f00d30`). Results are in the test log, "Phase 1, first group". The manual smoke list was **not run**. Nothing in the product can set the flag yet (WP8, WP9): everything below was exercised only by tests that seed `IsReference` in the database.
+
+**Done**
+
+- WP4, bulk: create branch and Prepare Workspace, Workspace-wide checkout, dependency update, version files, push, pull level, Return to Default (bulk) and the Actions page bulk run and rerun leave read-only repositories out and return them in `Skipped`. Prepare with only read-only repositories selected fails with its own message.
+- WP4, single repository: the row actions are refused with the policy message (the checks were already in the committed part). Pull request create, merge and bulk merge refuse a read-only repository in `WorkspacePullRequestOperations`; `CreateAsync` gained `workspaceId` for that.
+- WP4, skips visible (4.4): `Skipped` is part of the REST bodies (the reason is written by name), `RepositorySkipSummary.Describe` builds the one sentence ("2 read-only repositories skipped: a, b."), and `ShowRepoErrors` has an information action that is used only when there is no error and no warning. Wired on the Repositories page (push, update, Prepare, Workspace-wide checkout, Update and Push notice), the notification popup and the Git Changes push.
+- WP5, pull-only: `CommitSyncRepositoryRequest.pullOnly`, `GitService.PullFastForwardOnlyAsync` (`git pull --ff-only`), `GitRemoteIntegrateService.IntegratePullOnlyAsync`. A branch with local commits is refused before the pull; a pull blocked by local changes returns `localChangesBlockPull`; the command never pushes; the response carries `commit`. `WorkspaceCommitSyncHandler` sets the flag per repository, for the single pull and the level pull.
+- WP5, checkout: `CheckoutBranchResponse` carries `commit` and `localChangesBlockCheckout` (Worker and App mirror).
+- WP6: a read-only Source becomes a detached snapshot in a new Feature (`IsReferenceSnapshot`, `SourceBranchName`, no Feature branch, no parent branch). The Feature guard refuses every checkout in a snapshot; branch occupancy, the state writer, Switch Branch, the grid row, Remove Feature (an unchanged snapshot has nothing to lose) and the pin update know about snapshots.
+- WP7: the read service, the tree (`ro` badge), the commit planner (`ReferenceReason`), Commit, Stage All, Unstage All, Discard All, the AI commit message and `WorkspaceGitChangesOperations.CommitAsync` treat a read-only repository as never committed and left out of bulk actions; staging, unstaging and discarding one named repository still work.
+
+**Deviations**
+
+- Tag skips are now shown too, not only read-only ones: the summary names repositories on a tag in the same toast. Before, a tag skip was silent.
+- `UpdateAllVersionsAsync` now also leaves out repositories on a tag, because it goes through the same policy call.
+- Bulk discard is enforced on the Git Changes page only. The page calls the Worker client directly, so there is no service to put the check in.
+- The fast-forward pull is sent as `pull --ff-only origin <branch>` in the same argument style as the existing pull, not through `ArgumentList` with `--`. A branch name that starts with `-` is refused.
+- The wording of the two pull refusals is new (`GitRemoteIntegrateService.LocalCommitsMessage`, `LocalChangesBlockPullMessage`); the note's exact text was not found.
+- The enum `RepositoryOperationReason` is written as a string in JSON by an attribute on the enum, so it is a string everywhere it is serialized.
+
+**Not done in this group**
+
+- WP5 activation check, App half: the rule per checkout (block, warn, pass and the messages) is not written. Its only caller is the mode change in WP8, so it is built there. The Worker half is done, see "Leftovers closed" below.
+- WP5 restore at the recorded revision: needs `ReadPinnedRevision` from WP2. Moves to the WP2-WP3 group.
+- WP5: the App does not yet use `commit` or `localChangesBlockCheckout` from the checkout response (recording is WP8; the bulk checkout already continues with the other repositories on any failure).
+- Tests listed under "Not run" in the test log.
+
+**Leftovers closed (2026-11-12, after the first check-in)**
+
+- Package wait: `PackageProducerDiagnostic.IsReference`; the producer status in the diagnostics is `ReadOnly`; the timeout message names the read-only repository that produces a missing package and no longer tells the user to push again (`PackageWaitTimeout.FormatMessage`).
+- Return to Default on one read-only row: the Repositories page asks the policy in Individual scope and calls `IWorkspaceBranchOperations.ReturnToDefaultAsync`, which is a plain checkout of the default branch (that service path was already in place). No analysis, no options dialog, no branch deleted. `ReturnToDefaultRepositoryPlan` gained `IsReference`; in a bulk analysis a read-only repository is still reported as left out (`IsOnTag` true, as before) and the toast uses the read-only message.
+- Worker half of the activation check: `InspectWorktree` returns `headOnRemote` (`git branch -r --contains HEAD`). It is probed only when the branch has no upstream or HEAD is detached, and is null otherwise. The App mirror has the field.
+- `RefreshProjects` keeps a read-only repository and the update plan and dependency sync leave it out: now a test.
+
+**Checked, no change needed**
+
+- `GetCommonBranchesAsync` already excluded read-only repositories (`wr.Allows(RepositoryOperation.WorkspaceCheckout)`); the earlier "not done" line was wrong.
+- Actions row list (`WorkspaceActions.Loading.cs`): rows are built from the Workspace links, which carry `IsReference`, and every run and rerun guard reads the row's link. Nothing to add.
+- Pipelined push lane: the lane leaves read-only repositories out (`LoadPushSkippedRepoIdsAsync`), and `UpdateAndPushResult.Skipped` already names them through the update half, which evaluates the same set (tag or read-only). Adding them to the push half as well would list every repository twice in the REST body. Deviation from the plan text; not covered by a test.
+
 ### WP8 - Mode-change facade and recording
 
 - `IWorkspaceReferenceOperations` (`GrayMoon.Application`), implementation in `Services/Application/`:

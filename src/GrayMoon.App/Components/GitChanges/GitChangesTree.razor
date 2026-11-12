@@ -62,6 +62,10 @@
                     @if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
                         <span class="git-changes-tree__repo-name">@row.Label</span>
+                        @if (row.IsReference)
+                        {
+                            <span class="git-changes-tree__reference-badge" title="Read-only repository. It is not committed or pushed, and actions on all repositories leave it out.">ro</span>
+                        }
                         @if (!string.IsNullOrEmpty(row.BranchName))
                         {
                             <span class="git-changes-tree__repo-branch" title="@row.BranchName">@row.BranchName</span>

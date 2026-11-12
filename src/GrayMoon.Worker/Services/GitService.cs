@@ -426,6 +426,37 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, false, null);
     }
 
+    public async Task<(bool Success, bool LocalChangesBlock, string? ErrorMessage)> PullFastForwardOnlyAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName) || branchName.StartsWith('-'))
+            return (false, false, "Invalid repository path or branch name");
+
+        var args = $"{GetHooksConfigPrefix(skipHooks)}pull --ff-only origin {branchName}";
+
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Pull, args, repoPath, bearerToken, ct);
+        sw.Stop();
+
+        if (exitCode != 0)
+        {
+            var combinedOutput = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
+            var localChangesBlock = IsBlockedByLocalChanges(stdout, stderr);
+            logger.LogWarning("Git fast-forward pull refused in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, LocalChangesBlock={LocalChangesBlock}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, args, exitCode, localChangesBlock, stdout, stderr);
+            return (false, localChangesBlock, combinedOutput);
+        }
+
+        logger.LogInformation("Git fast-forward pull completed in {ElapsedMs}ms for {RepoPath}. Args={Args}, Branch={Branch}", sw.ElapsedMilliseconds, repoPath, args, branchName);
+        return (true, false, null);
+    }
+
+    /// <summary>Git's refusal to update the working tree because tracked or untracked local files are in the way.</summary>
+    internal static bool IsBlockedByLocalChanges(string? stdout, string? stderr)
+    {
+        var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
+        return combined.Contains("would be overwritten", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("commit your changes or stash them", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))

@@ -375,6 +375,8 @@ public sealed partial class WorkspacePushService
     {
         if (producer == null)
             return "Unknown";
+        if (producer.IsReference && !pushedIds.Contains(producer.ProducerRepositoryId))
+            return "ReadOnly";
         if (!producer.InCurrentOperation)
             return "NotInThisOperation";
         return pushedIds.Contains(producer.ProducerRepositoryId) ? "Succeeded" : "NotPushed";

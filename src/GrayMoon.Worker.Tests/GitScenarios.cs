@@ -105,6 +105,37 @@ internal static class GitScenarios
         return Path.Combine(root, "remote.git");
     }
 
+    /// <summary>
+    /// <c>origin.git</c>, a clone at <c>ws/repo</c> on <c>main</c> with its upstream set, and one commit on the remote
+    /// that the clone does not have yet: it changes <c>README.md</c> and was pushed from the <c>publisher</c> clone.
+    /// The clone has not fetched it. Returns the clone's path.
+    /// </summary>
+    public static string CloneBehindRemote(string root)
+    {
+        var spec = new CommitSpec();
+        GitTemplateCache.CopyTo("clone-behind-remote", root, template =>
+        {
+            var origin = Path.Combine(template, "origin.git");
+            var workspace = Path.Combine(template, "ws");
+            Directory.CreateDirectory(origin);
+            Directory.CreateDirectory(workspace);
+            Git(origin, "init --bare --initial-branch=main");
+            Git(workspace, $"clone \"{origin}\" repo");
+            var repo = Path.Combine(workspace, "repo");
+            Identify(repo, spec);
+            Commit(repo, spec);
+            Git(repo, "push -u origin main");
+
+            Git(template, $"clone \"{origin}\" publisher");
+            var publisher = Path.Combine(template, "publisher");
+            Identify(publisher, spec);
+            Commit(publisher, spec with { Content = "from the remote\n", Message = "remote change" });
+            Git(publisher, "push origin main");
+        });
+
+        return Path.Combine(root, "ws", "repo");
+    }
+
     private static void Identify(string repo, CommitSpec spec)
     {
         Git(repo, $"config user.email {spec.UserEmail}");

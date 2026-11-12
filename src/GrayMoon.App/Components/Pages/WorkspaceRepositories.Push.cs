@@ -222,6 +222,13 @@ public sealed partial class WorkspaceRepositories
         return (plan.RepositoryIds, plan.RequiredPackageIds);
     }
 
+    /// <summary>Tells the user which repositories a bulk action left out (read-only, on a tag). Information only.</summary>
+    private void ShowSkippedRepositories(IReadOnlyList<RepositorySkip> skipped)
+    {
+        if (RepositorySkipSummary.Describe(skipped) is { } message)
+            SafeInvoke(() => ToastService.Show(message));
+    }
+
     private async Task ExecutePushCoreAsync(
         GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId,
         BackgroundJobHandle job,
@@ -247,6 +254,8 @@ public sealed partial class WorkspaceRepositories
                     runId: runId,
                     restorePackages: restorePackages));
             ApplyPushResult(repoIds, result);
+            if (result.Success && !result.HasWarnings)
+                ShowSkippedRepositories(result.Skipped);
         }
         catch (OperationCanceledException)
         {

@@ -95,4 +95,12 @@ public sealed class InspectWorktreeResponse
     /// <summary>Commits on the Feature branch not on its upstream; null when there is no upstream, the branch is missing, or it was not requested.</summary>
     [JsonPropertyName("featureBranchAheadOfUpstream")]
     public int? FeatureBranchAheadOfUpstream { get; set; }
+
+    /// <summary>
+    /// True when HEAD is contained in at least one remote-tracking branch (<c>git branch -r --contains HEAD</c>), so the
+    /// commit is not only local. Probed only when the current branch has no upstream or HEAD is detached; null
+    /// otherwise, and when git could not say. Nothing is fetched: it is judged against the local remote-tracking refs.
+    /// </summary>
+    [JsonPropertyName("headOnRemote")]
+    public bool? HeadOnRemote { get; set; }
 }

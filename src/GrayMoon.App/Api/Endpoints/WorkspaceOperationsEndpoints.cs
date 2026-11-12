@@ -245,6 +245,7 @@ public static class WorkspaceOperationsEndpoints
                     success = false,
                     error = PrepareWorkspaceResult.BranchesStoppedMessage,
                     branchErrors = prepared.BranchErrors,
+                    skipped = prepared.Skipped,
                 });
             }
 
@@ -254,13 +255,13 @@ public static class WorkspaceOperationsEndpoints
             if (!prepared.PushPending)
             {
                 return prepared.Success
-                    ? Results.Ok(new { success = true, pushed = false })
-                    : Results.BadRequest(new { success = false, error = "Update failed." });
+                    ? Results.Ok(new { success = true, pushed = false, skipped = prepared.Skipped })
+                    : Results.BadRequest(new { success = false, error = "Update failed.", skipped = prepared.Skipped });
             }
 
             var push = await pushOperations.PushPendingAsync(workspaceId, contextId, synchronizedPush: true, progress, ct);
             return push.Success
-                ? Results.Ok(new { success = true, pushed = true })
+                ? Results.Ok(new { success = true, pushed = true, skipped = prepared.Skipped.Concat(push.Skipped).DistinctBy(skip => skip.RepositoryId) })
                 : Results.BadRequest(push);
         }, cancellationToken);
     }
@@ -362,7 +363,7 @@ public static class WorkspaceOperationsEndpoints
 
         return WorkspaceCommandHttp.RunExclusiveAsync(runner, workspaceId, "Creating pull requests...", async (_, ct) =>
         {
-            var results = await operations.CreateAsync(body.Requests, progress: null, ct);
+            var results = await operations.CreateAsync(workspaceId, body.Requests, progress: null, ct);
             return Results.Ok(results);
         }, cancellationToken);
     }

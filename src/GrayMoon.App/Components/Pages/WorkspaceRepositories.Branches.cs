@@ -264,6 +264,8 @@ public sealed partial class WorkspaceRepositories
                 }
                 if (result.OccupancyCheckDegraded)
                     ToastService.Show("Could not check worktrees. Branch switch was attempted for every repository.");
+                else if (RepositorySkipSummary.Describe(result.Skipped) is { } skipped)
+                    ToastService.Show(skipped);
             });
 
         }, new PageJobOptions

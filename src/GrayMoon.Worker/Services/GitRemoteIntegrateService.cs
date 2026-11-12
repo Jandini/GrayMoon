@@ -10,7 +10,14 @@ public sealed record GitRemoteIntegrateResult(
     int? Incoming,
     bool HasUpstream,
     bool MergeConflict,
-    string? ErrorMessage);
+    string? ErrorMessage)
+{
+    /// <summary>Pull-only: git refused the fast-forward because local changes would be overwritten.</summary>
+    public bool LocalChangesBlockPull { get; init; }
+
+    /// <summary>Pull-only: the branch has commits that are not on its remote branch, so nothing was pulled.</summary>
+    public bool HasLocalCommits { get; init; }
+}
 
 /// <summary>
 /// Fetches from origin and pulls incoming commits before push or commit-sync workflows.
@@ -19,6 +26,59 @@ public sealed record GitRemoteIntegrateResult(
 /// </summary>
 public sealed class GitRemoteIntegrateService(IGitService git, IGitRepositoryReader reader)
 {
+    public const string LocalChangesBlockPullMessage =
+        "Local changes block the pull. Nothing was changed. Discard the changes in this repository, then pull again.";
+
+    public static string LocalCommitsMessage(int outgoing) =>
+        outgoing == 1
+            ? "The repository is read-only and its branch has 1 local commit that is not on the remote. Nothing was pulled."
+            : $"The repository is read-only and its branch has {outgoing} local commits that are not on the remote. Nothing was pulled.";
+
+    /// <summary>
+    /// Fetch, then take incoming commits by fast-forward only. For a read-only repository: nothing is merged, and a
+    /// branch with commits of its own is refused before the pull so a diverged history is never touched.
+    /// </summary>
+    public async Task<GitRemoteIntegrateResult> IntegratePullOnlyAsync(
+        string repoPath,
+        string? bearerToken,
+        CancellationToken cancellationToken = default)
+    {
+        var (fetchSuccess, fetchError) = await git.FetchAsync(repoPath, includeTags: true, bearerToken, cancellationToken);
+        if (!fetchSuccess)
+            return new GitRemoteIntegrateResult(false, null, null, null, null, false, false, fetchError ?? "Fetch failed");
+
+        var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(branch))
+            return new GitRemoteIntegrateResult(false, null, null, null, null, false, false, "Could not determine branch name");
+
+        var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
+
+        if (outgoing is > 0)
+        {
+            return new GitRemoteIntegrateResult(false, branch, null, outgoing, incoming, hasUpstream, false, LocalCommitsMessage(outgoing.Value))
+            {
+                HasLocalCommits = true,
+            };
+        }
+
+        if (!incoming.HasValue || incoming.Value <= 0)
+            return new GitRemoteIntegrateResult(true, branch, null, outgoing, incoming, hasUpstream, false, null);
+
+        var (pullSuccess, localChangesBlock, pullError) = await git.PullFastForwardOnlyAsync(repoPath, branch, bearerToken, cancellationToken, skipHooks: true);
+        if (!pullSuccess)
+        {
+            return new GitRemoteIntegrateResult(
+                false, branch, null, outgoing, incoming, hasUpstream, false,
+                localChangesBlock ? LocalChangesBlockPullMessage : pullError ?? "Pull failed")
+            {
+                LocalChangesBlockPull = localChangesBlock,
+            };
+        }
+
+        (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
+        return new GitRemoteIntegrateResult(true, branch, null, outgoing, incoming, hasUpstream, false, null);
+    }
+
     public async Task<GitRemoteIntegrateResult> IntegrateAsync(
         string repoPath,
         string? bearerToken,
