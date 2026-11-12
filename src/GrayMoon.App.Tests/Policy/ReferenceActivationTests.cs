@@ -141,6 +141,35 @@ public sealed class ReferenceActivationTests
     }
 
     [Fact]
+    public async Task A_fully_pushed_branch_ahead_of_the_default_branch_passes_without_a_warning()
+    {
+        await using var ctx = await CreateAsync();
+        var graph = await SeedGraphAsync(ctx);
+        // The link says the branch is ahead of the default branch; the check does not care, only unpushed work counts.
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var link = await db.WorkspaceRepositories.SingleAsync(wr => wr.WorkspaceId == ctx.WorkspaceId && wr.RepositoryId == graph.ProducerId);
+            link.BranchName = "feature/ahead";
+            link.DefaultBranchName = "main";
+            link.DefaultBranchAheadCommits = 4;
+            await db.SaveChangesAsync();
+        }
+        RespondInspect(ctx, _ =>
+        {
+            var response = Clean();
+            response.Branch = "feature/ahead";
+            return response;
+        });
+
+        var report = await CheckAsync(ctx, graph.ProducerId);
+
+        Assert.False(report.IsBlocked);
+        Assert.Empty(report.Findings);
+        Assert.Equal("feature/ahead", report.Heads[graph.ProducerId].Branch);
+    }
+
+    [Fact]
     public async Task Unpushed_commits_in_the_Workspace_checkout_block_and_name_the_repository()
     {
         await using var ctx = await CreateAsync();

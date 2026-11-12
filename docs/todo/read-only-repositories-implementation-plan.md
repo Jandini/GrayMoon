@@ -1025,3 +1025,12 @@ Not committed (base `0a9fe3d4`).
 - **Section 11, done:** `docs/architecture/01` (read only repositories, definition file, Feature snapshot), `03` (columns of strict step 19, schema version 2, recorded revision, drift), `04` (the `reference-mode` structural operation, activation check, pull-only, archive check), `05` (the operation table and where the state is set), `06` (section 11: ask the policy, checklist for a new operation), `07` (padlock and bulk actions in Changes), `AGENTS.md` and `CLAUDE.md` (new section "Read only repositories"). The Desktop README bullet was written earlier.
 - **Section 11, not done:** deleting the idea note, this plan, the inventory and the test log and removing the row in `docs/todo/README.md`. That is for when the feature ships, after the gate.
 - `.cursor/rules` has no twin of the tag rule, so nothing was changed there.
+
+### Gate: the partly covered tests are closed (2026-11-12)
+
+Not committed (base `0a9fe3d4`).
+
+- Five tests added; every required test of the idea note now has a test name (test log, "Reference-mode gate", item 6).
+- One product change for it: the decision of "Undo across all repositories" moved from `WorkspaceGitChanges.Discard.cs` into the new `WorkspaceDiscardTargetPlanner.PlanAll` (`Services/GitChanges`). Same behavior; the page calls it.
+- One row needed no new test: `No_operation_can_start_in_a_context_while_the_change_runs` was already there and the mapping had missed it.
+- The gate is still **not passed**: the manual smoke M1-M13 is not run. Nothing else is open in section 10.

@@ -627,3 +627,23 @@ Not run. It is for the owner to run.
 ### 5. Result
 
 **The gate is not passed.** Open: the manual smoke (item 4), and the four rows marked "in part" above (discard through the page, "ahead of default", a read only producer with a package missing from the registry, an operation started while a mode change runs). The automated suites all pass.
+
+### 6. The four rows marked "in part": closed (2026-11-12, later the same day)
+
+This replaces the "in part" answers of the table in item 3.
+
+| Required | Test | Covered |
+|---|---|---|
+| Local edits: manual Undo (discard) | `WorkspaceCommitTargetPlannerTests.Undo_across_all_repositories_leaves_a_read_only_repository_out_and_names_it`, `Undo_across_only_read_only_repositories_has_no_target`, `Undo_on_one_named_read_only_repository_is_allowed_by_the_policy_and_Undo_across_all_is_not` | yes, for the decision. The decision moved from the Changes page into `WorkspaceDiscardTargetPlanner.PlanAll`; the page calls it. The page itself (dialog, Worker call) is still not driven by a test |
+| Fully pushed branch ahead of default: allowed, no extra warning | `ReferenceActivationTests.A_fully_pushed_branch_ahead_of_the_default_branch_passes_without_a_warning` | yes |
+| Graph: missing registry packages, read only producer | `WorkspacePushStrategyTests.DotNet_synchronized_push_never_pushes_a_read_only_producer_whose_package_has_no_registry` | yes |
+| Operation against a running mode toggle | `WorkspaceReferenceOperationsTests.No_operation_can_start_in_a_context_while_the_change_runs` | yes. The test was already there; the mapping missed it |
+
+Commands, after these changes:
+
+- `dotnet build GrayMoon.slnx`: 0 warnings, 0 errors.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4820 passed.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build --filter "Category=Long"`: 2 passed.
+- Common and Worker: not run again (no change there since the full run above).
+
+**Result now:** every required test has a test name. The gate is still **not passed** for one reason: the manual smoke M1-M13 is not run.

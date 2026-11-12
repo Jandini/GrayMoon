@@ -265,9 +265,9 @@ public sealed partial class WorkspaceGitChanges
         }
 
         // Undo across all repositories never touches a read-only one; its own Undo action still does.
-        var changed = (_view?.Repositories ?? []).Where(r => r.ChangedCount > 0).ToList();
-        var leftOut = changed.Where(r => r.IsReference).ToList();
-        var targets = changed.Except(leftOut).ToList();
+        var plan = WorkspaceDiscardTargetPlanner.PlanAll(_view?.Repositories ?? []);
+        var leftOut = plan.LeftOut;
+        var targets = plan.Targets.ToList();
         if (IsJobRunning)
         {
             return;
