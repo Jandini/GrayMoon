@@ -139,7 +139,7 @@ public sealed class ReferenceRevisionRecorder(IServiceScopeFactory scopeFactory,
 
     private string Warn(int workspaceId, string detail, Exception? exception)
     {
-        logger.LogWarning(exception, "Recording read-only repository revisions failed. WorkspaceId={WorkspaceId} Detail={Detail}", workspaceId, detail);
-        return $"The commit of a read-only repository could not be recorded in the Workspace definition: {detail.TrimEnd('.')}.";
+        logger.LogWarning(exception, "Recording read only repository revisions failed. WorkspaceId={WorkspaceId} Detail={Detail}", workspaceId, detail);
+        return $"The commit of a read only repository could not be recorded in the Workspace definition: {detail.TrimEnd('.')}.";
     }
 }

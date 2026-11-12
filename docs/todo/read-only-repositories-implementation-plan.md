@@ -534,7 +534,7 @@ Not committed (base `fb8df758`, which holds the third group of Phase 1). Results
 
 **Not done**
 
-- Appendix B, except the tooltips of P2 (see B.7): the "archived - make it read-only?" hint and the open questions.
+- Appendix B: the tooltips (B.7) and the hint (B.8) are built. The open questions of B.5 are not decided.
 - The warning of a manual switch (`CheckoutBranchApiResult.Warning`) is still not shown by the Repositories page.
 - No component test renders the checkbox, the column, the banner or the preview row. The decisions behind them are tested as functions.
 - Section 11 (architecture documents, `AGENTS.md`, Desktop README) is not started; it follows the gate.
@@ -776,6 +776,8 @@ Keep the two states and the two badges separate. Do not show `ro` for an archive
 3. Should the hint of P3 also appear when a repository is added to a Workspace whose default is writable?
 4. Is `ro` the right text once both badges can be on one row, or should the read-only badge say `read-only`? (The grid width was the reason for `ro`.)
 
+All four questions were answered by the owner on 2026-11-12. See B.9.
+
 ### B.6 Work, if the proposal is accepted
 
 Small, UI only, belongs to Phase 2:
@@ -798,11 +800,164 @@ The owner decided: the tooltips of P2 now, everything else about archived reposi
 - `ro` badge in the Git Changes tree, tooltip "Read-only in this Workspace. GrayMoon does not commit or push it, and actions on all repositories leave it out."
 - The `ro` badge itself was already built in the third group of Phase 1 (commit `fb8df758`): beside the branch, beside the tag, and on a Feature snapshot. Only its tooltip changed here.
 
-**Deferred**
+**Deferred at that time**
 
-- P3 (the hint "Archived on the provider. Make it read-only?") and `Archived` in the state of `IWorkspaceReferenceOperations`.
+- P3 (the hint). It was built later the same day, see B.8.
 - Open questions 1-4 of B.5. P4 and P5 stand as they are until then: no policy rule on `Archived`, nothing about it in `graymoon.json`.
 
 **Not tested**
 
 - The tooltips are text in Razor markup. No test reads them and they were not looked at in a browser.
+
+### B.8 The hint for an archived repository (2026-11-12)
+
+The owner asked for the rest of the appendix. Built is P3. Not committed (base `8e3b30f1`, which holds Phase 2 and the tooltips).
+
+**Built**
+
+- `WorkspaceReferenceRepositoryState` has `Archived` and `SuggestReference` (archived and still writable). `GetStateAsync` fills `Archived` from `Repository.Archived`. `WorkspaceReferenceSuggestions` holds the rule and the two texts.
+- Edit Workspace, read-only section: below the default switch, a callout "Archived on the provider, so pushes are rejected. Make them read-only?" with one line per archived and writable Source and a "Make read-only" button on each. The button calls `SetRepositoryAsync` for that repository. It is disabled while the Workspace is busy. The callout is absent when no repository qualifies.
+- Switch Branch dialog: for an archived and writable Source in the Workspace view, a callout "This repository is archived on the provider, so pushes are rejected. Make it read-only? Use the Read-only checkbox below." It goes away when the checkbox is ticked. It is shown only where the checkbox is shown (not in a Feature, not for the Workspace repository).
+- The suggestion changes nothing by itself. The activation check runs as for any repository, so an archived repository with unpushed commits is refused and stays suggested.
+
+**Decisions made while building**
+
+- One button per repository, not one for all: each change is checked and can be refused by itself, and the list is expected to be short.
+- The dialog has no second button; the checkbox is in the footer of the same dialog.
+- The value is the one of the last fetch of repositories (B.1). A repository that was un-archived since then is still suggested until the next fetch. Because it is only a suggestion, a stale value cannot block anything.
+
+**Still open (B.5) at that time - decided later the same day, see B.9**
+
+- Question 1: bulk push and archived repositories. Not built; no policy rule reads `Archived`.
+- Question 2: a notice when a repository becomes archived on a fetch. Not built.
+- Question 3: the hint when a repository is added to a Workspace. Not built; the hint appears the next time Edit Workspace or the dialog is opened.
+- Question 4: `ro` or `read-only` as badge text. Unchanged: `ro`.
+
+**Not tested**
+
+- The two callouts are Razor markup. The rule behind them and the state are tested; the markup is not, and it was not looked at in a browser.
+
+### B.9 The answers to B.5 and what is built (2026-11-12)
+
+Not committed (base `8e3b30f1`).
+
+**The owner's answers**
+
+1. Yes: an archived repository is left out of a push. A local commit that is already there stays; the user reverts it by hand.
+2. No notice when a repository becomes archived; the badge is enough. New request instead: when a repository is already marked archived, GrayMoon checks whether it is still archived, because it can be un-archived.
+3. No hint when a repository is added to a Workspace.
+4. The badge says `readonly` (no hyphen) as a first try.
+
+P4 of B.4 is replaced by answer 1. P5 stands.
+
+**Built: the push rule**
+
+- `RepositoryPolicySubject.IsArchived` (init property, default false; `ForCheckout` has `isArchived`). `RepositoryOperationReason.Archived`. `RepositoryOperationPolicy.ArchivedMessage` = "Repository is archived on the provider. Pushes are rejected."
+- `Rule.AllowedWhenArchived` (default true). Only `Push` sets it to false. `Evaluate` checks it after the tag rule and before the read-only rules, so a repository on a tag reports the tag, and an archived read-only repository reports archived. The rule holds for the Workspace repository too.
+- The subject is filled from `Repository.Archived` at every place that builds one: `RepositoryPolicySubjectExtensions` (link and list item), `WorkspaceRepositoryOperationPolicyService.LoadAsync`, the two "needs push" queries in `WorkspaceRepository.cs`, and the checkouts of `WorkspacePushService`.
+- `RepositoryOperationPolicyExpressions.Allows` has a sixth argument `isArchived`; the expanded SQL adds the term only for an operation whose rule reads it. All 18 call sites in `WorkspaceRepositoryLinkListQueryService` pass the repository's column, so the header no longer recommends a push for an archived repository.
+- `RepositorySkipSummary` has a group "archived repository / archived repositories".
+- Grid: an archived row with outgoing commits shows the commits badge as pull-only; its tooltip is the archived message (new `CommitsBadge.PullOnlyTitle`). A click on the push part shows the archived message as a toast.
+- Commit, pull, sync and every other operation do not read the archived state.
+
+**Different from the text of question 1: a single-repository push is refused too**
+
+Question 1 said that a single-repository push must stay possible, so that an out-of-date mark cannot lock the user out. As built, the push of one named repository is refused with the archived message. The reason: the check below now runs before every push and once per page, so the mark is compared with the provider at the moment it matters, and a push the provider is sure to reject is not started. What remains: when the provider cannot be reached, or does not answer, the mark stays and the push is refused; a push would fail in that situation anyway. The way out is "fetch repositories". This is for the owner to confirm; allowing the single push again means the archived check moves to the Bulk scope only, and the row badge, the badge click and two guards in `WorkspacePushService` change with it.
+
+**Built: the check for a repository that is no longer archived**
+
+- `ArchivedRepositoryVerifier.VerifyAsync(workspaceId)` (`Services/Policy/ArchivedRepositoryVerifier.cs`). For the repositories of the Workspace with `Archived == true` it asks the provider. When the provider says "not archived", it clears the mark and sends the `WorkspaceSynced` broadcast, so open pages reload. It never sets the mark. No answer, an error, a removed connector or a provider other than GitHub keeps the mark. It never fails its caller.
+- `IRepositoryArchiveProbe` with `GitHubRepositoryArchiveProbe`: GET `repos/{owner}/{repo}` through the existing `GitHubService.GetRepositoryMergeSettingsAsync` (ETag, no rate-limit retry). `GitHubRepositoryMergeSettingsDto` has `Archived`.
+- When it runs: once per opened Workspace page (after the first load), before a push plan is made (`WorkspacePushOperations.GetPlanAsync`) and before a push (`PushAsync`). With no repository marked archived it costs one database query and no request.
+- Not built: a background timer. Archiving (the other direction) is still learned only from "fetch repositories" (B.1).
+
+**Built: badge text**
+
+- `readonly` in place of `ro` in the grid row (3 places, now with `text-nowrap flex-shrink-0`) and in the Git Changes tree. The search field is still `ro:yes` / `ro:no`.
+
+**Not built, by decision**
+
+- A notice when a repository becomes archived (answer 2). The hint on adding a repository (answer 3).
+
+**Not tested**
+
+- `GitHubRepositoryArchiveProbe` against GitHub. The tests use a fake probe.
+- The page trigger, the tooltip, the toast and the width of the `readonly` badge in the grid. Nothing was looked at in a browser.
+
+### B.10 Wording: "read only" without a hyphen (2026-11-12)
+
+Decided by the owner. Not committed (base `ee992ac0`).
+
+- Every text the user sees says "read only" / "Read only": "Read only repositories", "Make all read only", "Repository is read only.", "1 read only repository skipped: ...", the tooltips, the toasts, the progress and the warning texts, and the error texts of the Workspace definition ("... is not read only"). Also the pull refusal text of the Worker.
+- The badge stays `readonly` (B.9). The search field stays `ro:yes` / `ro:no`. Identifiers stay `Reference`.
+- Not changed: code comments, and texts where the words are not about this feature (the GitHub push rejection "archived on GitHub and is read-only", which repeats GitHub's own wording; the AI sandbox mode).
+- The texts quoted earlier in this document are as they were when written, with the hyphen.
+
+**Fix on the same day:** Edit Workspace failed to open, because `WorkspaceReferenceSection.razor` injected `ToastService` and only `IToastService` is registered. It now injects `IToastService`. No test renders the component, so no test saw it.
+
+**Why "Make all read only" takes long and "Make all writable" does not**
+
+- Before a repository becomes read only, `ReferenceActivationChecker.CheckAsync` asks the Worker to inspect its main checkout and every ready Feature worktree of it (uncommitted changes, unpushed commits, the commit to record). These requests run one after the other. So the time grows with repositories plus worktrees.
+- After the save, the Workspace definition is written and the commits of the read only repositories are recorded in it.
+- Making repositories writable needs no check: it saves the flags and writes the definition.
+- Possible later: run the inspections in parallel. Built the same day, see B.11.
+
+### B.11 Overlay, parallel check, no "also" checkbox (2026-11-12)
+
+Asked for by the owner. Not committed (base `ee992ac0`).
+
+- **Overlay.** While a change of the read only section runs, Edit Workspace shows the loading overlay (`LoadingOverlay`, without the command terminal) in place of the small spinner. Its text is the running step: "Making repositories read only...", "Checking repositories for local work... 7 of 20", "Writing Workspace definition...". The section passes an `IProgress<OperationProgress>` to `SetAllAsync` / `SetRepositoryAsync`; the texts come from the operation.
+- **Parallel check.** `ReferenceActivationChecker.CheckAsync` inspects the repositories in parallel, at most `WorkspaceOptions.MaxParallelOperations` at a time (the existing option, default 16). The checkouts of one repository (main checkout, then its Feature worktrees) are still inspected one after the other. The paths are read from the database first, one after the other. Findings and recorded commits are in repository name order, as before. The check reports "n of total" after each repository.
+- **The checkbox "Also make new repositories read only" is removed.** It did nothing the switch "New repositories are read only" below the buttons does not do; it only saved one click. The question "Make all repositories read only?" stays. `SetAllAsync` keeps its `alsoSetDefault` argument; the dialog passes false.
+
+**Not tested**
+
+- The overlay in the dialog. Nothing was looked at in a browser. How much faster the check is on a real Workspace was not measured.
+
+### B.12 Switch Branch dialog: a button in place of the checkbox (2026-11-12)
+
+Asked for by the owner. Not committed (base `ee992ac0`).
+
+- The "Read only" checkbox in the footer is replaced by a button with the look of Fetch (`btn btn-outline-secondary`). Its text is the change a click makes: "Make readonly" for a writable repository, "Make writable" for a read only one. It shows a spinner while the change runs. Where it is shown, when it is disabled, and what it calls (`SetRepositoryAsync`) are unchanged.
+- The `@key` attempt counter is gone: a button has no ticked state that a refused change could leave behind.
+- The hint for an archived repository now ends with: Use "Make readonly" below.
+- Earlier sections of this document that speak of the checkbox describe the state before this change.
+
+**Not tested**
+
+- The button as markup. Nothing was looked at in a browser.
+
+### B.13 Progress texts and no overlay for the default switch (2026-11-12)
+
+Asked for by the owner. Not committed (base `ee992ac0`). This replaces the progress text named in B.11.
+
+- The check shows "Checking repositories for local work..." until the first repository is done, then "Checked X of Y repositories". A count of 0 is never shown. The same texts are used when one repository changes its mode.
+- The switch "New repositories are read only" shows no overlay; it is a quick save. The buttons are still disabled while it runs.
+
+### B.14 Decision: the `readonly` badge stays beside the branch (2026-11-12)
+
+Decided by the owner. Documentation only; no code changed.
+
+- The `readonly` badge stays where it is: in the branch cell, beside the branch name or the tag (`WorkspaceRepositoriesRow.razor`), and on a Feature snapshot.
+- It is not moved to the name cell beside the repository name. The owner had considered that later and dropped it.
+- So a row that is archived and read only keeps `archived` in the name cell and `readonly` in the branch cell (problem 3 of B.3 stands as accepted).
+
+### B.15 The overlay shows the git commands of the check (2026-11-12)
+
+Asked for by the owner. Not committed (base `ee992ac0`).
+
+- The check runs git in the Worker for every checkout (`GitWorktreeService.InspectWorktreeAsync`: worktree list, HEAD and branch, status, counts against the upstream and the default branch).
+- The overlay of the read only section now shows the command terminal, like the other overlays. It reads the terminal of the running Workspace operation (`IWorkspaceOperationRunner.GetRunning(workspaceId).Terminal`), which is where the Worker output of that operation is collected. The terminal toggle of the overlay applies as everywhere.
+- With the parallel check the lines of several repositories are mixed.
+
+**Not tested:** nothing was looked at in a browser; whether lines appear depends on the running app and Worker.
+
+### B.16 Switch Branch dialog: Lock / Unlock and the badge in the title (2026-11-12)
+
+Asked for by the owner. Not committed (base `ee992ac0`). This replaces the button texts of B.12.
+
+- The button in the footer says "Lock" for a writable repository and "Unlock" for a read only one (lock / unlock icon as before). The hint for an archived repository ends with: Use "Lock" below.
+- The title shows the same `readonly` badge as the grid, after the repository name: Branch {repository} [readonly]. It follows the button at once, and in a Feature it carries the snapshot tooltip.
+- Only the button uses the words lock and unlock. The state is still called read only everywhere else (badge `readonly`, Edit Workspace, messages, `ro:` search). A rename of the state to Locked / Unlocked was discussed and is not decided.
+
+**Not tested:** markup only; nothing was looked at in a browser.

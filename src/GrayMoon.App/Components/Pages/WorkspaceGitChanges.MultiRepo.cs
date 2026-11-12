@@ -150,8 +150,8 @@ public sealed partial class WorkspaceGitChanges
             if (referenceCount > 0)
             {
                 ToastService.Show(referenceCount == 1
-                    ? "Nothing to commit: the repository with changes is read-only."
-                    : $"Nothing to commit: the {referenceCount} repositories with changes are read-only.");
+                    ? "Nothing to commit: the repository with changes is read only."
+                    : $"Nothing to commit: the {referenceCount} repositories with changes are read only.");
             }
 
             return;
@@ -459,8 +459,8 @@ public sealed partial class WorkspaceGitChanges
         if (leftOut.Count > 0)
         {
             ToastService.Show(leftOut.Count == 1
-                ? $"{leftOut[0].RepositoryName} is read-only and was left out."
-                : $"{leftOut.Count} read-only repositories were left out.");
+                ? $"{leftOut[0].RepositoryName} is read only and was left out."
+                : $"{leftOut.Count} read only repositories were left out.");
         }
 
         if (targets.Count == 0)

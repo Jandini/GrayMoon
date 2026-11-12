@@ -122,9 +122,9 @@ public sealed class RepositorySkipReportingTests
 
         Assert.Null(RepositorySkipSummary.Describe([]));
         Assert.Null(RepositorySkipSummary.Describe(null));
-        Assert.Equal("1 read-only repository skipped: graymoon-api.", RepositorySkipSummary.Describe([reference, reference]));
+        Assert.Equal("1 read only repository skipped: graymoon-api.", RepositorySkipSummary.Describe([reference, reference]));
         Assert.Equal(
-            "2 read-only repositories skipped: graymoon-api, graymoon-web. 1 repository on a tag skipped: graymoon-docs.",
+            "2 read only repositories skipped: graymoon-api, graymoon-web. 1 repository on a tag skipped: graymoon-docs.",
             RepositorySkipSummary.Describe([reference, tag, snapshot]));
     }
 
@@ -136,7 +136,7 @@ public sealed class RepositorySkipReportingTests
             .ToList();
 
         Assert.Equal(
-            "7 read-only repositories skipped: repo-1, repo-2, repo-3, repo-4, repo-5, and 2 more.",
+            "7 read only repositories skipped: repo-1, repo-2, repo-3, repo-4, repo-5, and 2 more.",
             RepositorySkipSummary.Describe(skips));
     }
 

@@ -100,7 +100,7 @@ public sealed class WorkspaceAiGenerationOperations(
         var leftOut = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
         var described = scope.Repositories.Where(r => !leftOut.Contains(r.RepositoryId)).ToList();
         if (described.Count == 0)
-            return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, "There is nothing to commit: the repositories with changes are read-only.");
+            return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, "There is nothing to commit: the repositories with changes are read only.");
 
         var repositories = described
             .Select(r => new GitEvidenceRepositoryScope { RepositoryId = r.RepositoryId })

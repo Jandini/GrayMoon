@@ -132,7 +132,7 @@
                 var snapshotCommit = string.IsNullOrEmpty(Link.HeadCommit) ? null : Link.HeadCommit[..Math.Min(7, Link.HeadCommit.Length)];
                 <div class="branch-container">
                     <span class="branch-inner branch-inner--disabled"
-                          title="Read-only snapshot. It stays at the commit the Feature was created from; use the Workspace to move the repository.">
+                          title="Read only snapshot. It stays at the commit the Feature was created from; use the Workspace to move the repository.">
                         @if (Link.IsOnTag)
                         {
                             <i class="bi bi-tag me-1" aria-hidden="true"></i>

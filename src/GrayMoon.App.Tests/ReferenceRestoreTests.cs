@@ -169,7 +169,7 @@ public sealed class ReferenceRestoreTests
         var warnings = await ApplyGuardAsync(ctx, graph.ProducerId, graph.ConsumerId);
 
         var warning = Assert.Single(warnings);
-        Assert.Equal($"Repository {ProducerName}: it has 3 unpushed commits. It was added as writable, not read-only.", warning);
+        Assert.Equal($"Repository {ProducerName}: it has 3 unpushed commits. It was added as writable, not read only.", warning);
         Assert.False((await ReadLinkAsync(ctx, graph.ProducerId)).IsReference);
         Assert.True((await ReadLinkAsync(ctx, graph.ConsumerId)).IsReference);
     }

@@ -15,10 +15,10 @@ public static class RepositoryOperationPolicy
     public const string OnTagPushMessage = "Repository is pinned to a tag. Checkout a branch before pushing.";
 
     /// <summary>The message for an operation that a reference (read-only) repository does not take part in.</summary>
-    public const string ReferenceMessage = "Repository is read-only.";
+    public const string ReferenceMessage = "Repository is read only.";
 
     /// <summary>The message for an operation on a repository a Feature holds as a detached read-only snapshot.</summary>
-    public const string ReferenceSnapshotMessage = "Repository is a read-only snapshot in this Feature.";
+    public const string ReferenceSnapshotMessage = "Repository is a read only snapshot in this Feature.";
 
     /// <summary>The message for a push of a repository that is archived on the provider.</summary>
     public const string ArchivedMessage = "Repository is archived on the provider. Pushes are rejected.";

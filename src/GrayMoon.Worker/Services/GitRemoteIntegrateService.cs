@@ -31,8 +31,8 @@ public sealed class GitRemoteIntegrateService(IGitService git, IGitRepositoryRea
 
     public static string LocalCommitsMessage(int outgoing) =>
         outgoing == 1
-            ? "The repository is read-only and its branch has 1 local commit that is not on the remote. Nothing was pulled."
-            : $"The repository is read-only and its branch has {outgoing} local commits that are not on the remote. Nothing was pulled.";
+            ? "The repository is read only and its branch has 1 local commit that is not on the remote. Nothing was pulled."
+            : $"The repository is read only and its branch has {outgoing} local commits that are not on the remote. Nothing was pulled.";
 
     /// <summary>
     /// Fetch, then take incoming commits by fast-forward only. For a read-only repository: nothing is merged, and a

@@ -37,7 +37,7 @@ public sealed class WorkspaceDefinitionRevisionPinTests
     }
 
     [Theory]
-    [InlineData(null, "main", Sha, false, "not read-only")]
+    [InlineData(null, "main", Sha, false, "not read only")]
     [InlineData("v1.0.0", "main", Sha, true, "both tag and branch")]
     [InlineData(null, "main", null, true, "missing the full commit hash")]
     [InlineData(null, "main", "0123456", true, "full commit hash")]

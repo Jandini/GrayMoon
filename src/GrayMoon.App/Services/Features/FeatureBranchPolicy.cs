@@ -26,7 +26,7 @@ public static class FeatureBranchPolicy
         "This repository is pinned to a tag in this Feature. Use the Workspace to check out a branch.";
 
     public const string ReferenceSnapshotMessage =
-        "This repository is a read-only snapshot in this Feature and stays at the commit the Feature was created from. Use the Workspace to check out a branch or a tag.";
+        "This repository is a read only snapshot in this Feature and stays at the commit the Feature was created from. Use the Workspace to check out a branch or a tag.";
 
     /// <summary>
     /// The branch a Feature's repository is expected to be on: the Feature's own name for a

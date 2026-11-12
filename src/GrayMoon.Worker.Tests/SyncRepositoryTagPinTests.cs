@@ -188,7 +188,7 @@ public sealed class SyncRepositoryTagPinTests : IDisposable
         var response = await SyncAsync(origin, applyRepositoryTagPin: true);
 
         Assert.False(response.Success);
-        Assert.Contains("not read-only", response.ErrorMessage);
+        Assert.Contains("not read only", response.ErrorMessage);
         Assert.False(Directory.Exists(RepoPath()));
     }
 

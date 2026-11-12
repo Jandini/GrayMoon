@@ -470,3 +470,78 @@ Changed tests: `RepositoryOperationPolicyExpressionsTests` passes the new sixth 
 - The manual smoke list M1-M13. Nothing was looked at in a browser.
 - No request to GitHub: the real probe is not tested.
 - No test for the page trigger of the check, the tooltip, the toast or the badge markup.
+
+## Wording "read only" and the Edit Workspace fix (Appendix B.10) - 2026-11-12
+
+Base: commit `ee992ac0`. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| Worker tests | 1034 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4641 passed, 0 failed, 0 skipped |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Failures on the way:
+
+- Reported by the owner: Edit Workspace did not open (`ToastService` not registered for `WorkspaceReferenceSection`). Fixed by injecting `IToastService`.
+- Build error CS1705 after that fix: the App had restored EF Core 10.0.15 and the App test project 10.0.14 (floating `10.0.*`). `dotnet restore GrayMoon.slnx --force-evaluate` fixed it. No project file changed.
+
+Changed tests: the expected texts in 9 test files now say "read only" (no new tests).
+
+### Not run
+
+- The manual smoke list M1-M13. Nothing was looked at in a browser, also not the fixed Edit Workspace dialog.
+
+## Overlay, parallel activation check, checkbox removed (Appendix B.11) - 2026-11-12
+
+Base: commit `ee992ac0` plus the uncommitted wording change (B.10). Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| App tests | 4642 passed, 0 failed, 0 skipped (4641 before) |
+| App `Category=Long` | 2 passed |
+| Worker tests, Worker `Category=Long` | not run again: no Worker file changed since the run of B.10 |
+
+New test: App `ReferenceActivationTests` (+1): two repositories are inspected at the same time (each answer waits until both requests are open), the findings are in name order, and progress is reported as 0 of 2 up to 2 of 2.
+
+### Not run
+
+- The manual smoke list M1-M13. Nothing was looked at in a browser, also not the overlay in Edit Workspace.
+- No measurement of the check on a real Workspace.
+
+## Switch Branch dialog: button in place of the checkbox (Appendix B.12) - 2026-11-12
+
+Base: commit `ee992ac0` plus the uncommitted changes of B.10 and B.11. Not committed. One Razor file changed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| App tests | 4642 passed, 0 failed, 0 skipped |
+| Common, Worker, both `Category=Long` | not run again: only `SwitchBranchModal.razor` changed |
+
+No new test. Nothing was looked at in a browser.
+
+## Progress texts, no overlay for the default switch (Appendix B.13) - 2026-11-12
+
+Base: commit `ee992ac0` plus the uncommitted changes of B.10 to B.12. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| App tests | 4642 passed, 0 failed, 0 skipped |
+| Common, Worker, both `Category=Long` | not run again: three App files changed, texts and one overlay condition |
+
+No new test; the parallel check test reads the texts through `ProgressMessage`. Nothing was looked at in a browser.
+
+## Overlay terminal for the check (Appendix B.15) - 2026-11-12
+
+One Razor line changed. Build: 0 warnings, 0 errors. App tests: 4642 passed. Other suites not run again. No new test; nothing was looked at in a browser.
+
+## Lock / Unlock button and title badge (Appendix B.16) - 2026-11-12
+
+One Razor file changed. Build: 0 warnings, 0 errors. App tests: 4642 passed. Other suites not run again. No new test; nothing was looked at in a browser.

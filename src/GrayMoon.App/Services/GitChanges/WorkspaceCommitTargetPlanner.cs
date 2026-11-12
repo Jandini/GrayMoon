@@ -17,7 +17,7 @@ public sealed record WorkspaceCommitTargetPlan(
 public static class WorkspaceCommitTargetPlanner
 {
     /// <summary>The reason reported for a read-only repository that has changes the commit leaves alone.</summary>
-    public const string ReferenceReason = "it is read-only";
+    public const string ReferenceReason = "it is read only";
 
     public static bool IsOnDefaultBranch(WorkspaceGitChangesRepositoryView repository) =>
         !string.IsNullOrWhiteSpace(repository.DefaultBranchName)

@@ -26,6 +26,10 @@
                         @if (!string.IsNullOrEmpty(RepositoryName))
                         {
                             <span class="modal-title__secondary text-muted fw-normal fs-6" title="@RepositoryName">@RepositoryName</span>
+                            @if (_reference)
+                            {
+                                <span class="badge bg-secondary text-nowrap flex-shrink-0" title="@(IsFeatureContext ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)">readonly</span>
+                            }
                         }
                     </h5>
                     <button type="button" class="btn-close" @onclick="OnCancel" disabled="@isRefreshing"></button>
@@ -40,7 +44,7 @@
                         @if (IsReference && UncommittedChangedFileCount > 0)
                         {
                             <div class="gm-callout gm-callout--warning mb-3" role="alert">
-                                This read-only repository has uncommitted changes. A switch keeps them, and fails when they conflict with the target.
+                                This read only repository has uncommitted changes. A switch keeps them, and fails when they conflict with the target.
                             </div>
                         }
                         @if (IsFeatureContext && FeatureBranchPolicy.IsOffFeatureBranch(FeatureBranchName, CurrentBranch))
@@ -532,7 +536,7 @@
                     @if (ShowReferenceToggle && GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.SuggestForArchived(IsArchived, _reference))
                     {
                         <div class="gm-callout gm-callout--warning mt-3" role="status">
-                            @GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.ArchivedSingle Use the Read-only checkbox below.
+                            @GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.ArchivedSingle Use "@ReferenceButtonText(false)" below.
                         </div>
                     }
                     @if (_referenceError is not null)
@@ -597,19 +601,23 @@
                         }
                         @if (ShowReferenceToggle)
                         {
-                            @* Recreated after every attempt (key): a refused change must show the stored value again. *@
-                            <div class="form-check mb-0 flex-shrink-0" @key="_referenceAttempt">
-                                <input class="form-check-input form-check-input-gray" type="checkbox" id="switch-branch-reference"
-                                       checked="@_reference"
-                                       disabled="@ReferenceToggleDisabled"
-                                       title="@(ReferenceToggleBusy ? "An operation is running for this Workspace." : "GrayMoon pulls a read-only repository but never commits, pushes or updates it.")"
-                                       @onchange="OnReferenceChangedAsync" />
-                                <label class="form-check-label text-nowrap" for="switch-branch-reference">Read-only</label>
-                            </div>
-                            @if (_referenceRunning)
-                            {
-                                <span class="spinner-border spinner-border-sm flex-shrink-0"></span>
-                            }
+                            @* Same look as Fetch. The text names the change the click makes, so it shows the stored state. *@
+                            <button type="button"
+                                    class="btn btn-outline-secondary text-nowrap flex-shrink-0"
+                                    id="switch-branch-reference"
+                                    disabled="@ReferenceToggleDisabled"
+                                    title="@(ReferenceToggleBusy ? "An operation is running for this Workspace." : "GrayMoon pulls a read only repository but never commits, pushes or updates it.")"
+                                    @onclick="ToggleReferenceAsync">
+                                @if (_referenceRunning)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi @(_reference ? "bi-unlock" : "bi-lock") me-1" aria-hidden="true"></i>
+                                }
+                                @ReferenceButtonText(_reference)
+                            </button>
                         }
                     </div>
                     <div class="d-flex gap-2 ms-auto">
@@ -772,7 +780,6 @@
     private bool _reference;
     private bool _referenceParameter;
     private bool _referenceRunning;
-    private int _referenceAttempt;
     private string? _referenceError;
     private IReadOnlyList<GrayMoon.Application.Workspaces.WorkspaceReferenceFinding> _referenceBlocks = [];
     private IReadOnlyList<string> _referenceWarnings = [];
@@ -789,12 +796,15 @@
 
     private bool ReferenceToggleDisabled => _referenceRunning || isRefreshing || isProcessing || isCreating || ReferenceToggleBusy;
 
-    private async Task OnReferenceChangedAsync(ChangeEventArgs e)
+    /// <summary>The button text: the change a click makes.</summary>
+    internal static string ReferenceButtonText(bool isReference) => isReference ? "Unlock" : "Lock";
+
+    private async Task ToggleReferenceAsync()
     {
         if (_referenceRunning)
             return;
 
-        var value = e.Value is true;
+        var value = !_reference;
         _referenceRunning = true;
         _referenceError = null;
         _referenceBlocks = [];
@@ -815,13 +825,12 @@
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Changing the read-only state failed for repository {RepositoryId} in workspace {WorkspaceId}", RepositoryId, WorkspaceId);
+            Logger.LogWarning(ex, "Changing the read only state failed for repository {RepositoryId} in workspace {WorkspaceId}", RepositoryId, WorkspaceId);
             _referenceError = ex.Message;
         }
         finally
         {
             _referenceRunning = false;
-            _referenceAttempt++;
         }
     }
 

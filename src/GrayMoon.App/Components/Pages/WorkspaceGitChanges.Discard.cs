@@ -277,7 +277,7 @@ public sealed partial class WorkspaceGitChanges
         {
             if (leftOut.Count > 0)
             {
-                ToastService.Show("Nothing to undo: the repositories with changes are read-only. Use Undo on the repository itself.");
+                ToastService.Show("Nothing to undo: the repositories with changes are read only. Use Undo on the repository itself.");
             }
 
             return;
@@ -293,7 +293,7 @@ public sealed partial class WorkspaceGitChanges
         };
         if (leftOut.Count > 0)
         {
-            details.Add(new("Read-only, left as they are", leftOut
+            details.Add(new("Read only, left as they are", leftOut
                 .Select(r => new ConfirmDetailItem(r.RepositoryName, FileCountLabel(r.ChangedCount)))
                 .ToList()));
         }

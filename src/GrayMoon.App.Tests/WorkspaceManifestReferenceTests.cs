@@ -191,7 +191,7 @@ public sealed class WorkspaceManifestReferenceTests
             workspace.WorkspaceId, [new WorkspaceRepositoryReferenceRevisionChange(ApiUrl, "main", Sha)]);
 
         Assert.False(result.Success);
-        Assert.Contains("not read-only", result.Error);
+        Assert.Contains("not read only", result.Error);
         Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == "WriteRepositoryFile");
     }
 

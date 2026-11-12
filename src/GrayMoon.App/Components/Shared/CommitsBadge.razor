@@ -71,7 +71,7 @@ else
     private string CssClass => NotUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
     private string DisplayText => $"↑{X} ↓{Y}";
     private string Title => PullOnly && Y == 0
-        ? PullOnlyTitle ?? "Read-only repository. GrayMoon does not push it."
+        ? PullOnlyTitle ?? "Read only repository. GrayMoon does not push it."
         : NotUpstreamed ? "Push to set upstream" : (Y > 0 ? "Click to pull" : "Click to push");
     private bool ShowPlaceholder => IsOnTag || (!Outgoing.HasValue && !Incoming.HasValue && BranchHasUpstream != false);
 

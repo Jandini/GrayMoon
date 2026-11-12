@@ -58,9 +58,9 @@ public sealed record WorkspaceReferenceRepositoryState(int RepositoryId, string 
 /// <summary>When GrayMoon suggests read-only. A suggestion is never applied without the user.</summary>
 public static class WorkspaceReferenceSuggestions
 {
-    public const string ArchivedSingle = "This repository is archived on the provider, so pushes are rejected. Make it read-only?";
+    public const string ArchivedSingle = "This repository is archived on the provider, so pushes are rejected. Make it read only?";
 
-    public const string ArchivedList = "Archived on the provider, so pushes are rejected. Make them read-only?";
+    public const string ArchivedList = "Archived on the provider, so pushes are rejected. Make them read only?";
 
     public static bool SuggestForArchived(bool archived, bool isReference) => archived && !isReference;
 }

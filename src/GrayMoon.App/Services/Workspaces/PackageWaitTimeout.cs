@@ -29,8 +29,8 @@ internal static class PackageWaitTimeout
         {
             return message
                 + (readOnlyProducers.Count == 1
-                    ? $" Repository {readOnlyProducers[0]} produces a missing package and is read-only"
-                    : $" Repositories {string.Join(", ", readOnlyProducers)} produce missing packages and are read-only")
+                    ? $" Repository {readOnlyProducers[0]} produces a missing package and is read only"
+                    : $" Repositories {string.Join(", ", readOnlyProducers)} produce missing packages and are read only")
                 + $": GrayMoon does not push {(readOnlyProducers.Count == 1 ? "it" : "them")}."
                 + " Publish the package from outside GrayMoon, or use a version that is already published.";
         }

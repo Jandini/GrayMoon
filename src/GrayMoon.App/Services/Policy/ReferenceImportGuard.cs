@@ -60,6 +60,6 @@ public sealed class ReferenceImportGuard(
             workspaceId, string.Join(", ", blockedIds));
 
         return [.. blocked.Select(group =>
-            $"{string.Join(" ", group.Select(finding => finding.Message))} It was added as writable, not read-only.")];
+            $"{string.Join(" ", group.Select(finding => finding.Message))} It was added as writable, not read only.")];
     }
 }

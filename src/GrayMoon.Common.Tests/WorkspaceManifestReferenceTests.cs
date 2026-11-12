@@ -153,7 +153,7 @@ public sealed class WorkspaceManifestReferenceTests
             Json("\"version\": 2,", "", $", \"reference\": false, \"branch\": \"main\", \"commit\": \"{Sha}\""), out _, out var error));
         Assert.Contains("Repository 'Billing'", error);
         Assert.Contains("branch", error);
-        Assert.Contains("not read-only", error);
+        Assert.Contains("not read only", error);
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public sealed class WorkspaceManifestReferenceTests
     }
 
     [Theory]
-    [InlineData(", \"branch\": \"main\", \"commit\": \"" + Sha + "\"", "not read-only")]
+    [InlineData(", \"branch\": \"main\", \"commit\": \"" + Sha + "\"", "not read only")]
     [InlineData(", \"reference\": \"yes\", \"branch\": \"main\", \"commit\": \"" + Sha + "\"", "reference must be true or false")]
     [InlineData(", \"reference\": true, \"branch\": 7, \"commit\": \"" + Sha + "\"", "branch")]
     public void An_invalid_entry_gives_no_pinned_revision(string repository, string expected)

@@ -157,7 +157,7 @@ public sealed class RepositoryOperationPolicyMatrixTests
             && !(individual && SnapshotAllowsForOneOnly.Contains(operation)))
         {
             AssertForbidden(decision, scope, RepositoryOperationReason.ReferenceSnapshot);
-            Assert.Equal("Repository is a read-only snapshot in this Feature.", decision.Message);
+            Assert.Equal("Repository is a read only snapshot in this Feature.", decision.Message);
             return;
         }
 
@@ -166,7 +166,7 @@ public sealed class RepositoryOperationPolicyMatrixTests
             && !(individual && ReferenceAllowsForOneOnly.Contains(operation)))
         {
             AssertForbidden(decision, scope, RepositoryOperationReason.Reference);
-            Assert.Equal("Repository is read-only.", decision.Message);
+            Assert.Equal("Repository is read only.", decision.Message);
             return;
         }
 

@@ -379,7 +379,7 @@ public sealed class WorkspaceManifestService(
                 manifest => WorkspaceRepositoryRevisionPins.TryApply(manifest, changes, out var updated, out var error)
                     ? (updated, null)
                     : (null, error ?? "The repository revision could not be recorded."),
-                "Recording read-only repository revisions failed.",
+                "Recording read only repository revisions failed.",
                 cancellationToken);
 
     /// <summary>

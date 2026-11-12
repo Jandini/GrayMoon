@@ -30,12 +30,12 @@ public sealed record WorkspaceManifestDrift(
             var names = string.Join(", ", ChangedReference.Take(MaxNamedRepositories));
             var more = ChangedReference.Count - MaxNamedRepositories;
             parts.Add(more > 0
-                ? $"The read-only state differs for {names} and {more} more."
-                : $"The read-only state differs for {names}.");
+                ? $"The read only state differs for {names} and {more} more."
+                : $"The read only state differs for {names}.");
         }
 
         if (ReferenceDefaultChanged)
-            parts.Add("The read-only default for new repositories differs.");
+            parts.Add("The read only default for new repositories differs.");
 
         return parts.Count == 0 ? null : string.Join(" ", parts);
     }

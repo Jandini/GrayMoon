@@ -104,11 +104,11 @@ public sealed class ReferencePerRepositoryTests
         var many = new WorkspaceManifestDrift(true, null, [], [], [], [], []) { ChangedReference = ["A", "B", "C", "D", "E", "F", "G"] };
 
         Assert.Null(none.DescribeReferenceDifferences());
-        Assert.Equal("The read-only state differs for Api, Web.", names.DescribeReferenceDifferences());
+        Assert.Equal("The read only state differs for Api, Web.", names.DescribeReferenceDifferences());
         Assert.Equal(
-            "The read-only state differs for Api. The read-only default for new repositories differs.",
+            "The read only state differs for Api. The read only default for new repositories differs.",
             both.DescribeReferenceDifferences());
-        Assert.Equal("The read-only state differs for A, B, C, D, E and 2 more.", many.DescribeReferenceDifferences());
+        Assert.Equal("The read only state differs for A, B, C, D, E and 2 more.", many.DescribeReferenceDifferences());
     }
 
     [Theory]

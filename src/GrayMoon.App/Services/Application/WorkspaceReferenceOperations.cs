@@ -29,10 +29,10 @@ public sealed class WorkspaceReferenceOperations(
     internal const string BlockedMessage = "Nothing was changed. Some repositories have work that is only on this machine.";
 
     internal const string WorkerNotConnectedMessage =
-        "Worker not connected. Start the GrayMoon Worker so the repositories can be checked before they become read-only.";
+        "Worker not connected. Start the GrayMoon Worker so the repositories can be checked before they become read only.";
 
     internal const string NoWorkspaceRepositoryNotice =
-        "This Workspace has no Workspace repository, so the read-only state and the commits of read-only repositories are not recorded in a Workspace definition. Restoring it on another computer needs a Workspace repository.";
+        "This Workspace has no Workspace repository, so the read only state and the commits of read only repositories are not recorded in a Workspace definition. Restoring it on another computer needs a Workspace repository.";
 
     public async Task<WorkspaceReferenceState> GetStateAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
@@ -71,7 +71,7 @@ public sealed class WorkspaceReferenceOperations(
         CancellationToken cancellationToken = default) =>
         RunLockedAsync(
             workspaceId,
-            reference ? "Making repositories read-only..." : "Making repositories writable...",
+            reference ? "Making repositories read only..." : "Making repositories writable...",
             progress,
             (report, ct) => ChangeAsync(workspaceId, repositoryId: null, reference, alsoSetDefault ? reference : null, report, ct),
             cancellationToken);
@@ -79,7 +79,7 @@ public sealed class WorkspaceReferenceOperations(
     public Task<WorkspaceReferenceChangeResult> SetDefaultAsync(int workspaceId, bool referenceDefault, CancellationToken cancellationToken = default) =>
         RunLockedAsync(
             workspaceId,
-            "Saving the read-only default...",
+            "Saving the read only default...",
             progress: null,
             (report, ct) => ChangeAsync(workspaceId, repositoryId: null, reference: null, referenceDefault, report, ct),
             cancellationToken);
@@ -92,7 +92,7 @@ public sealed class WorkspaceReferenceOperations(
         CancellationToken cancellationToken = default) =>
         RunLockedAsync(
             workspaceId,
-            reference ? "Making the repository read-only..." : "Making the repository writable...",
+            reference ? "Making the repository read only..." : "Making the repository writable...",
             progress,
             (report, ct) => ChangeAsync(workspaceId, repositoryId, reference, referenceDefault: null, report, ct),
             cancellationToken);
@@ -128,7 +128,7 @@ public sealed class WorkspaceReferenceOperations(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Changing read-only mode threw. WorkspaceId={WorkspaceId}", workspaceId);
+                    logger.LogWarning(ex, "Changing read only mode threw. WorkspaceId={WorkspaceId}", workspaceId);
                     tcs.TrySetResult(WorkspaceReferenceChangeResult.Failed(ex.Message));
                 }
             },
@@ -182,7 +182,7 @@ public sealed class WorkspaceReferenceOperations(
                 return WorkspaceReferenceChangeResult.Failed(WorkerNotConnectedMessage);
 
             progress.Report(new OperationProgress("Checking repositories..."));
-            report = await activationChecker.CheckAsync(workspaceId, [.. changing.Select(link => link.RepositoryId)], cancellationToken);
+            report = await activationChecker.CheckAsync(workspaceId, [.. changing.Select(link => link.RepositoryId)], cancellationToken, progress);
             if (report.IsBlocked)
             {
                 return new WorkspaceReferenceChangeResult
@@ -204,7 +204,7 @@ public sealed class WorkspaceReferenceOperations(
             workspace.ReferenceDefault = referenceDefault!.Value;
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation(
-            "Persistence: saved read-only mode. WorkspaceId={WorkspaceId}, Reference={Reference}, RepositoryIds=[{RepositoryIds}], Default={Default}",
+            "Persistence: saved read only mode. WorkspaceId={WorkspaceId}, Reference={Reference}, RepositoryIds=[{RepositoryIds}], Default={Default}",
             workspaceId, reference, string.Join(", ", changing.Select(link => link.RepositoryId)), defaultChanges ? referenceDefault : null);
 
         if (hasWorkspaceRepository)

@@ -47,7 +47,7 @@ public static class WorkspaceDefinitionRevisionPin
 
         if (!isReference)
         {
-            error = $"{label} has a branch but is not read-only. branch is recorded only for a repository with reference set to true.";
+            error = $"{label} has a branch but is not read only. branch is recorded only for a repository with reference set to true.";
             return false;
         }
 

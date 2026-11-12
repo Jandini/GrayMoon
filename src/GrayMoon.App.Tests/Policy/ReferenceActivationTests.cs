@@ -329,6 +329,50 @@ public sealed class ReferenceActivationTests
         Assert.Equal([graph.ConsumerId], report.Heads.Keys);
     }
 
+    [Fact]
+    public async Task Repositories_are_inspected_at_the_same_time_and_reported_in_name_order_with_progress()
+    {
+        await using var ctx = await CreateAsync();
+        var graph = await SeedGraphAsync(ctx);
+        var inFlight = 0;
+        var bothInFlight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ctx.WorkerBridge.RespondAsync("InspectWorktree", async (args, ct) =>
+        {
+            if (Interlocked.Increment(ref inFlight) == 2)
+                bothInFlight.TrySetResult();
+            // One after the other would never have two requests open: the wait would time out.
+            await bothInFlight.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
+            var response = Clean();
+            response.AheadOfUpstream = 1;
+            return new WorkerCommandResponse(true, response, null);
+        });
+        var progress = new RecordingProgress();
+
+        await using var scope = ctx.CreateScope();
+        var report = await ActivatorUtilities.CreateInstance<ReferenceActivationChecker>(scope.ServiceProvider)
+            .CheckAsync(ctx.WorkspaceId, [graph.ConsumerId, graph.ProducerId], default, progress);
+
+        Assert.Equal([graph.ProducerId, graph.ConsumerId], report.Blocks.Select(finding => finding.RepositoryId));
+        Assert.Equal(ReferenceActivationChecker.ProgressMessage(0, 2), progress.Messages[0]);
+        Assert.Contains(ReferenceActivationChecker.ProgressMessage(2, 2), progress.Messages);
+        Assert.Equal(3, progress.Messages.Count);
+    }
+
+    private sealed class RecordingProgress : IProgress<GrayMoon.Application.OperationProgress>
+    {
+        private readonly List<string> _messages = [];
+
+        public IReadOnlyList<string> Messages
+        {
+            get { lock (_messages) return [.. _messages]; }
+        }
+
+        public void Report(GrayMoon.Application.OperationProgress value)
+        {
+            lock (_messages) _messages.Add(value.Message);
+        }
+    }
+
     private static async Task<ReferenceActivationReport> CheckAsync(SyncStateTestContext ctx, params int[] repositoryIds)
     {
         await using var scope = ctx.CreateScope();

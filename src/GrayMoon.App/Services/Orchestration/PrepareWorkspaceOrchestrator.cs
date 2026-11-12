@@ -14,7 +14,7 @@ public sealed class PrepareWorkspaceOrchestrator(
 {
     public const string NoRepositoriesMessage = "Prepare Workspace stopped: no repositories were selected.";
 
-    public const string OnlyReadOnlyRepositoriesMessage = "Prepare Workspace stopped: every selected repository is read-only.";
+    public const string OnlyReadOnlyRepositoriesMessage = "Prepare Workspace stopped: every selected repository is read only.";
 
     public async Task<PrepareWorkspaceResult> RunAsync(
         int workspaceId,
