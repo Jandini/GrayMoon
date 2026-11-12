@@ -45,6 +45,17 @@ public sealed class WorkspaceFeatureRepository
     /// <summary>True when the Feature pins this repository to a tag: its worktree is detached and it has no Feature branch.</summary>
     public bool IsDetached => PinnedTag != null;
 
+    /// <summary>
+    /// True when this Feature holds the repository as a reference snapshot: the Source was a reference repository
+    /// when the Feature was created, so the worktree is detached at <see cref="BaseCommitSha"/> and has no Feature
+    /// branch. Set at creation and never changed afterwards.
+    /// </summary>
+    public bool IsReferenceSnapshot { get; set; }
+
+    /// <summary>Branch the Source was on when the reference snapshot was taken; null when it was on a tag or this is not a snapshot.</summary>
+    [MaxLength(200)]
+    public string? SourceBranchName { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public WorkspaceFeatureRepositoryState State { get; set; } = WorkspaceFeatureRepositoryState.Pending;

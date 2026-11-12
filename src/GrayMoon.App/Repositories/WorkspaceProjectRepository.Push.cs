@@ -172,7 +172,7 @@ public sealed partial class WorkspaceProjectRepository
             new WorkspaceFeatureContextId(workspaceFeatureContextId),
             RepositoryOperation.Push,
             repositoryIds: null,
-            RepositorySubjectSource.ContextStateFirst,
+            RepositorySubjectSources.PushPlan,
             cancellationToken)).Eligible.ToHashSet();
 
     /// <summary>Legacy overload for callers without a context id: resolves the special Workspace context.</summary>

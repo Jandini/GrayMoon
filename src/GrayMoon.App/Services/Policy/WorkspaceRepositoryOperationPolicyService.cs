@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GrayMoon.App.Services.Policy;
 
 /// <summary>
-/// Reads each repository's checkout state for a context and applies <see cref="RepositoryOperationPolicy"/>.
+/// Reads each repository's checkout state and reference flags for a context and applies <see cref="RepositoryOperationPolicy"/>.
 /// The single reader of "which row holds this context's tag". Uses factory-created contexts only, so it is safe
 /// beside a circuit's DbContext and inside parallel work.
 /// </summary>
@@ -100,6 +100,7 @@ public sealed class WorkspaceRepositoryOperationPolicyService(
                 link.WorkspaceRepositoryId,
                 RepositoryName = link.Repository != null ? link.Repository.RepositoryName : null,
                 link.Role,
+                link.IsReference,
                 link.BranchName,
                 link.CheckedOutTag,
             })
@@ -128,13 +129,28 @@ public sealed class WorkspaceRepositoryOperationPolicyService(
                 .ToDictionary(state => state.WorkspaceRepositoryId, state => (state.BranchName, state.CheckedOutTag));
         }
 
+        // A reference snapshot belongs to one Feature; the Workspace itself never has one.
+        var snapshotLinkIds = new HashSet<int>();
+        if (!isSpecialWorkspace)
+        {
+            var allLinkIds = links.Select(link => link.WorkspaceRepositoryId).ToList();
+            snapshotLinkIds = (await db.WorkspaceFeatureRepositories
+                    .AsNoTracking()
+                    .Where(row => row.WorkspaceFeatureContextId == contextId.Value
+                        && row.IsReferenceSnapshot
+                        && allLinkIds.Contains(row.WorkspaceRepositoryId))
+                    .Select(row => row.WorkspaceRepositoryId)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+        }
+
         return links.Select(link =>
         {
             string? branchName;
             string? checkedOutTag;
             if (readsStates && states.TryGetValue(link.WorkspaceRepositoryId, out var state))
                 (branchName, checkedOutTag) = state;
-            else if (source == RepositorySubjectSource.LegacySharedLink || isSpecialWorkspace)
+            else if (isSpecialWorkspace)
                 (branchName, checkedOutTag) = (link.BranchName, link.CheckedOutTag);
             else
                 (branchName, checkedOutTag) = (null, null);
@@ -146,7 +162,9 @@ public sealed class WorkspaceRepositoryOperationPolicyService(
                     branchName,
                     checkedOutTag,
                     isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
-                    isFeatureContext: !isSpecialWorkspace));
+                    isFeatureContext: !isSpecialWorkspace,
+                    isReference: link.IsReference,
+                    isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId)));
         }).ToList();
     }
 }

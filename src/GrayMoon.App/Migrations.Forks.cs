@@ -69,6 +69,35 @@ public static partial class Migrations
         await AddNullableTextColumnIfMissingAsync(conn, "Connectors", "RemovedAtUtc");
     }
 
+    /// <summary>
+    /// Reference (read-only) repositories. Strict step 19: no try/catch, a failure propagates to
+    /// <see cref="RunStrictStepAsync"/>. Idempotent. Adds Workspaces.ReferenceDefault, WorkspaceRepositories.IsReference
+    /// and WorkspaceFeatureRepositories.IsReferenceSnapshot / SourceBranchName. Every existing row reads as writable.
+    /// Older steps load these tables through EF, whose model already has the columns, so the runner also calls this
+    /// before them (see <see cref="RunAllAsync(AppDbContext, ILogger?, TimeProvider?)"/>).
+    /// </summary>
+    public static async Task MigrateReferenceRepositoriesAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        // Tolerates tables that do not exist yet: it also runs ahead of older steps, before the Feature tables are created.
+        if (await TableExistsAsync(conn, "Workspaces"))
+            await AddBooleanColumnIfMissingAsync(conn, "Workspaces", "ReferenceDefault");
+
+        if (await TableExistsAsync(conn, "WorkspaceRepositories"))
+            await AddBooleanColumnIfMissingAsync(conn, "WorkspaceRepositories", "IsReference");
+
+        if (await TableExistsAsync(conn, "WorkspaceFeatureRepositories"))
+        {
+            await AddBooleanColumnIfMissingAsync(conn, "WorkspaceFeatureRepositories", "IsReferenceSnapshot");
+            await AddNullableTextColumnIfMissingAsync(conn, "WorkspaceFeatureRepositories", "SourceBranchName");
+        }
+
+        logger?.LogDebug("Reference repository columns are present.");
+    }
+
     private static async Task<bool> TableExistsAsync(System.Data.Common.DbConnection conn, string tableName)
     {
         await using var cmd = conn.CreateCommand();

@@ -16,12 +16,13 @@ public enum RepositorySubjectSource
     /// shared link and a Feature has no state. Kept because the push plan has always read it this way.
     /// </summary>
     ContextStateFirst,
+}
 
-    /// <summary>
-    /// The shared link in every context, so a Feature is judged by the Workspace checkout. Kept because the
-    /// dependency update path has always read it this way; it is wrong for a Feature and is replaced on purpose later.
-    /// </summary>
-    LegacySharedLink,
+/// <summary>The source each path reads. One place, so a path cannot read two different rows by accident.</summary>
+public static class RepositorySubjectSources
+{
+    /// <summary>The push plan.</summary>
+    public const RepositorySubjectSource PushPlan = RepositorySubjectSource.ContextStateFirst;
 }
 
 /// <summary>

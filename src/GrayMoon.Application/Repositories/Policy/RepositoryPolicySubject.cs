@@ -5,11 +5,11 @@ namespace GrayMoon.Application.Repositories.Policy;
 /// row it already trusts for that context (the shared link, the context state, a list item), never looked up here.
 /// </summary>
 /// <param name="IsWorkspaceRepository">True for the Workspace repository, false for a Source.</param>
-/// <param name="IsReference">Reference (read-only) mode. Always false until reference mode exists.</param>
+/// <param name="IsReference">True when the Source is a reference (read-only) repository. Shared by every context.</param>
 /// <param name="BranchName">The checked-out branch, or null.</param>
 /// <param name="CheckedOutTag">The checked-out tag, or null. Blank counts as no tag.</param>
 /// <param name="IsFeatureContext">True when the state is that of a Feature, false for the Workspace itself.</param>
-/// <param name="IsReferenceSnapshot">A reference repository held detached by a Feature. Always false until reference mode exists.</param>
+/// <param name="IsReferenceSnapshot">True when a Feature holds the repository as a detached reference snapshot.</param>
 public sealed record RepositoryPolicySubject(
     bool IsWorkspaceRepository,
     bool IsReference,
@@ -21,13 +21,15 @@ public sealed record RepositoryPolicySubject(
     /// <summary>The one tag test: null, empty and whitespace-only all mean "not on a tag".</summary>
     public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
 
-    /// <summary>A Source in the given checkout state, with reference mode off.</summary>
+    /// <summary>A repository in the given checkout state.</summary>
     public static RepositoryPolicySubject ForCheckout(
         string? branchName,
         string? checkedOutTag,
         bool isWorkspaceRepository = false,
-        bool isFeatureContext = false) =>
-        new(isWorkspaceRepository, IsReference: false, branchName, checkedOutTag, isFeatureContext, IsReferenceSnapshot: false);
+        bool isFeatureContext = false,
+        bool isReference = false,
+        bool isReferenceSnapshot = false) =>
+        new(isWorkspaceRepository, isReference, branchName, checkedOutTag, isFeatureContext, isReferenceSnapshot);
 }
 
 /// <summary>The answer for one operation on one repository.</summary>

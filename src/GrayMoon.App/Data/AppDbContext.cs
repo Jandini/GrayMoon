@@ -165,6 +165,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
 
             entity.Property(workspace => workspace.ManifestDriftDetectedAt);
 
+            entity.Property(workspace => workspace.ReferenceDefault)
+                .HasDefaultValue(false);
+
             entity.Property(workspace => workspace.PinnedAiProviderId)
                 .HasMaxLength(32);
         });
@@ -190,6 +193,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             entity.Property(wr => wr.Role)
                 .HasConversion<int>()
                 .HasDefaultValue(WorkspaceRepositoryRole.Source);
+
+            entity.Property(wr => wr.IsReference)
+                .HasDefaultValue(false);
 
             entity.HasIndex(wr => wr.WorkspaceId)
                 .IsUnique()

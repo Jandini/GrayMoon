@@ -51,6 +51,12 @@ public class Workspace
     [MaxLength(1000)]
     public string? ManagedFeatureStorageRoot { get; set; }
 
+    /// <summary>
+    /// Whether a Source repository added to this Workspace later starts as a reference (read-only) repository.
+    /// It is a default for new links only; it never changes an existing link and is not an input of the policy.
+    /// </summary>
+    public bool ReferenceDefault { get; set; }
+
     /// <summary>Set when the Workspace repository definition file (graymoon.json) was last found to differ from this Workspace; null when in agreement or never checked. Reconciliation state, not Git state.</summary>
     public DateTime? ManifestDriftDetectedAt { get; set; }
 

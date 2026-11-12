@@ -1645,11 +1645,24 @@ public sealed partial class WorkspacePushService(
         await _recomputeScope.CompleteAsync(workspaceId, contextId, cancellationToken);
     }
 
-    /// <summary>What a context has checked out in one repository. All null when the context has no state row yet.</summary>
-    private sealed record ContextCheckout(int WorkspaceRepositoryId, string? BranchName, string? CheckedOutTag, bool? BranchHasUpstream)
+    /// <summary>What a context has checked out in one repository. Branch, tag and upstream are null when the context has no state row yet.</summary>
+    private sealed record ContextCheckout(
+        int WorkspaceRepositoryId,
+        string? BranchName,
+        string? CheckedOutTag,
+        bool? BranchHasUpstream,
+        bool IsWorkspaceRepository,
+        bool IsReference,
+        bool IsFeatureContext = false,
+        bool IsReferenceSnapshot = false)
     {
-        /// <summary>The role and the context kind are not loaded here; no push rule reads them.</summary>
-        public RepositoryPolicySubject ToPolicySubject() => RepositoryPolicySubject.ForCheckout(BranchName, CheckedOutTag);
+        public RepositoryPolicySubject ToPolicySubject() => RepositoryPolicySubject.ForCheckout(
+            BranchName,
+            CheckedOutTag,
+            IsWorkspaceRepository,
+            IsFeatureContext,
+            IsReference,
+            IsReferenceSnapshot);
 
         public bool AllowsPush => RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, ToPolicySubject());
     }
@@ -1669,7 +1682,7 @@ public sealed partial class WorkspacePushService(
         if (repositoryIds != null)
             linkQuery = linkQuery.Where(wr => repositoryIds.Contains(wr.RepositoryId));
         var links = await linkQuery
-            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.BranchName, wr.CheckedOutTag, wr.BranchHasUpstream })
+            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.BranchName, wr.CheckedOutTag, wr.BranchHasUpstream, wr.Role, wr.IsReference })
             .ToListAsync(cancellationToken);
 
         var kind = await _dbContext.WorkspaceFeatureContexts
@@ -1681,7 +1694,13 @@ public sealed partial class WorkspacePushService(
         {
             return links.ToDictionary(
                 l => l.RepositoryId,
-                l => new ContextCheckout(l.WorkspaceRepositoryId, l.BranchName, l.CheckedOutTag, l.BranchHasUpstream));
+                l => new ContextCheckout(
+                    l.WorkspaceRepositoryId,
+                    l.BranchName,
+                    l.CheckedOutTag,
+                    l.BranchHasUpstream,
+                    l.Role == WorkspaceRepositoryRole.Workspace,
+                    l.IsReference));
         }
 
         var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
@@ -1690,11 +1709,29 @@ public sealed partial class WorkspacePushService(
             .Where(s => s.WorkspaceFeatureContextId == contextId.Value && linkIds.Contains(s.WorkspaceRepositoryId))
             .Select(s => new { s.WorkspaceRepositoryId, s.BranchName, s.CheckedOutTag, s.BranchHasUpstream })
             .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
+        var snapshotLinkIds = (await _dbContext.WorkspaceFeatureRepositories
+                .AsNoTracking()
+                .Where(row => row.WorkspaceFeatureContextId == contextId.Value
+                    && row.IsReferenceSnapshot
+                    && linkIds.Contains(row.WorkspaceRepositoryId))
+                .Select(row => row.WorkspaceRepositoryId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
         return links.ToDictionary(
             l => l.RepositoryId,
-            l => states.TryGetValue(l.WorkspaceRepositoryId, out var state)
-                ? new ContextCheckout(l.WorkspaceRepositoryId, state.BranchName, state.CheckedOutTag, state.BranchHasUpstream)
-                : new ContextCheckout(l.WorkspaceRepositoryId, null, null, null));
+            l =>
+            {
+                states.TryGetValue(l.WorkspaceRepositoryId, out var state);
+                return new ContextCheckout(
+                    l.WorkspaceRepositoryId,
+                    state?.BranchName,
+                    state?.CheckedOutTag,
+                    state?.BranchHasUpstream,
+                    l.Role == WorkspaceRepositoryRole.Workspace,
+                    l.IsReference,
+                    IsFeatureContext: true,
+                    IsReferenceSnapshot: snapshotLinkIds.Contains(l.WorkspaceRepositoryId));
+            });
     }
 
     private async Task<HashSet<int>> LoadPushSkippedRepoIdsAsync(

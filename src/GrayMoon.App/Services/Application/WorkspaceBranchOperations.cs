@@ -7,8 +7,10 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Git;
@@ -34,8 +36,22 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IWorkspaceManifestService manifestService,
     IServiceScopeFactory scopeFactory,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
+    /// <summary>A bad-request outcome with the policy message when the operation may not run on this repository, else null.</summary>
+    private async Task<BranchHttpOutcome?> RefuseByPolicyAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        RepositoryOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var decision = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, operation, repositoryId, cancellationToken: cancellationToken);
+        return decision.IsAllowed ? null : BranchHttpOutcome.BadRequest(decision.Message ?? "The operation is not possible for this repository.");
+    }
+
     public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
         => GetBranchesAsync(workspaceId, contextId: null, repositoryId, cancellationToken);
 
@@ -321,6 +337,10 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.ManualCheckout, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -472,6 +492,17 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.ReturnToDefault, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
+        // Where the clean-up is not allowed (a reference repository), Return to Default is a plain switch to the
+        // default branch: no branch is deleted, locally or on the remote, and nothing is discarded.
+        var cleanup = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.ReturnToDefaultCleanup, repositoryId, cancellationToken: cancellationToken);
+        if (!cleanup.IsAllowed)
+            return await SwitchToDefaultBranchAsync(workspaceId, contextId, repositoryId, cancellationToken);
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -505,6 +536,31 @@ public sealed class WorkspaceBranchOperations(
         }
     }
 
+    private async Task<BranchHttpOutcome> SwitchToDefaultBranchAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
+        if (resolved.Error != null)
+            return resolved.Error;
+
+        var defaultBranchName = resolved.Link!.DefaultBranchName;
+        if (string.IsNullOrWhiteSpace(defaultBranchName))
+            return BranchHttpOutcome.BadRequest("The default branch of this repository is not known yet. Sync the repository first.");
+
+        var checkout = await CheckoutAsync(workspaceId, contextId, repositoryId, defaultBranchName, isTag: false, cancellationToken);
+        if (checkout.Body is not CheckoutBranchApiResult result)
+            return checkout;
+
+        if (!result.Success)
+            return BranchHttpOutcome.Problem(result.ErrorMessage ?? "Failed to return to default branch", 500);
+
+        await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
+        return BranchHttpOutcome.Ok(new { success = true });
+    }
+
     public async Task<BranchHttpOutcome> GetCommonBranchesAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         if (workspaceId <= 0)
@@ -522,8 +578,9 @@ public sealed class WorkspaceBranchOperations(
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
 
-        // Repos checked out on a tag do not participate in the common-branch intersection.
-        links = links.Where(wr => !wr.IsOnTag).ToList();
+        // Repos checked out on a tag do not participate in the common-branch intersection, and neither do those a
+        // Workspace-wide checkout leaves alone (reference repositories).
+        links = links.Where(wr => !wr.IsOnTag && wr.Allows(RepositoryOperation.WorkspaceCheckout)).ToList();
 
         if (links.Count == 0)
         {
@@ -639,6 +696,10 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.CreateBranch, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -720,6 +781,10 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.SetUpstream, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -777,6 +842,14 @@ public sealed class WorkspaceBranchOperations(
         branchName = branchName?.Trim();
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
+
+        // Deleting a remote branch, or a local one git would only delete by force, can lose commits.
+        var deleteOperation = isRemote || force
+            ? RepositoryOperation.DeleteBranchRemoteOrForced
+            : RepositoryOperation.DeleteLocalBranch;
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, deleteOperation, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
 
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: false, cancellationToken);
         if (resolved.Error != null)
@@ -850,6 +923,10 @@ public sealed class WorkspaceBranchOperations(
     {
         if (workspaceId <= 0 || repositoryId <= 0)
             return BranchHttpOutcome.BadRequest("workspaceId and repositoryId are required.");
+
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.UpdateBranchFromDefault, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
 
         var result = await updateHandler.UpdateBranchFromDefaultAsync(workspaceId, contextId, repositoryId, cancellationToken);
 

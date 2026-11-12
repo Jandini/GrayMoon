@@ -357,9 +357,8 @@ public sealed class DependencyUpdateOrchestrator(
         string? runId,
         CancellationToken cancellationToken)
     {
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skipped = await workspaceGitService.GetSkippedRepositoriesAsync(
-            workspaceId, contextId, operation, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, operation, RepositorySubjectSource.Context, cancellationToken);
         if (skipped.Count == 0)
             return result;
 
@@ -392,9 +391,8 @@ public sealed class DependencyUpdateOrchestrator(
             return false;
         }
 
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await workspaceGitService.GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.UpdateVersionFiles, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.UpdateVersionFiles, RepositorySubjectSource.Context, cancellationToken);
         var repoIds = workspace.Repositories
             .Where(link => link.Repository != null && !skippedIds.Contains(link.RepositoryId))
             .Select(link => link.RepositoryId)
@@ -446,9 +444,8 @@ public sealed class DependencyUpdateOrchestrator(
         }
 
         // Repositories pinned to a tag (detached HEAD) must never participate in update: sync/commit/version refresh corrupts persisted branch/tag state and can yield "(no branch)".
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await workspaceGitService.GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.Context, cancellationToken);
         bool IsLeftOut(WorkspaceRepositoryLink link) => skippedIds.Contains(link.RepositoryId);
 
         // Dependency level is per-context (a Feature's own graph can differ from the Workspace's), so read
@@ -585,9 +582,8 @@ public sealed class DependencyUpdateOrchestrator(
             .ToList();
 
         // Never commit version-file changes for repos pinned to a tag.
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await workspaceGitService.GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.Context, cancellationToken);
         if (skippedIds.Count > 0)
             byRepo = byRepo.Where(r => !skippedIds.Contains(r.RepositoryId)).ToList();
         if (byRepo.Count == 0)

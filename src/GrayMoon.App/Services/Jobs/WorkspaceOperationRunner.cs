@@ -116,9 +116,8 @@ public sealed class WorkspaceOperationRunner(ILogger<WorkspaceOperationRunner> l
             set[contextId.Value] = 0;
             operation = created;
             created.Changed += RaiseChanged;
-            _ = RunAsync(created, work, onFinally: () =>
+            _ = RunAsync(created, work, releaseLock: () =>
             {
-                created.Changed -= RaiseChanged;
                 _contextByContextId.TryRemove(contextId.Value, out _);
                 if (_contextIdsByWorkspace.TryGetValue(workspaceId, out var wsSet))
                 {
@@ -166,9 +165,8 @@ public sealed class WorkspaceOperationRunner(ILogger<WorkspaceOperationRunner> l
 
             operation = created;
             created.Changed += RaiseChanged;
-            _ = RunAsync(created, async (op, ct) => await work((WorkspaceOperation)op, ct), onFinally: () =>
+            _ = RunAsync(created, async (op, ct) => await work((WorkspaceOperation)op, ct), releaseLock: () =>
             {
-                created.Changed -= RaiseChanged;
                 _structuralByWorkspace.TryRemove(new KeyValuePair<int, WorkspaceOperation>(workspaceId, created));
             });
         }
@@ -177,24 +175,30 @@ public sealed class WorkspaceOperationRunner(ILogger<WorkspaceOperationRunner> l
         return true;
     }
 
+    /// <summary>
+    /// Runs the work and then ends the operation. The lock is released before the operation reports its final state,
+    /// so whoever reacts to "completed" can start the next operation at once and is not refused by a lock that is
+    /// about to go.
+    /// </summary>
     private Task RunAsync(
         WorkspaceOperation created,
         Func<IWorkspaceLockedOperation, CancellationToken, Task> work,
-        Action onFinally)
+        Action releaseLock)
         => Task.Run(async () =>
         {
             var operationId = GrayMoonOperationContext.NewId();
             using var operationScope = GrayMoonOperationContext.Begin(operationId);
             using var operationProp = LogContext.PushProperty(GrayMoonLogProperties.OperationId, operationId);
             using var _ = TerminalSinkContext.Use(created.Terminal);
+            Action markEnded;
             try
             {
                 await work(created, created.CancellationToken);
-                created.MarkCompleted();
+                markEnded = created.MarkCompleted;
             }
             catch (OperationCanceledException)
             {
-                created.MarkAborted();
+                markEnded = created.MarkAborted;
             }
             catch (Exception ex)
             {
@@ -204,11 +208,17 @@ public sealed class WorkspaceOperationRunner(ILogger<WorkspaceOperationRunner> l
                     created.WorkspaceId,
                     created.OperationKind,
                     ex.Message);
-                created.MarkFaulted(ex);
+                markEnded = () => created.MarkFaulted(ex);
+            }
+
+            try
+            {
+                releaseLock();
+                markEnded();
             }
             finally
             {
-                onFinally();
+                created.Changed -= RaiseChanged;
                 created.NotifySettled();
                 RaiseChanged();
             }

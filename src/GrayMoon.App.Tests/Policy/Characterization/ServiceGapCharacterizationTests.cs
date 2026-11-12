@@ -4,6 +4,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Common.Git;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,29 +13,33 @@ using static GrayMoon.App.Tests.Policy.Characterization.PolicyHarness;
 namespace GrayMoon.App.Tests.Policy.Characterization;
 
 /// <summary>
-/// Phase 0A, finding F5: entry points that send a mutating Worker command for a tag-pinned repository because no
-/// service checks the tag (the only guard today is in the page that offers the action). Each test pins the seeded
-/// repository in the special Workspace and records that the command still reaches the Worker. Also the six write
-/// actions of <see cref="IWorkspaceBranchOperations"/>, none of which refuses a tag-pinned repository.
+/// Entry points that used to send a mutating Worker command for a tag-pinned repository because only the page checked
+/// the tag. Each test pins the seeded repository in the special Workspace. Pull, Update Branch from Default and a
+/// single Return to Default are now refused or skipped by the service. The others stay possible on a tag: they are how
+/// a repository leaves a tag (checkout, new branch), or they do not depend on the checkout.
 /// </summary>
 public sealed class ServiceGapCharacterizationTests
 {
     [Fact]
-    public async Task Pull_has_no_service_side_tag_check_today()
+    public async Task Pull_of_a_tag_pinned_repository_is_refused_and_a_level_pull_leaves_it_out()
     {
         await using var ctx = await PinnedAsync();
         var special = await ctx.GetSpecialContextIdAsync();
 
         await using var scope = ctx.CreateScope();
         var sync = scope.ServiceProvider.GetRequiredService<IWorkspaceSyncOperations>();
-        await sync.PullAsync(ctx.WorkspaceId, special, ctx.RepositoryId, null, CancellationToken.None);
-        await sync.PullLevelAsync(ctx.WorkspaceId, special, [ctx.RepositoryId], null, CancellationToken.None);
+        var single = await sync.PullAsync(ctx.WorkspaceId, special, ctx.RepositoryId, null, CancellationToken.None);
+        var level = await sync.PullLevelAsync(ctx.WorkspaceId, special, [ctx.RepositoryId], null, CancellationToken.None);
 
-        Assert.Equal(2, Calls(ctx, "CommitSyncRepository").Count);
+        Assert.False(single.Success);
+        Assert.Equal(RepositoryOperationPolicy.OnTagMessage, single.RepoErrors![ctx.RepositoryId]);
+        Assert.True(level.Success);
+        Assert.Equal([ctx.RepositoryId], level.Skipped.Select(skip => skip.RepositoryId));
+        Assert.Empty(Calls(ctx, "CommitSyncRepository"));
     }
 
     [Fact]
-    public async Task Bulk_create_branch_has_no_service_side_tag_check_today()
+    public async Task Bulk_create_branch_is_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "feature/prep", Branch = "feature/prep" });
@@ -55,7 +60,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Prepare_workspace_with_null_repository_ids_has_no_service_side_tag_check_today()
+    public async Task Prepare_workspace_with_null_repository_ids_is_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "feature/prep", Branch = "feature/prep" });
@@ -81,7 +86,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Workspace_wide_checkout_has_no_service_side_tag_check_today()
+    public async Task Workspace_wide_checkout_is_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         ctx.WorkerBridge.Respond("CheckoutBranch", new CheckoutBranchResponse { Success = true, CurrentBranch = "main" });
@@ -104,7 +109,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Git_changes_commit_has_no_service_side_tag_check_today()
+    public async Task Git_changes_commit_is_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         var special = await ctx.GetSpecialContextIdAsync();
@@ -117,7 +122,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Git_changes_stage_and_unstage_have_no_service_side_tag_check_today()
+    public async Task Git_changes_stage_and_unstage_are_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         var special = await ctx.GetSpecialContextIdAsync();
@@ -132,16 +137,18 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Update_branch_from_default_has_no_service_side_tag_check_today()
+    public async Task Update_branch_from_default_of_a_tag_pinned_repository_is_refused()
     {
         await using var ctx = await PinnedAsync();
         var special = await ctx.GetSpecialContextIdAsync();
 
         await using var scope = ctx.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>()
+        var outcome = await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>()
             .UpdateBranchFromDefaultAsync(ctx.WorkspaceId, special, ctx.RepositoryId);
 
-        Assert.Equal([ProducerName], RepositoryNames(ctx, "UpdateBranchFromDefault"));
+        Assert.Equal(400, outcome.StatusCode);
+        Assert.Equal(RepositoryOperationPolicy.OnTagMessage, outcome.ErrorText);
+        Assert.Empty(Calls(ctx, "UpdateBranchFromDefault"));
     }
 
     [Fact]
@@ -165,7 +172,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Create_branch_on_a_tag_pinned_repository_has_no_service_side_tag_check_today()
+    public async Task Create_branch_is_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic", Branch = "topic" });
@@ -180,7 +187,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Set_upstream_on_a_tag_pinned_repository_has_no_service_side_tag_check_today()
+    public async Task Set_upstream_is_allowed_on_a_tag()
     {
         await using var ctx = await PinnedAsync();
         var special = await ctx.GetSpecialContextIdAsync();
@@ -195,7 +202,7 @@ public sealed class ServiceGapCharacterizationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Delete_branch_on_a_tag_pinned_repository_has_no_service_side_tag_check_today(bool isRemote)
+    public async Task Delete_branch_is_allowed_on_a_tag(bool isRemote)
     {
         await using var ctx = await PinnedAsync();
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
@@ -209,7 +216,7 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Single_return_to_default_on_a_tag_pinned_repository_has_no_service_side_tag_check_today()
+    public async Task Single_return_to_default_of_a_tag_pinned_repository_is_refused()
     {
         await using var ctx = await PinnedAsync();
         ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new ReturnToDefaultBranchResponse
@@ -222,10 +229,12 @@ public sealed class ServiceGapCharacterizationTests
         var special = await ctx.GetSpecialContextIdAsync();
 
         await using var scope = ctx.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>().ReturnToDefaultAsync(
+        var outcome = await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>().ReturnToDefaultAsync(
             ctx.WorkspaceId, special, ctx.RepositoryId, "feature/x", deleteRemoteBranch: false, allowForceDeleteLocalBranch: false);
 
-        Assert.Single(Calls(ctx, "ReturnToDefaultBranch"));
+        Assert.Equal(400, outcome.StatusCode);
+        Assert.Equal(RepositoryOperationPolicy.OnTagMessage, outcome.ErrorText);
+        Assert.Empty(Calls(ctx, "ReturnToDefaultBranch"));
     }
 
     /// <summary>The one branch read that does filter: a tag-pinned link takes no part in the common-branch intersection.</summary>

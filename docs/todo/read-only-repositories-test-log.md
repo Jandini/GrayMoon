@@ -143,3 +143,93 @@ The same command fails in the same way on an export of commit `ece83ab7` (built 
 - No check that each new test detects a defect by breaking the code on purpose, except what the tests show by themselves: the convention test failed with the full list of readers before the allow-list was filled in, and the service tests failed where a test host had no policy registered.
 - The manual smoke list (owner, at the gates).
 - No test was run on a second machine or operating system.
+
+## 0B follow-ups - 2026-11-12
+
+Base: commit `459c120c`. Not committed. Plan: `read-only-repositories-0b-follow-ups.md`, steps 1 and 2 of "Resulting order".
+
+### Mutation checks
+
+Each change was applied alone, the whole App suite was run, and the file was restored. "Caught" means at least one test failed that does not fail without the change.
+
+| # | Change | Result | Tests that failed |
+|---|---|---|---|
+| 1 | Rule table: Push allowed on a tag | caught, 34 failed | matrix, counter and push characterization, push strategy, service and skip tests |
+| 2 | Rule table: Sync not allowed on a tag | caught, 8 failed | `Every_operation_answers_as_it_did_before_the_policy` only. No service asks the policy for Sync. |
+| 5a | Loader: a Feature without a state row reads the link | caught, 3 failed | service tests, Feature restore characterization |
+| 5b | Loader: a Feature never reads its state rows | caught, 6 failed | service tests, restore characterization, `FeatureContextBranchRefreshScopingTests` |
+| 7a | `DependencyUpdateOrchestrator`: source changed to `Context` | **not caught** | none |
+| 7b | `WorkspaceGitService.Projects.cs`: source changed to `Context` | caught, 2 failed | Feature update plan characterization |
+| 7c | `WorkspaceGitService.Commit.cs`: source changed to `Context` | caught, 1 failed | Feature commit characterization |
+| 8 | Push plan: source changed to `Context` | **not caught** | none |
+| 9 | Query form: a tag is "not null" only | caught, 40 failed | `RepositoryOperationPolicyExpressionsTests` |
+| 10 | Header query: one `ExpandRepositoryPolicy()` removed (each of the four) | caught, 6 to 13 failed | counter characterization, header state tests |
+| 12 | `[JsonIgnore]` removed from `OperationResult.Skipped` | caught, 1 failed | `Skips_are_not_part_of_the_REST_response` |
+
+Closing 7a and 8:
+
+- The source of the update path and of the push plan is now one constant each (`RepositorySubjectSources.UpdatePath`, `.PushPlan`), used by every call site.
+- New `Policy/RepositoryPolicySubjectSourceTests.cs`, 3 tests: the Workspace push plan reads a state row before the link (both directions), and a Feature update run names a repository the Workspace has on a tag.
+- Run again against the constants: `UpdatePath` changed to `Context` fails 4 tests; `PushPlan` changed to `Context` fails 1 test.
+
+Not covered: a call site that stops using the constant and names another source itself. A full dependency-aware update run of a Feature is not tested end to end; the test host has no Worker answer for `RefreshRepositoryProjects`.
+
+### The two tests that failed together
+
+Command, 10 or 20 runs each:
+
+```
+dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build --filter "FullyQualifiedName~AiAndGitChangesSweepTests|FullyQualifiedName~BackgroundJobRefusedStartTests"
+```
+
+| Tree | `Workspace_job_refused_by_the_lock_reports_not_started` | `Cancel_racing_the_end_of_a_run_never_throws` |
+|---|---|---|
+| Both fixes | 0 of 20 failed | 0 of 20 failed |
+| Lock fix undone | 10 of 10 failed | 0 of 10 failed |
+| Test change undone | 0 of 10 failed | 9 of 10 failed |
+
+Causes:
+
+- Lock: `WorkspaceOperationRunner.RunAsync` marked the operation completed (which raises `Changed`) and released the lock afterwards. The test waits for "completed" and starts the next job at once. Fixed in the product: the lock is released first.
+- AI run: the test expected the run to finish inline on the completing thread. Under the test runner the run was started with a synchronization context, so it finished later. Fixed in the test: the run is started from a pool thread.
+
+### Suites after the changes
+
+| Step | Result |
+|---|---|
+| Build (`dotnet build GrayMoon.slnx`) | succeeded, 0 warnings, 0 errors |
+| App tests, 5 runs | 2751 passed, 0 failed in each (+3: `RepositoryPolicySubjectSourceTests`) |
+| App `Category=Long` | 2 passed |
+| Common tests | 393 passed |
+| Worker tests | 1015 passed, 1 skipped (same test as the baseline) |
+| Worker `Category=Long` | 2 passed |
+
+### Not run
+
+- Mutations 3, 4, 6, 11, 13, 14, 15 (planned for later; 14 needs a new test first).
+- The manual smoke list.
+
+## Phase 0C and 0D - 2026-11-12
+
+Base: commit `459c120c` plus the uncommitted follow-up changes above. Not committed.
+
+### 0C gate
+
+Automated part: the "Suites after the changes" table above (build, Common, Worker, App five times, both `Long` runs), all passed. Compared with the 0A baseline: Common and Worker totals are the same and the same Worker test is skipped; App grew only by tests added in F22, 0B and the follow-ups.
+
+Manual smoke list M1-M8: **not run** (needs a running App and Worker and a person).
+
+### 0D
+
+| Step | Result | Change |
+|---|---|---|
+| Build (App tests project) | succeeded, 0 warnings, 0 errors | - |
+| App tests | 2750 passed, 0 failed, 0 skipped (20 s) | -1: `The_legacy_source_judges_a_Feature_by_the_Workspace_link` deleted with the source it tested |
+
+Tests changed on purpose (each asserted the old behavior and passed against it before the change):
+
+- `ServiceGapCharacterizationTests`: `Pull_of_a_tag_pinned_repository_is_refused_and_a_level_pull_leaves_it_out`, `Update_branch_from_default_of_a_tag_pinned_repository_is_refused`, `Single_return_to_default_of_a_tag_pinned_repository_is_refused` now assert no Worker call and the tag message. The other tests of the class are renamed from `..._has_no_service_side_tag_check_today` to `..._is_allowed_on_a_tag`; what they assert is unchanged.
+- `UpdateCharacterizationTests`: the three Feature tests are reversed (`Feature_update_plan_keeps_a_repository_only_the_Workspace_has_on_a_tag`, `Feature_update_plan_leaves_out_a_repository_the_Feature_has_on_a_tag_while_the_Workspace_is_on_a_branch`, `Feature_commit_keeps_a_repository_only_the_Workspace_has_on_a_tag_and_drops_one_the_Feature_has_on_a_tag`).
+- `RepositoryPolicySubjectSourceTests`: the Feature update run now names what the Feature has on a tag and not what the Workspace has.
+
+Not run for 0D: Common and Worker tests (no file of theirs changed), the manual smoke list.

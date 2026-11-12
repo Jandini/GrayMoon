@@ -240,7 +240,7 @@ It is registered **scoped**: one instance per circuit (browser tab), so a toast 
 
 ### Tag-pinned repositories
 
-Repositories checked out on a tag (`IsOnTag` / `CheckedOutTag`, including Workspace tag pins) are never candidates for mutating multi-repo operations (Return to Default, Push, Sync Commits, Update Dependencies, Prepare Workspace branch work, Merge PRs... return follow-ups, and similar). Filter them out of id sets and leave them untouched in service paths; see `AGENTS.md` and `docs/architecture/06-developer-extension-guide.md` section 11.
+Repositories checked out on a tag (`IsOnTag` / `CheckedOutTag`, including Workspace tag pins) are never candidates for mutating multi-repo operations (Return to Default, Push, Sync Commits, Update Dependencies, Prepare Workspace branch work, Merge PRs... return follow-ups, and similar). Decide eligibility through `RepositoryOperationPolicy` (the `Allows(operation)` extensions, `IWorkspaceRepositoryOperationPolicy`, or `RepositoryOperationPolicyExpressions` in a query), never by reading the tag yourself, and leave such repositories untouched in service paths; see `AGENTS.md` and `docs/architecture/06-developer-extension-guide.md` section 11.
 
 ### CSS conventions for the loading overlay terminal
 

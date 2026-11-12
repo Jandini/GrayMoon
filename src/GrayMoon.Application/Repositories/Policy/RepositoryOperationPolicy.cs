@@ -14,8 +14,21 @@ public static class RepositoryOperationPolicy
     /// <summary>The message for a push of a repository that is on a tag.</summary>
     public const string OnTagPushMessage = "Repository is pinned to a tag. Checkout a branch before pushing.";
 
-    /// <summary>One row per operation. <see cref="AllowedOnTag"/> is what GrayMoon does today for a tag checkout.</summary>
-    public sealed record Rule(bool AllowedOnTag, string OnTagMessage = RepositoryOperationPolicy.OnTagMessage);
+    /// <summary>The message for an operation that a reference (read-only) repository does not take part in.</summary>
+    public const string ReferenceMessage = "Repository is read-only.";
+
+    /// <summary>The message for an operation on a repository a Feature holds as a detached read-only snapshot.</summary>
+    public const string ReferenceSnapshotMessage = "Repository is a read-only snapshot in this Feature.";
+
+    /// <summary>One row per operation.</summary>
+    /// <param name="AllowedOnTag">What GrayMoon does for a tag checkout.</param>
+    /// <param name="Reference">What a reference repository on a branch allows.</param>
+    /// <param name="ReferenceSnapshot">What a reference repository held detached by a Feature allows.</param>
+    public sealed record Rule(
+        bool AllowedOnTag,
+        ReferenceRule Reference,
+        ReferenceRule ReferenceSnapshot,
+        string OnTagMessage = RepositoryOperationPolicy.OnTagMessage);
 
     /// <summary>
     /// The rule table. It is data so that a test can enumerate it; adding a <see cref="RepositoryOperation"/>
@@ -23,40 +36,43 @@ public static class RepositoryOperationPolicy
     /// </summary>
     public static FrozenDictionary<RepositoryOperation, Rule> Rules { get; } = new Dictionary<RepositoryOperation, Rule>
     {
-        [RepositoryOperation.Sync] = new(AllowedOnTag: true),
-        [RepositoryOperation.Fetch] = new(AllowedOnTag: true),
-        [RepositoryOperation.RefreshProjects] = new(AllowedOnTag: false),
-        [RepositoryOperation.RestorePackages] = new(AllowedOnTag: false),
+        [RepositoryOperation.Sync] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Allowed),
+        [RepositoryOperation.Fetch] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Allowed),
+        [RepositoryOperation.RefreshProjects] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Allowed),
+        [RepositoryOperation.RestorePackages] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Allowed),
 
-        [RepositoryOperation.Pull] = new(AllowedOnTag: false),
+        [RepositoryOperation.Pull] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Forbidden),
 
         // Moving off a tag is how a repository leaves it, so the checkouts and branch creation stay possible.
         // "Skip repos on tags" in the Workspace-wide dialogs is a user option, not a rule: see IsOnTag on the subject.
-        [RepositoryOperation.ManualCheckout] = new(AllowedOnTag: true),
-        [RepositoryOperation.WorkspaceCheckout] = new(AllowedOnTag: true),
-        [RepositoryOperation.CreateBranch] = new(AllowedOnTag: true),
-        [RepositoryOperation.ReturnToDefault] = new(AllowedOnTag: false),
-        [RepositoryOperation.ReturnToDefaultCleanup] = new(AllowedOnTag: false),
+        [RepositoryOperation.ManualCheckout] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Forbidden),
+        [RepositoryOperation.WorkspaceCheckout] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.CreateBranch] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.ReturnToDefault] = new(AllowedOnTag: false, ReferenceRule.IndividualOnly, ReferenceRule.Forbidden),
+        [RepositoryOperation.ReturnToDefaultCleanup] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
 
-        [RepositoryOperation.DeleteLocalBranch] = new(AllowedOnTag: true),
-        [RepositoryOperation.DeleteBranchRemoteOrForced] = new(AllowedOnTag: true),
-        [RepositoryOperation.UpdateBranchFromDefault] = new(AllowedOnTag: false),
-        [RepositoryOperation.UpdateDependencies] = new(AllowedOnTag: false),
-        [RepositoryOperation.UpdateVersionFiles] = new(AllowedOnTag: false),
-        [RepositoryOperation.Commit] = new(AllowedOnTag: false),
-        [RepositoryOperation.Push] = new(AllowedOnTag: false, OnTagPushMessage),
-        [RepositoryOperation.SetUpstream] = new(AllowedOnTag: true),
-        [RepositoryOperation.UndoPush] = new(AllowedOnTag: false),
-        [RepositoryOperation.CreatePullRequest] = new(AllowedOnTag: false),
-        [RepositoryOperation.MergePullRequest] = new(AllowedOnTag: false),
-        [RepositoryOperation.RunWorkflow] = new(AllowedOnTag: true),
+        [RepositoryOperation.DeleteLocalBranch] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Forbidden),
+        [RepositoryOperation.DeleteBranchRemoteOrForced] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.UpdateBranchFromDefault] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.UpdateDependencies] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.UpdateVersionFiles] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.Commit] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        // A commit the user makes in Git Changes. A tag checkout has always allowed it; the commit GrayMoon makes after
+        // a dependency or version file update is the row above.
+        [RepositoryOperation.CommitGitChanges] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.Push] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden, OnTagPushMessage),
+        [RepositoryOperation.SetUpstream] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.UndoPush] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.CreatePullRequest] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.MergePullRequest] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        [RepositoryOperation.RunWorkflow] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
 
-        [RepositoryOperation.Stage] = new(AllowedOnTag: true),
-        [RepositoryOperation.Unstage] = new(AllowedOnTag: true),
-        [RepositoryOperation.Discard] = new(AllowedOnTag: true),
+        [RepositoryOperation.Stage] = new(AllowedOnTag: true, ReferenceRule.IndividualOnly, ReferenceRule.IndividualOnly),
+        [RepositoryOperation.Unstage] = new(AllowedOnTag: true, ReferenceRule.IndividualOnly, ReferenceRule.IndividualOnly),
+        [RepositoryOperation.Discard] = new(AllowedOnTag: true, ReferenceRule.IndividualOnly, ReferenceRule.IndividualOnly),
 
         // A repository on a tag joins a Feature detached, without a Feature branch.
-        [RepositoryOperation.CreateFeatureBranch] = new(AllowedOnTag: false),
+        [RepositoryOperation.CreateFeatureBranch] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
     }.ToFrozenDictionary();
 
     /// <summary>
@@ -76,12 +92,35 @@ public static class RepositoryOperationPolicy
         if (subject.IsOnTag && !rule.AllowedOnTag)
             return Forbidden(scope, RepositoryOperationReason.OnTag, rule.OnTagMessage);
 
+        // The Workspace repository is where GrayMoon writes the Workspace definition: it is never a reference repository.
+        if (subject.IsWorkspaceRepository)
+            return RepositoryOperationDecision.Allowed;
+
+        if (subject.IsReferenceSnapshot && !Permits(rule.ReferenceSnapshot, scope))
+            return Forbidden(scope, RepositoryOperationReason.ReferenceSnapshot, ReferenceSnapshotMessage);
+
+        if (subject.IsReference && !Permits(rule.Reference, scope))
+            return Forbidden(scope, RepositoryOperationReason.Reference, ReferenceMessage);
+
         return RepositoryOperationDecision.Allowed;
     }
 
-    /// <summary>True when the operation may run. The scope changes how a "no" is reported, never the answer.</summary>
-    public static bool IsAllowed(RepositoryOperation operation, RepositoryPolicySubject subject) =>
-        Evaluate(operation, RepositoryOperationScope.Bulk, subject).IsAllowed;
+    /// <summary>
+    /// True when the operation may run. For a tag the scope changes only how a "no" is reported. A reference
+    /// repository allows a few operations (Return to Default as a plain switch, stage, unstage, discard) when the
+    /// user names the repository and leaves them out of a bulk action, so a caller acting on one named repository
+    /// passes <see cref="RepositoryOperationScope.Individual"/>.
+    /// </summary>
+    public static bool IsAllowed(
+        RepositoryOperation operation,
+        RepositoryPolicySubject subject,
+        RepositoryOperationScope scope = RepositoryOperationScope.Bulk) =>
+        Evaluate(operation, scope, subject).IsAllowed;
+
+    /// <summary>True when a rule cell allows the operation in the given scope.</summary>
+    public static bool Permits(ReferenceRule rule, RepositoryOperationScope scope) =>
+        rule == ReferenceRule.Allowed
+        || (rule == ReferenceRule.IndividualOnly && scope == RepositoryOperationScope.Individual);
 
     private static RepositoryOperationDecision Forbidden(
         RepositoryOperationScope scope,

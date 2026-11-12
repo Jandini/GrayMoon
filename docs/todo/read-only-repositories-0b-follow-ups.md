@@ -1,8 +1,29 @@
 # Read-only repositories - follow-ups from Phase 0B
 
-Date: 2026-11-12. Code: `C:\Workspace\GrayMoon\GrayMoon`, branch `readonly-repos`. Phase 0B is done and not committed.
+Date: 2026-11-12. Code: `C:\Workspace\GrayMoon\GrayMoon`, branch `readonly-repos`. Phase 0B is committed (`1c67c21a`).
 
-Phase 0B moved the tag eligibility checks to one policy without changing behavior. Five things were left open. This document says what each one is, what to do about it, and when. Nothing here is started.
+Phase 0B moved the tag eligibility checks to one policy without changing behavior. Five things were left open. This document says what each one is, what to do about it, and when. The state of each item is in the next section.
+
+## Status - 2026-11-12
+
+Steps 1 and 2 of the resulting order are done and not committed. Details and commands are in the test log ("0B follow-ups").
+
+| Item | State |
+|---|---|
+| 5 (required part): mutations 1, 2, 5, 7, 8, 9, 10, 12 | Run. Two were not caught (7 in `DependencyUpdateOrchestrator`, 8 in the push plan); both are closed with new tests in `Policy/RepositoryPolicySubjectSourceTests.cs`. Mutation 2 is caught by the matrix test only: no service asks the policy for Sync, so no characterization test can react. |
+| 4: two tests that fail together | Cause found for both, and both fixed. One was a defect in the Workspace operation lock (below). The other was a wrong assumption in the test. |
+| 1, 2, 3 and the rest of 5 | Not started. Placed as written under "Required" and "Can wait". |
+
+What changed in the product:
+
+- **`WorkspaceOperationRunner` releases the lock before the operation reports its final state.** Before, the operation reported "completed" first and released the lock after. Code that reacted to "completed" by starting the next operation could be refused by a lock that was about to go. With the fix undone the test fails in 10 of 10 runs together with the other class; with it, 0 of 20.
+- **One constant per path for the row a tag is read from** (`RepositorySubjectSources.UpdatePath`, `RepositorySubjectSources.PushPlan`). The update path had eleven call sites that each named the source; a test could cover only the ones it reached. Now one test covers all of them, and the Feature update fix (F6) is a one-line change.
+
+What changed in tests only:
+
+- `AiAndGitChangesSweepTests.Cancel_racing_the_end_of_a_run_never_throws` starts the run from a pool thread. Started from the test itself, the run resumed through the test runner's synchronization context and not inline, so the run could still be marked as running when the test looked. `AiTextGenerationRuns` is not at fault. With the change undone the test fails in 9 of 10 runs; with it, 0 of 20.
+
+The lock fix and the test change are unrelated to read-only repositories. They are in their own files (`WorkspaceOperationRunner.cs`, `AiAndGitChangesSweepTests.cs`) so they can be committed alone.
 
 Related: `read-only-repositories-implementation-plan.md` (section 6, "0B as built"), `read-only-repositories-test-log.md` ("Phase 0B").
 
@@ -16,7 +37,54 @@ Related: `read-only-repositories-implementation-plan.md` (section 6, "0B as buil
 | 4 | Two existing tests fail when run together | Find the cause, fix the tests or the code | Separate change, before the 0C gate | No |
 | 5 | No mutation checks for the new tests | Run a fixed list of mutations once and record the result | 0C, before the gate | No |
 
-Recommended order: 4, 5, 1, 2, 3. Item 4 first because a full run that fails at random makes every later gate unreliable. Item 5 second because it checks the tests that guard items 1 to 3.
+The table says where each item fits best if all of it is done. The next section says which parts are required to complete the work and which can wait.
+
+## Recommendation: what is required and what can wait
+
+The read-only repositories work is complete when a reference repository cannot be changed through any entry point, every skip is visible to the user, and the tag behavior of today is intact. Each item below is judged against that, using the rule table in section 4.1 of the plan.
+
+Short version: of the five items, parts of 1, 2 and 5 and the diagnosis half of 4 are required. Item 3 and the rest of 1, 4 and 5 can wait until after the reference gate.
+
+### Required
+
+| What | Latest point | Why it cannot wait |
+|---|---|---|
+| **5 (part): mutations 1, 2, 5, 7, 8, 9, 10, 12** | Before 0B is committed | 0B claims that nothing changed, and the tests are the only evidence. These eight check the tag rules, the three subject sources and the counter queries. Phase 1 changes exactly these places on purpose; if a test does not react to a wrong rule now, it will not react to a wrong reference rule later. About 15 short test runs. |
+| **4 (part): find the cause (steps 1 and 2)** | Before the 0C gate | One of the two tests is about the Workspace operation lock. If the lock is released after the job is reported as finished, that is a product defect in the mechanism the reference rules rely on to refuse work at dispatch. It has to be known, not guessed. If the cause is only thread pool starvation in the test, the fix can wait (see below). |
+| **1 (part): split the commits badge of a row into pull and push** | Phase 1, with the row work | For a reference repository on a branch, Pull is allowed and Push is refused. One `Disabled` flag cannot show that. Without the split the badge either blocks an allowed pull or offers a refused push. |
+| **2 (part): fill `Skipped` in the pipelined push lane and in bulk Return to Default** | Phase 1, before skips are shown to the user | Phase 1 shows "N read-only repositories skipped" and adds the list to the REST bodies. Both operations skip reference repositories. If they do not fill the list, the user is told nothing for the two operations where a silent skip is most surprising. |
+| **Convention test covers the reference fields** (new, grows out of item 3) | Phase 1, in the change that adds the fields | The test guards the tag getters only. The day `IsReference` and `IsReferenceSnapshot` exist, their getters must be on the guarded list, or reference checks can be written by hand anywhere and nothing fails. This is the cheap half of item 3: the existing compiled-call scan, two more getters. |
+| **Mutation 14: a test for the page helper** | Phase 1, with the page work | The page refusals (toast and disabled action) are what the user sees of the feature, and `IsRepoAllowed` has no test. Move it to a static helper that can be tested, as `UiRaceGuards` is. |
+
+Also required, already in the plan and not new here. They are listed because the five items do not replace them:
+
+- **Review and commit 0B, then the 0C gate** with the manual smoke list M1 to M8. Only the owner can do both.
+- **F5: page-only checks get a service check.** Otherwise a REST caller walks past every reference rule.
+- **F6: the update path stops reading the Workspace checkout for a Feature** (`LegacySharedLink` removed). A reference snapshot is per Feature; a rule that reads the Workspace row gives the wrong answer for it.
+- **Entry points outside the Workspace lock ask the policy at dispatch** (decision already made).
+
+### Can wait until after the reference gate
+
+| What | Why it is safe to wait | Cost of waiting |
+|---|---|---|
+| **1 (rest): `SyncFromRow` and `SyncLevel` rules, `AreAllOnTag`** | Sync is allowed for a reference repository in every column of the rule table. The buttons that read the tag today therefore give the right answer for a reference repository too. | Two OPEN entries stay in the convention test. A level that holds only reference repositories keeps its action buttons enabled; pressing one skips every repository and reports it (once the required part of item 2 is done). Cosmetic. |
+| **2 (rest): commit, project refresh, Restore Packages as separate results** | Their skips are the same repositories the update run already reports. | None for the user. |
+| **3 (rest): source scan for tag comparisons inside query expressions** | The four header projections are covered by the parity test and the counter characterization tests. The gap is a new, fifth projection written by hand, and Phase 1 adds terms to the existing four, not a new one. | A hand-written comparison in a new query would not be caught automatically; a reviewer has to see it. |
+| **4 (rest): the fix, if the cause is test-only** | A full run that fails at random can be run again and the failure named in the log, as in 0B. | Every gate needs a second look when one of the two tests fails. Annoying, not dangerous. |
+| **5 (rest): mutations 3, 4, 6, 13, 15, and 11** | 3, 4 and 15 fail by construction (the test asserts the thing directly). 6 and 13 guard paths Phase 1 does not change. 11 cannot fail until pull and push differ, which Phase 1 brings; rerun it then. | Low. Run them once at the reference gate. |
+
+### Not recommended
+
+- **Option B of item 1** (one answer for Sync on a tag everywhere) inside this work. It changes what users see for tags, which the reference work promised not to do. If wanted, it is a separate change with its own decision.
+- **Fixing the two failing tests inside a read-only repositories commit.** They are unrelated code; keep the change separate so it can be reviewed and reverted alone.
+
+### Resulting order
+
+1. Mutations 1, 2, 5, 7, 8, 9, 10, 12. Add a test for any that passes. Then commit 0B.
+2. Cause of the two failing tests. Fix now only if the lock is at fault.
+3. 0C gate.
+4. Phase 1, with the four required parts above placed in the work packages they belong to.
+5. After the reference gate: everything in "Can wait".
 
 ## 1. Sync treats a tag checkout differently by entry point
 

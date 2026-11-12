@@ -129,9 +129,9 @@ public sealed class UpdateCharacterizationTests
         Assert.Equal([ConsumerName], RepositoryNames(ctx, "StageAndCommit"));
     }
 
-    /// <summary>F6: the update plan of a Feature is filtered by the Workspace link's tag, not the Feature's own checkout.</summary>
+    /// <summary>The update plan of a Feature is filtered by the Feature's own checkout; a tag in the Workspace does not count.</summary>
     [Fact]
-    public async Task Feature_update_plan_leaves_out_a_repository_the_Workspace_has_on_a_tag_although_the_Feature_is_on_a_branch()
+    public async Task Feature_update_plan_keeps_a_repository_only_the_Workspace_has_on_a_tag()
     {
         await using var ctx = await CreateAsync();
         await ctx.UseDotNetDependencyProfileAsync();
@@ -146,12 +146,12 @@ public sealed class UpdateCharacterizationTests
         var after = await UpdatePlanAsync(ctx, feature);
 
         Assert.Equal([graph.ConsumerId], before);
-        Assert.Empty(after);
+        Assert.Equal([graph.ConsumerId], after);
     }
 
-    /// <summary>F6, the other direction: a repository the Feature has on a tag is still planned for an update.</summary>
+    /// <summary>The other direction: a repository the Feature has on a tag is not planned for an update.</summary>
     [Fact]
-    public async Task Feature_update_plan_includes_a_repository_the_Feature_has_on_a_tag_while_the_Workspace_is_on_a_branch()
+    public async Task Feature_update_plan_leaves_out_a_repository_the_Feature_has_on_a_tag_while_the_Workspace_is_on_a_branch()
     {
         await using var ctx = await CreateAsync();
         await ctx.UseDotNetDependencyProfileAsync();
@@ -163,12 +163,12 @@ public sealed class UpdateCharacterizationTests
 
         var plan = await UpdatePlanAsync(ctx, feature);
 
-        Assert.Equal([graph.ConsumerId], plan);
+        Assert.Empty(plan);
     }
 
-    /// <summary>F6: the commit step in a Feature also reads the Workspace link.</summary>
+    /// <summary>The commit step in a Feature reads the Feature's own checkout too.</summary>
     [Fact]
-    public async Task Feature_commit_drops_a_repository_the_Workspace_has_on_a_tag_and_keeps_one_the_Feature_has_on_a_tag()
+    public async Task Feature_commit_keeps_a_repository_only_the_Workspace_has_on_a_tag_and_drops_one_the_Feature_has_on_a_tag()
     {
         await using var ctx = await CreateAsync();
         var graph = await SeedGraphAsync(ctx);
@@ -184,7 +184,7 @@ public sealed class UpdateCharacterizationTests
             feature,
             [(graph.ProducerId, ProducerName, ["version.txt"]), (graph.ConsumerId, ConsumerName, ["version.txt"])]);
 
-        Assert.Equal([ConsumerName], RepositoryNames(ctx, "StageAndCommit"));
+        Assert.Equal([ProducerName], RepositoryNames(ctx, "StageAndCommit"));
     }
 
     [Fact]

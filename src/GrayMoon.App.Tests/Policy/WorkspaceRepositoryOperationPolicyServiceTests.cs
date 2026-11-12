@@ -65,20 +65,6 @@ public sealed class WorkspaceRepositoryOperationPolicyServiceTests
     }
 
     [Fact]
-    public async Task The_legacy_source_judges_a_Feature_by_the_Workspace_link()
-    {
-        await using var ctx = await CreateAsync();
-        var graph = await SeedGraphAsync(ctx);
-        await PinWorkspaceAsync(ctx, graph.ProducerId);
-        var feature = await SeedFeatureAsync(ctx, [new FeatureRepo(graph.ProducerId, Branch: "feature/y")]);
-
-        var subject = (await Policy(ctx).GetSubjectsAsync(ctx.WorkspaceId, feature, RepositorySubjectSource.LegacySharedLink))[graph.ProducerId];
-
-        Assert.Equal(Tag, subject.CheckedOutTag);
-        Assert.True(subject.IsFeatureContext);
-    }
-
-    [Fact]
     public async Task State_first_prefers_the_Workspace_state_row_over_the_link()
     {
         await using var ctx = await CreateAsync();

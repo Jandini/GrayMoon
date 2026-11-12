@@ -172,8 +172,16 @@ A repository checked out on a tag (Workspace tag pin in `graymoon.json`, or any
 Dependencies, Return to Default, Prepare Workspace branch work, bulk Merge PRs...
 return-to-default follow-ups, or any similar mutating multi-repo operation.
 
-1. **Filter at the call site** - build candidate id sets with `!wr.IsOnTag` (or
-   equivalent). UI tips such as "Repositories checked out on a tag will not be
+1. **Ask the policy, do not read the tag** - whether an operation may run on a
+   repository is decided by `RepositoryOperationPolicy`
+   (`GrayMoon.Application/Repositories/Policy`). Code that holds rows uses the
+   `Allows(operation)` extensions; a service that loads its own rows uses
+   `IWorkspaceRepositoryOperationPolicy` (`PartitionAsync` for a set,
+   `EvaluateAsync` for one repository); a database query uses
+   `RepositoryOperationPolicyExpressions`. Do not write `!wr.IsOnTag` or compare
+   `CheckedOutTag` for an eligibility decision: `RepositoryPolicyConventionTests`
+   fails. A new operation gets a value in `RepositoryOperation` and a row in the
+   rule table. UI tips such as "Repositories checked out on a tag will not be
    affected" match this rule.
 2. **Service paths leave tags untouched** - if a tag id still reaches an
    operation, skip it (do not mutate, do not fail the batch for that reason).

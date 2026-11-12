@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -26,6 +27,7 @@ public sealed class WorkspaceCommitSyncHandler(
     IHubContext<WorkspaceSyncHub> hubContext,
     IServiceScopeFactory serviceScopeFactory,
     IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
     public async Task CommitSyncAsync(
@@ -50,6 +52,14 @@ public sealed class WorkspaceCommitSyncHandler(
         if (repo == null)
         {
             setRepositoryError(repositoryId, "Repository not found.");
+            return;
+        }
+
+        var decision = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.Pull, repositoryId, cancellationToken: cancellationToken);
+        if (!decision.IsAllowed)
+        {
+            setRepositoryError(repositoryId, decision.Message);
             return;
         }
 
@@ -121,7 +131,8 @@ public sealed class WorkspaceCommitSyncHandler(
         }
     }
 
-    public async Task CommitSyncLevelAsync(
+    /// <summary>Pulls the given repositories. Returns the ones the policy left out; they are not sent to the Worker.</summary>
+    public async Task<IReadOnlyList<RepositorySkip>> CommitSyncLevelAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
@@ -131,20 +142,28 @@ public sealed class WorkspaceCommitSyncHandler(
         Action<string?> setPageError)
     {
         if (repositoryIds.Count == 0)
-            return;
+            return [];
 
         if (!workerBridge.IsWorkerConnected)
         {
             setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
-            return;
+            return [];
         }
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
         {
             setPageError("Workspace not found.");
-            return;
+            return [];
         }
+
+        var eligibility = await operationPolicy.PartitionAsync(
+            workspaceId, contextId, RepositoryOperation.Pull, repositoryIds, cancellationToken: cancellationToken);
+        var skippedIds = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+        if (skippedIds.Count > 0)
+            repositoryIds = repositoryIds.Where(id => !skippedIds.Contains(id)).ToList();
+        if (repositoryIds.Count == 0)
+            return eligibility.Skipped;
 
         var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
         var workspaceRoot = workerArgs.WorkspaceRoot;
@@ -237,6 +256,8 @@ public sealed class WorkspaceCommitSyncHandler(
         {
             // Caller handles reload on cancel.
         }
+
+        return eligibility.Skipped;
     }
 
     private static async Task ApplyResultToDbAsync(

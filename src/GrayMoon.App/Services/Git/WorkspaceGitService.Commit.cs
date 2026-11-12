@@ -30,9 +30,8 @@ public sealed partial class WorkspaceGitService
         if (!_workerBridge.IsWorkerConnected || reposToCommit.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.Context, cancellationToken);
         reposToCommit = reposToCommit.Where(r => !skippedIds.Contains(r.RepoId)).ToList();
         if (reposToCommit.Count == 0)
             return Array.Empty<(int, bool, string?)>();
@@ -128,9 +127,8 @@ public sealed partial class WorkspaceGitService
         if (!_workerBridge.IsWorkerConnected || reposAndPaths.Count == 0)
             return Array.Empty<(int, bool, string?)>();
 
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.Commit, RepositorySubjectSource.Context, cancellationToken);
         reposAndPaths = reposAndPaths.Where(r => !skippedIds.Contains(r.RepoId)).ToList();
         if (reposAndPaths.Count == 0)
             return Array.Empty<(int, bool, string?)>();

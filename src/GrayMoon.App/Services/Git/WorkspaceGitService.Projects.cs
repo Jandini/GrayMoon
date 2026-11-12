@@ -44,9 +44,8 @@ public sealed partial class WorkspaceGitService
         if (repositoryIds != null && repositoryIds.Count > 0)
             repos = repos.Where(r => repositoryIds.Contains(r.RepositoryId)).ToList();
 
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.RefreshProjects, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.RefreshProjects, RepositorySubjectSource.Context, cancellationToken);
         if (skippedIds.Count > 0)
             repos = repos.Where(r => !skippedIds.Contains(r.RepositoryId)).ToList();
 
@@ -137,9 +136,8 @@ public sealed partial class WorkspaceGitService
         if (repo == null)
             throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
 
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var refreshDecision = await _operationPolicy.EvaluateAsync(
-            workspaceId, contextId, RepositoryOperation.RefreshProjects, repositoryId, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.RefreshProjects, repositoryId, RepositorySubjectSource.Context, cancellationToken);
         if (!refreshDecision.IsAllowed)
             return false;
 
@@ -190,9 +188,8 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var updateDecision = await _operationPolicy.EvaluateAsync(
-            workspaceId, contextId, RepositoryOperation.UpdateDependencies, repositoryId, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, repositoryId, RepositorySubjectSource.Context, cancellationToken);
         if (!updateDecision.IsAllowed)
             return;
 
@@ -214,9 +211,8 @@ public sealed partial class WorkspaceGitService
             return (Array.Empty<SyncDependenciesRepoPayload>(), false);
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.Context, cancellationToken);
 
         var withUpdates = payloads
             .Where(p => p.ProjectUpdates.Count > 0 && !skippedIds.Contains(p.RepoId))
@@ -251,9 +247,8 @@ public sealed partial class WorkspaceGitService
             return new HashSet<int>();
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-        // The update path has always judged a Feature by the Workspace checkout (shared link); kept as it is.
         var skippedIds = await GetSkippedRepositoryIdsAsync(
-            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.LegacySharedLink, cancellationToken);
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.Context, cancellationToken);
 
         var toSync = payloads
             .Where(p => p.ProjectUpdates.Count > 0 && (repoIdsToSync == null || repoIdsToSync.Contains(p.RepoId)))

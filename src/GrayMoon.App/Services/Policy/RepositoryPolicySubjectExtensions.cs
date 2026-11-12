@@ -19,7 +19,9 @@ public static class RepositoryPolicySubjectExtensions
             link.BranchName,
             link.CheckedOutTag,
             isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
-            isFeatureContext: isFeatureContext);
+            isFeatureContext: isFeatureContext,
+            isReference: link.IsReference,
+            isReferenceSnapshot: link.IsReferenceSnapshot);
 
     /// <summary>The subject of a list row, which already carries the selected context's branch and tag.</summary>
     public static RepositoryPolicySubject ToPolicySubject(this WorkspaceRepositoryLinkListItemDto row, bool isFeatureContext) =>
@@ -27,24 +29,40 @@ public static class RepositoryPolicySubjectExtensions
             row.BranchName,
             row.CheckedOutTag,
             isWorkspaceRepository: row.Role == WorkspaceRepositoryRole.Workspace,
-            isFeatureContext: isFeatureContext);
+            isFeatureContext: isFeatureContext,
+            isReference: row.IsReference,
+            isReferenceSnapshot: row.IsReferenceSnapshot);
 
     /// <summary>True when <paramref name="operation"/> may run on the repository this link describes.</summary>
-    public static bool Allows(this WorkspaceRepositoryLink link, RepositoryOperation operation, bool isFeatureContext) =>
-        RepositoryOperationPolicy.IsAllowed(operation, link.ToPolicySubject(isFeatureContext));
+    public static bool Allows(
+        this WorkspaceRepositoryLink link,
+        RepositoryOperation operation,
+        bool isFeatureContext,
+        RepositoryOperationScope scope = RepositoryOperationScope.Bulk) =>
+        RepositoryOperationPolicy.IsAllowed(operation, link.ToPolicySubject(isFeatureContext), scope);
 
     /// <summary>True when <paramref name="operation"/> may run on the repository this list row describes.</summary>
-    public static bool Allows(this WorkspaceRepositoryLinkListItemDto row, RepositoryOperation operation, bool isFeatureContext) =>
-        RepositoryOperationPolicy.IsAllowed(operation, row.ToPolicySubject(isFeatureContext));
+    public static bool Allows(
+        this WorkspaceRepositoryLinkListItemDto row,
+        RepositoryOperation operation,
+        bool isFeatureContext,
+        RepositoryOperationScope scope = RepositoryOperationScope.Bulk) =>
+        RepositoryOperationPolicy.IsAllowed(operation, row.ToPolicySubject(isFeatureContext), scope);
 
     /// <summary>
-    /// For a caller that was handed rows without the kind of context they came from. No rule reads the context kind
-    /// for the operations these callers ask about; a rule that starts to must be given the kind by its caller.
+    /// For a caller that was handed rows without the kind of context they came from. No rule reads the context kind:
+    /// the row itself says whether it is a reference repository or a reference snapshot.
     /// </summary>
-    public static bool Allows(this WorkspaceRepositoryLink link, RepositoryOperation operation) =>
-        link.Allows(operation, isFeatureContext: false);
+    public static bool Allows(
+        this WorkspaceRepositoryLink link,
+        RepositoryOperation operation,
+        RepositoryOperationScope scope = RepositoryOperationScope.Bulk) =>
+        link.Allows(operation, isFeatureContext: false, scope);
 
-    /// <inheritdoc cref="Allows(WorkspaceRepositoryLink, RepositoryOperation)"/>
-    public static bool Allows(this WorkspaceRepositoryLinkListItemDto row, RepositoryOperation operation) =>
-        row.Allows(operation, isFeatureContext: false);
+    /// <inheritdoc cref="Allows(WorkspaceRepositoryLink, RepositoryOperation, RepositoryOperationScope)"/>
+    public static bool Allows(
+        this WorkspaceRepositoryLinkListItemDto row,
+        RepositoryOperation operation,
+        RepositoryOperationScope scope = RepositoryOperationScope.Bulk) =>
+        row.Allows(operation, isFeatureContext: false, scope);
 }

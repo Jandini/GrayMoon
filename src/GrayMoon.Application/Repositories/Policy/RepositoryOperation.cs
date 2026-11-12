@@ -29,6 +29,7 @@ public enum RepositoryOperation
     UpdateDependencies,
     UpdateVersionFiles,
     Commit,
+    CommitGitChanges,
     Push,
     SetUpstream,
     UndoPush,
@@ -43,6 +44,17 @@ public enum RepositoryOperation
 
     // Features.
     CreateFeatureBranch,
+}
+
+/// <summary>What a reference repository allows for one operation.</summary>
+public enum ReferenceRule
+{
+    Allowed,
+
+    /// <summary>Allowed when the user names the repository; left out of a bulk action.</summary>
+    IndividualOnly,
+
+    Forbidden,
 }
 
 /// <summary>Whether the user asked for this one repository, or it is one of many in a Workspace-wide action.</summary>

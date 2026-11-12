@@ -261,7 +261,7 @@ Exit: 0A tests unchanged and green, new policy tests green. **Stop for review, t
 
 ### 0B as built (2026-11-12)
 
-Done, not committed, waiting for review. Where the result differs from the steps above:
+Committed as `1c67c21a`. Where the result differs from the steps above:
 
 - **Subject carries a bool, not the role enum.** `RepositoryPolicySubject.IsWorkspaceRepository` replaces `WorkspaceRepositoryRole Role` (the enum is not visible to `GrayMoon.Application`). The enum did not move.
 - **Subject source has three values:** `Context`, `ContextStateFirst` (the push plan: a state row wins in the Workspace too) and `LegacySharedLink` (the update path, F6). The "missing Feature state row" case needs no value of its own: a Feature repository without a state row is on no branch and no tag under `Context` and `ContextStateFirst`, as before.
@@ -277,7 +277,7 @@ Left for 0C or later, found while moving the checks:
 - **The commits badge of a row** is disabled by the tag itself, because it stands for pull and push together.
 - **The header counters compare the column with null and the empty string; the policy also treats blank text as no tag.** Nothing stores blank text (F8). `Blank_text_is_a_tag_to_the_query_form_only` records the difference.
 - **The convention test scans compiled calls.** A tag read written inside a database query expression is not seen by it.
-- **Two existing tests fail when run together and alone they pass** (`AiAndGitChangesSweepTests.Cancel_racing_the_end_of_a_run_never_throws`, `BackgroundJobRefusedStartTests.Workspace_job_refused_by_the_lock_reports_not_started`). The same happens on commit `ece83ab7`; it is not caused by 0B. See the test log.
+- **Two existing tests failed when run together** (`AiAndGitChangesSweepTests.Cancel_racing_the_end_of_a_run_never_throws`, `BackgroundJobRefusedStartTests.Workspace_job_refused_by_the_lock_reports_not_started`). Not caused by 0B. Both are fixed; see `read-only-repositories-0b-follow-ups.md` and the test log.
 
 ## 7. Phase 0C - gate, then 0D
 
@@ -290,6 +290,28 @@ Left for 0C or later, found while moving the checks:
 - Run the 0C command list again and log it.
 
 **Stop for review.**
+
+### 0C and 0D as built (2026-11-12)
+
+Not committed. The owner asked on 2026-11-12 to continue through the next phases without a stop here.
+
+**0C.** The automated part passed (test log, "0B follow-ups" and "Phase 0C and 0D"). The manual smoke list M1-M8 was **not run**: it needs a running App and Worker and a person. It is still owed before a release.
+
+**0D.** What the service now does for a repository on a tag:
+
+| Entry point | Before | Now |
+|---|---|---|
+| Pull of one repository (`WorkspaceCommitSyncHandler.CommitSyncAsync`) | sent to the Worker | refused with the tag message |
+| Pull of a level (`CommitSyncLevelAsync`) | sent to the Worker | left out, named in `OperationResult.Skipped` |
+| Update Branch from Default (`WorkspaceBranchOperations`) | sent to the Worker | refused, HTTP 400 with the tag message |
+| Return to Default of one repository (`WorkspaceBranchOperations`) | sent to the Worker | refused, HTTP 400 with the tag message |
+| Dependency update, version files, project refresh and their commits in a Feature | judged by the Workspace checkout | judged by the Feature's own checkout (F6). `LegacySharedLink` is deleted. |
+
+Not changed, against the first draft of this section:
+
+- **Bulk Create Branch, Prepare Workspace with no ids, Workspace checkout, single checkout, Create Branch, Set Upstream, Delete Branch.** They are allowed on a tag in the rule table: a checkout or a new branch is how a repository leaves a tag, and "Skip repos on tags" is an option of the dialog, not a rule. A REST caller that passes no ids gets what the dialog does with the option off.
+- **Git Changes commit, stage and unstage.** The Git Changes page has never checked the tag, so a commit on a tag checkout is possible there today. Refusing it would take something away from users, which 0D must not do. Consequence for Phase 1 (WP7): the reference rule for a Git Changes commit needs its own operation (`CommitGitChanges`), because `Commit` (the dependency and version-file commit) is not allowed on a tag.
+- **Actions bulk rerun.** Run Workflow is allowed on a tag.
 
 ## 8. Phase 1 - persistence, enforcement, Workspace-wide control
 
