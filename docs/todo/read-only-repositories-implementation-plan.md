@@ -1,5 +1,7 @@
 # Read-only (reference) repositories - implementation plan
 
+> **History, not open work (2026-11-12).** Read only repositories are built and merged. What is still open is only in [read-only-repositories-open-items](read-only-repositories-open-items.md). Statements below such as "nothing is built", "not started" or "open" describe the time this was written. This document is deleted with the others after the manual smoke.
+
 Status: plan only, nothing is built. Written 2026-11-11 against commit `1515d32b` (branch `readonly-repos`). Reviewed against the code on 2026-11-12; the owner answered decisions D1-D12 the same day, all as recommended.
 
 Design source: [ideas/read-only-repositories](ideas/read-only-repositories.md). That note holds the decisions; this plan holds the order of work, the code that changes, and the tests. Where the two disagree, section 2 says so and names the decision that is needed.
@@ -1044,3 +1046,12 @@ Not committed (base `0a9fe3d4`).
 - **One product change:** new `Components/GitChanges/GitChangesRepositoryLabel.razor`, used by `GitChangesTree.razor`. Same markup; it exists so the label can be rendered outside `Virtualize`.
 - **Still open:** `SwitchBranchModal` and `WorkspaceReferenceSection` are not rendered by a test, and nothing checks CSS or a browser. That stays with the manual smoke.
 - Details and results: test log, "Reference-mode gate", item 7.
+
+### Decision: the commits badge of a read only snapshot stays off (2026-11-12)
+
+Owner decision on the difference flagged in B.20. In a Feature, the commits badge of a read only snapshot stays switched off.
+
+- The click can never succeed: a snapshot allows neither pull nor push.
+- It matches the rest of the row: a repository on a tag has the badge off for the same reason, and the padlock says why.
+- It keeps one rule: the badge asks the policy like every other button on the row.
+- Lost: the message on click. The padlock tooltip covers it.

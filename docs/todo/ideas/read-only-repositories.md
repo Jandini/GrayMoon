@@ -1,5 +1,7 @@
 # Read-only (reference) repositories
 
+> **History, not open work (2026-11-12).** Read only repositories are built and merged. What is still open is only in [read-only-repositories-open-items](../read-only-repositories-open-items.md). Statements below such as "nothing is built", "not started" or "open" describe the time this was written. This document is deleted with the others after the manual smoke.
+
 Status: draft, design only. Written 2026-11-11 on branch `readonly-repos`. Nothing is built. Order of work and the code findings: [read-only-repositories-implementation-plan](../read-only-repositories-implementation-plan.md).
 
 Naming: the UI says "read-only" and shows an `ro` badge. The file, the database and the code say `reference`.

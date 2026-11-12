@@ -464,7 +464,7 @@ Tagged repositories are intentionally protected from mutating workflows: a repos
 
 ### Read only repositories and the operation policy
 
-Whether an operation runs on a repository is decided in one place, `RepositoryOperationPolicy` (`GrayMoon.Application/Repositories/Policy`). The table is its rule table. "all" is an action on several repositories (a repository that is not allowed is skipped and named), "one" is an action on one named repository (it is refused with a message).
+Whether an operation runs on a repository is decided in one place, `RepositoryOperationPolicy` (`GrayMoon.Application/Repositories/Policy`). How the policy is put together (subject, sources, the three ways to ask, skips) is in 02, section 7B. The table is its rule table. "all" is an action on several repositories (a repository that is not allowed is skipped and named), "one" is an action on one named repository (it is refused with a message).
 
 ```text
 operation                              on a tag   read only   snapshot in a Feature
@@ -493,6 +493,8 @@ Create Feature branch                  no (detached at the tag)   no (snapshot) 
 ```
 
 The Workspace repository is never read only: the read only columns do not apply to it. The archived rule does.
+
+The buttons of a row ask the same table. In a Feature the commits badge of a read only snapshot is off, because a snapshot allows neither pull nor push; a repository on a tag has it off for the same reason. A branch without an upstream can become read only when its commit is on the remote.
 
 Messages: "Repository is on a tag; checkout a branch first.", "Repository is pinned to a tag. Checkout a branch before pushing.", "Repository is read only.", "Repository is a read only snapshot in this Feature.", "Repository is archived on the provider. Pushes are rejected.". A bulk action reports its skips in one sentence built by `RepositorySkipSummary` (read only, tag and archived repositories counted apart); skips are shown as information and never in place of an error or a warning. The REST responses carry them in `Skipped` with the reason by name.
 

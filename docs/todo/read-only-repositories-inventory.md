@@ -1,5 +1,7 @@
 # Read-only (reference) repositories - Phase 0A inventory
 
+> **History, not open work (2026-11-12).** Read only repositories are built and merged. What is still open is only in [read-only-repositories-open-items](read-only-repositories-open-items.md). Statements below such as "nothing is built", "not started" or "open" describe the time this was written. This document is deleted with the others after the manual smoke.
+
 Status: Phase 0A output of the [implementation plan](read-only-repositories-implementation-plan.md). Collected 2026-11-12 from the application repository `C:\Workspace\GrayMoon\GrayMoon` (branch `readonly-repos`, commit `1515d32b` plus the uncommitted 0A test files). Deleted when the feature ships.
 
 No production code was changed in 0A. Paths are relative to the repository root.

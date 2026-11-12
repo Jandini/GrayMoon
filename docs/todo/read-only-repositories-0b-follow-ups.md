@@ -1,5 +1,7 @@
 # Read-only repositories - follow-ups from Phase 0B
 
+> **History, not open work (2026-11-12).** Read only repositories are built and merged. What is still open is only in [read-only-repositories-open-items](read-only-repositories-open-items.md). Statements below such as "nothing is built", "not started" or "open" describe the time this was written. This document is deleted with the others after the manual smoke.
+
 Date: 2026-11-12. Code: `C:\Workspace\GrayMoon\GrayMoon`, branch `readonly-repos`. Phase 0B is committed (`1c67c21a`).
 
 Phase 0B moved the tag eligibility checks to one policy without changing behavior. Five things were left open. This document says what each one is, what to do about it, and when. The state of each item is in the next section.
