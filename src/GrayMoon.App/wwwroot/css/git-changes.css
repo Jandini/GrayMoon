@@ -720,15 +720,9 @@
 }
 
 /* Read-only repository marker beside the repository name. */
-.git-changes-tree__reference-badge {
+.git-changes-tree__reference-lock {
     flex: 0 0 auto;
-    padding: 0 0.3rem;
-    border: 1px solid var(--border-color);
-    border-radius: 0.25rem;
     color: var(--text-secondary);
-    font-weight: 400;
-    font-size: 0.7rem;
-    line-height: 1.2;
 }
 
 .git-changes-tree__repo-branch {

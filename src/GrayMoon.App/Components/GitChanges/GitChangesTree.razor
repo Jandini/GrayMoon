@@ -64,7 +64,7 @@
                         <span class="git-changes-tree__repo-name">@row.Label</span>
                         @if (row.IsReference)
                         {
-                            <span class="git-changes-tree__reference-badge" title="@RepositoryBadgeTitles.ReferenceInGitChanges">readonly</span>
+                            <ReferenceLockIcon AdditionalClass="git-changes-tree__reference-lock" Title="@RepositoryBadgeTitles.ReferenceInGitChanges" />
                         }
                         @if (!string.IsNullOrEmpty(row.BranchName))
                         {

@@ -1,6 +1,7 @@
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Components.Pages;
 
@@ -28,7 +29,7 @@ public sealed partial class WorkspaceRepositories
 
     private void ShowConfirmSyncLevel(List<int> repositoryIds)
     {
-        var filtered = repositoryIds.Where(id => !IsRepoOnTag(id)).ToList();
+        var filtered = repositoryIds.Where(id => IsRepoAllowed(id, RepositoryOperation.SyncLevel)).ToList();
         if (filtered.Count == 0)
         {
             ToastService.Show("All repositories in this level are on tags; checkout a branch first.");

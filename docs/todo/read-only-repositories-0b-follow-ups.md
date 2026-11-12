@@ -12,7 +12,8 @@ Steps 1 and 2 of the resulting order are done and not committed. Details and com
 |---|---|
 | 5 (required part): mutations 1, 2, 5, 7, 8, 9, 10, 12 | Run. Two were not caught (7 in `DependencyUpdateOrchestrator`, 8 in the push plan); both are closed with new tests in `Policy/RepositoryPolicySubjectSourceTests.cs`. Mutation 2 is caught by the matrix test only: no service asks the policy for Sync, so no characterization test can react. |
 | 4: two tests that fail together | Cause found for both, and both fixed. One was a defect in the Workspace operation lock (below). The other was a wrong assumption in the test. |
-| 1, 2, 3 and the rest of 5 | Not started. Placed as written under "Required" and "Can wait". |
+| 1: Sync on a tag by entry point | Done on 2026-11-12, option A (owner decision). See the plan, B.20. |
+| 2, 3 and the rest of 5 | Not started. Placed as written under "Required" and "Can wait". |
 
 What changed in the product:
 

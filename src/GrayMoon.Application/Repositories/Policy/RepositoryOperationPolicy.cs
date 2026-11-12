@@ -47,6 +47,9 @@ public static class RepositoryOperationPolicy
     public static FrozenDictionary<RepositoryOperation, Rule> Rules { get; } = new Dictionary<RepositoryOperation, Rule>
     {
         [RepositoryOperation.Sync] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Allowed),
+        // Workspace Sync includes a tag checkout; Sync from a row or for a level has always left it alone.
+        [RepositoryOperation.SyncFromRow] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Allowed),
+        [RepositoryOperation.SyncLevel] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Allowed),
         [RepositoryOperation.Fetch] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Allowed),
         [RepositoryOperation.RefreshProjects] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Allowed),
         [RepositoryOperation.RestorePackages] = new(AllowedOnTag: false, ReferenceRule.Allowed, ReferenceRule.Allowed),

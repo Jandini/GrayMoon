@@ -8,6 +8,10 @@ public enum RepositoryOperation
 {
     // Read and refresh.
     Sync,
+    /// <summary>Sync started from one row. Unlike <see cref="Sync"/> for the whole Workspace it leaves a tag checkout alone.</summary>
+    SyncFromRow,
+    /// <summary>Sync started for one dependency level. It leaves a tag checkout alone, like <see cref="SyncFromRow"/>.</summary>
+    SyncLevel,
     Fetch,
     RefreshProjects,
     RestorePackages,

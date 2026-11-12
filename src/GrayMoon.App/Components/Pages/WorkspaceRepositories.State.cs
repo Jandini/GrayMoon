@@ -143,9 +143,6 @@ public sealed partial class WorkspaceRepositories
     private bool IsRepoAllowed(int repositoryId, RepositoryOperation operation) =>
         TryGetLink(repositoryId) is not { } link || Allows(link, operation);
 
-    /// <summary>For the row and level Sync buttons, which leave a tag checkout alone although Workspace Sync includes it.</summary>
-    private bool IsRepoOnTag(int repositoryId) =>
-        TryGetLink(repositoryId)?.IsOnTag == true;
     private WorkspaceRepositoryLink? TryGetLink(int repositoryId) =>
         _linkByRepoId.TryGetValue(repositoryId, out var link) ? link : null;
     private async Task<WorkspaceRepositoryLink?> TryGetLinkAsync(int repositoryId)
@@ -395,15 +392,16 @@ public sealed partial class WorkspaceRepositories
         _linkByRepoId.Values.Where(wr => wr.Role == WorkspaceRepositoryRole.Workspace);
     private IEnumerable<WorkspaceRepositoryLink> GetHydratedSourceLinks() =>
         _linkByRepoId.Values.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace);
-    private bool IsLevelActionsDisabled(int? levelKey) => AreAllOnTag(GetHydratedLinksAtLevel(levelKey));
-    private static bool AreAllOnTag(IEnumerable<WorkspaceRepositoryLink> group)
+    private bool IsLevelActionsDisabled(int? levelKey) => NoRepositoryAllowsLevelActions(GetHydratedLinksAtLevel(levelKey));
+    /// <summary>The level buttons are off when no loaded repository of the group takes part in a level action (today: all are on a tag).</summary>
+    private static bool NoRepositoryAllowsLevelActions(IEnumerable<WorkspaceRepositoryLink> group)
     {
         var hydrated = group.ToList();
         if (hydrated.Count == 0)
         {
             return false;
         }
-        return hydrated.All(wr => wr.IsOnTag);
+        return hydrated.All(wr => !wr.Allows(RepositoryOperation.SyncLevel));
     }
     /// <summary>Returns true when the visible window actually changed.</summary>
     private bool UpdateVisibleRange(int start, int end)

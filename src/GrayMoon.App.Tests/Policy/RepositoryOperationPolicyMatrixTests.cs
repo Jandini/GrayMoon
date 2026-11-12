@@ -12,6 +12,8 @@ public sealed class RepositoryOperationPolicyMatrixTests
     /// <summary>Operations that a tag checkout forbids, in a page or in a service.</summary>
     private static readonly HashSet<RepositoryOperation> ForbiddenOnTag =
     [
+        RepositoryOperation.SyncFromRow,
+        RepositoryOperation.SyncLevel,
         RepositoryOperation.RefreshProjects,
         RepositoryOperation.RestorePackages,
         RepositoryOperation.Pull,
@@ -32,6 +34,8 @@ public sealed class RepositoryOperationPolicyMatrixTests
     private static readonly HashSet<RepositoryOperation> ReferenceAllowsInBulk =
     [
         RepositoryOperation.Sync,
+        RepositoryOperation.SyncFromRow,
+        RepositoryOperation.SyncLevel,
         RepositoryOperation.Fetch,
         RepositoryOperation.RefreshProjects,
         RepositoryOperation.RestorePackages,
@@ -53,6 +57,8 @@ public sealed class RepositoryOperationPolicyMatrixTests
     private static readonly HashSet<RepositoryOperation> SnapshotAllowsInBulk =
     [
         RepositoryOperation.Sync,
+        RepositoryOperation.SyncFromRow,
+        RepositoryOperation.SyncLevel,
         RepositoryOperation.Fetch,
         RepositoryOperation.RefreshProjects,
         RepositoryOperation.RestorePackages,

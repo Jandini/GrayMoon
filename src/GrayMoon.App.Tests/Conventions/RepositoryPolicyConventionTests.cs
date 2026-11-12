@@ -46,12 +46,10 @@ public sealed class RepositoryPolicyConventionTests
         ["GrayMoon.App.Components.Features.WorkspaceContextBar"] =
             "Shows the branch the repositories share; a tag checkout has no branch to show.",
         ["GrayMoon.App.Components.Pages.WorkspaceRepositoriesRow"] =
-            "Shows the tag. OPEN: the commits and sync badges of a row are disabled by the tag itself, not by a policy "
-            + "rule, because Sync is allowed on a tag for the whole Workspace but not from a row.",
+            "Shows the tag and passes it to badges; whether a badge is active is asked of the policy.",
         ["GrayMoon.App.Components.Pages.WorkspaceRepositories"] =
             "Shows tag state and passes it to badges; 'Skip repos on tags' in the Workspace-wide dialogs is a user option, "
-            + "not a rule. OPEN: the level action buttons and the row and level Sync leave a tag checkout alone by reading "
-            + "the tag, because Sync is allowed on a tag for the whole Workspace but not from a row or a level.",
+            + "not a rule.",
     };
 
     [Fact]

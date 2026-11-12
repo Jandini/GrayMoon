@@ -492,7 +492,7 @@
                                   Incoming="@Link.IncomingCommits"
                                   BranchHasUpstream="@Link.BranchHasUpstream"
                                   BranchName="@Link.BranchName"
-                                  Disabled="@(ActionsDisabled || Link.IsOnTag)"
+                                  Disabled="@(ActionsDisabled || !(Link.Allows(RepositoryOperation.Pull) || Link.Allows(RepositoryOperation.Push)))"
                                   IsOnTag="@Link.IsOnTag"
                                   PullOnly="@(!Link.Allows(RepositoryOperation.Push) && Link.Allows(RepositoryOperation.Pull))"
                                   PullOnlyTitle="@(repo.Archived && !Link.IsReference ? RepositoryOperationPolicy.ArchivedMessage : null)"
@@ -503,7 +503,7 @@
                     <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
                                         Status="@RepoSyncStatus"
                                         IsSyncing="@IsSyncing"
-                                        Disabled="@(ActionsDisabled || Link.IsOnTag)"
+                                        Disabled="@(ActionsDisabled || !Link.Allows(RepositoryOperation.SyncFromRow))"
                                         OnSyncClick="OnSyncClick" />
                 </span>
             </div>

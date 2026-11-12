@@ -559,3 +559,18 @@ One Razor file changed. Build: 0 warnings, 0 errors. App tests: 4642 passed. Oth
 - `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4642 passed.
 - Common, Worker and the Long runs: not run (only Razor markup and CSS in the App changed).
 - Browser: not run. M1-M13: not run.
+
+### B.19 Padlock in Git Changes, hover color in the other grids (2026-11-12)
+
+- `dotnet build GrayMoon.slnx`: 0 warnings, 0 errors.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4642 passed.
+- Common, Worker and the Long runs: not run (only Razor markup and CSS in the App changed).
+- Browser: not run. M1-M13: not run.
+
+### B.20 Sync on a tag asks the policy (2026-11-12)
+
+- `dotnet build GrayMoon.slnx`: 0 warnings, 0 errors.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4814 passed (4642 before; the matrix tests grew with the two new operations).
+- `dotnet test src/GrayMoon.Common.Tests/GrayMoon.Common.Tests.csproj --no-build`: 446 passed.
+- Worker and the Long runs: not run (no Worker change).
+- Browser: not run. M1-M13: not run.

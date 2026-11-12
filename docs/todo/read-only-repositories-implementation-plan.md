@@ -987,3 +987,31 @@ Asked for by the owner. Not committed (base `e0528057`).
 **Not tested**
 
 - Nothing was looked at in a browser.
+
+### B.19 Padlock in Git Changes, hover color in the other grids (2026-11-12)
+
+Asked for by the owner. Not committed (base `e0528057`).
+
+- Git Changes tree: the `readonly` badge beside a repository name is replaced by the padlock (`ReferenceLockIcon`, same tooltip). The CSS class `git-changes-tree__reference-badge` is replaced by `git-changes-tree__reference-lock`. No `readonly` badge is left anywhere.
+- Actions, Repository column: the link turned blue on hover for the same reason as in B.18; its scoped `.repo-link` rules were weaker than the global `app.css` rules. The rules now also use `.actions-table td a.repo-link` and set the color at rest and on hover.
+- Repositories (all repositories) and Packages had the same fault in their `.repo-link:hover` rule; both now set the color on hover.
+- Decision: the names Lock / Unlock stay.
+
+**Not tested**
+
+- Nothing was looked at in a browser.
+
+### B.20 Owner decisions: archived single push, Sync on a tag (2026-11-12)
+
+Not committed (base `0efada9c`).
+
+- **Archived single push: confirmed as built.** The push of one named archived repository stays refused (B.9). One rule for every push.
+- **Sync on a tag: the difference stays (follow-up 1, option A).** Two operations are added to the rule table: `SyncFromRow` and `SyncLevel`. Both are not allowed on a tag and allowed for a read only repository and a snapshot, as `Sync` is. `Sync` (whole Workspace) still includes a tag checkout.
+  - Row: the sync badge asks `SyncFromRow`. The commits badge is off when the policy allows neither `Pull` nor `Push`.
+  - Level: `ShowConfirmSyncLevel` asks `SyncLevel`. `AreAllOnTag` is now `NoRepositoryAllowsLevelActions` and asks `SyncLevel` too. `IsRepoOnTag` is deleted.
+  - `RepositoryPolicyConventionTests`: no OPEN marker is left. The matrix test has the two operations in its expected sets.
+- **One difference for the user:** a read only snapshot of a Feature that is on a branch has its commits badge off. Before, the badge was active and a click was refused by the policy (a snapshot allows neither pull nor push). A repository on a tag, a read only repository and an archived repository behave as before.
+
+**Not tested**
+
+- Nothing was looked at in a browser. No test renders the row or the level header.

@@ -348,10 +348,16 @@
     text-decoration: underline;
 }
 
+/* Repository column link. The selectors must beat app.css `.table tbody td a:not(.badge)` and its `:hover` twin,
+   or the link (and so its hover underline) turns blue. */
+.actions-table td a.repo-link,
 .repo-link {
+    color: inherit !important;
     text-decoration: none;
 }
 
+.actions-table td a.repo-link:hover,
+.actions-table td a.repo-link:focus,
 .repo-link:hover,
 .repo-link:focus {
     color: inherit !important;
