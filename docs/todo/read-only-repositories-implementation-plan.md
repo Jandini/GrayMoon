@@ -1034,3 +1034,13 @@ Not committed (base `0a9fe3d4`).
 - One product change for it: the decision of "Undo across all repositories" moved from `WorkspaceGitChanges.Discard.cs` into the new `WorkspaceDiscardTargetPlanner.PlanAll` (`Services/GitChanges`). Same behavior; the page calls it.
 - One row needed no new test: `No_operation_can_start_in_a_context_while_the_change_runs` was already there and the mapping had missed it.
 - The gate is still **not passed**: the manual smoke M1-M13 is not run. Nothing else is open in section 10.
+
+### Known gaps closed in part: markup and the archive check (2026-11-12)
+
+Not committed (base `0a9fe3d4`).
+
+- **Archive check:** `GitHubRepositoryArchiveProbeTests` runs the probe through the real `GitHubService` over scripted HTTP answers. Before, the verifier was tested only with a fake probe. GitHub itself is still not called by a test.
+- **Markup:** `ReferenceMarkupRenderTests` renders `ReferenceLockIcon`, `WorkspaceRepositoriesRow` and the repository label of Git Changes to HTML with the framework's `HtmlRenderer`. No package added.
+- **One product change:** new `Components/GitChanges/GitChangesRepositoryLabel.razor`, used by `GitChangesTree.razor`. Same markup; it exists so the label can be rendered outside `Virtualize`.
+- **Still open:** `SwitchBranchModal` and `WorkspaceReferenceSection` are not rendered by a test, and nothing checks CSS or a browser. That stays with the manual smoke.
+- Details and results: test log, "Reference-mode gate", item 7.

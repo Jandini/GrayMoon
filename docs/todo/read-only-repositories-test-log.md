@@ -647,3 +647,34 @@ Commands, after these changes:
 - Common and Worker: not run again (no change there since the full run above).
 
 **Result now:** every required test has a test name. The gate is still **not passed** for one reason: the manual smoke M1-M13 is not run.
+
+### 7. Two known gaps: markup and the archive check (2026-11-12)
+
+Both were listed as "not planned". They now have tests. What the tests do not reach is said under each.
+
+**Archive check for GitHub** - `Policy/GitHubRepositoryArchiveProbeTests` (10 tests). `GitHubRepositoryArchiveProbe` runs through the real `GitHubService`; only the HTTP transport is scripted.
+
+- The request is `GET https://api.github.com/repos/{owner}/{repo}`.
+- `archived: true` and `archived: false` are read from a repository answer.
+- A `304 Not Modified` repeats the last answer and sends `If-None-Match`.
+- 404, 401, 403 and 500 are no answer. An answer without the `archived` field is no answer too.
+- No connector, a removed connector, a connector that is not GitHub and an address that is not a repository: not asked.
+- `ArchivedRepositoryVerifier` with the real probe clears the mark of the repository GitHub reports as not archived and keeps the mark of the one whose request fails.
+- Not reached: GitHub itself. No test calls the network, so a change of the real API answer is not seen.
+
+**Razor markup** - `Policy/ReferenceMarkupRenderTests` (11 tests). The components are rendered to HTML with `HtmlRenderer` of the framework. No package was added.
+
+- `ReferenceLockIcon`: with a title it is an image named "Read only"; without one it is hidden from assistive technology; square view box, `1em` wide and high, `flex-shrink-0`, even-odd keyhole; the open shackle differs from the closed one.
+- `WorkspaceRepositoriesRow`: a read only repository has the padlock after its name, with and without a web address, and no `readonly` text badge; a snapshot has the Feature text; a writable repository has no padlock.
+- Git Changes: the repository label has the padlock after the name for a read only repository and none for a writable one.
+- One product change for it: the label of a repository row moved from `GitChangesTree.razor` into the new `GitChangesRepositoryLabel.razor`. The tree draws its rows in `Virtualize`, which draws no row before the browser reports its size, so the label could not be rendered inside the tree. Same markup and classes. A test guards that the tree uses the component.
+- Not reached: `SwitchBranchModal` and `WorkspaceReferenceSection` (they need the loading overlay and many services), CSS (hover color, width on screen), clicks, and a browser. The first render only.
+
+Commands:
+
+- `dotnet build GrayMoon.slnx`: 0 warnings, 0 errors.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build`: 4841 passed.
+- `dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build --filter "Category=Long"`: 2 passed.
+- Common and Worker: not run again (no change there since the full run above).
+
+The gate is still **not passed** for one reason: the manual smoke M1-M13 is not run.
