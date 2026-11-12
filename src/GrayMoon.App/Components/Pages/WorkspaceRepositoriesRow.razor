@@ -54,7 +54,7 @@
                     }
                     @if (repo.Archived)
                     {
-                        <span class="badge repo-archived-badge">archived</span>
+                        <span class="badge repo-archived-badge" title="@RepositoryBadgeTitles.Archived">archived</span>
                     }
                     @if (repo.Connector?.IsRemoved == true)
                     {
@@ -85,7 +85,7 @@
                     }
                     @if (repo.Archived)
                     {
-                        <span class="badge repo-archived-badge">archived</span>
+                        <span class="badge repo-archived-badge" title="@RepositoryBadgeTitles.Archived">archived</span>
                     }
                     @if (repo.Connector?.IsRemoved == true)
                     {
@@ -142,7 +142,7 @@
                             @snapshotSource<span class="text-muted"> (source)</span>
                         }
                     </span>
-                    <span class="badge bg-secondary ms-1" title="Read-only repository">ro</span>
+                    <span class="badge bg-secondary ms-1" title="@RepositoryBadgeTitles.ReferenceSnapshot">ro</span>
                     @if (snapshotCommit is not null)
                     {
                         <span class="text-muted small font-monospace ms-1" title="@Link.HeadCommit">@snapshotCommit</span>
@@ -159,7 +159,7 @@
                     </span>
                     @if (Link.IsReference)
                     {
-                        <span class="badge bg-secondary ms-1" title="Read-only repository">ro</span>
+                        <span class="badge bg-secondary ms-1" title="@RepositoryBadgeTitles.Reference">ro</span>
                     }
                 </div>
             }
@@ -171,7 +171,7 @@
                           title="Click to switch branch">@Link.BranchName</span>
                     @if (Link.IsReference)
                     {
-                        <span class="badge bg-secondary ms-1" title="Read-only repository">ro</span>
+                        <span class="badge bg-secondary ms-1" title="@RepositoryBadgeTitles.Reference">ro</span>
                     }
                 </div>
             }
