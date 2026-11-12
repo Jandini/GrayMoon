@@ -3,6 +3,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,7 @@ public sealed class WorkspaceCommitSyncHandler(
     IServiceScopeFactory serviceScopeFactory,
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceRepositoryOperationPolicy operationPolicy,
+    ReferenceRevisionRecorder revisionRecorder,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
     public async Task CommitSyncAsync(
@@ -114,6 +116,8 @@ public sealed class WorkspaceCommitSyncHandler(
 
             var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
             await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+            if (pullOnly)
+                await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -240,6 +244,8 @@ public sealed class WorkspaceCommitSyncHandler(
 
                 var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
                 await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+                if (pullOnlyIds.Contains(repositoryId))
+                    await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
                 if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -271,6 +277,25 @@ public sealed class WorkspaceCommitSyncHandler(
         }
 
         return eligibility.Skipped;
+    }
+
+    /// <summary>
+    /// After a pull of a read-only repository the Workspace definition records where it is now. The recorder
+    /// leaves out a Feature and never fails the pull: a failed write is logged there.
+    /// </summary>
+    private async Task RecordReferenceRevisionAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CommitSyncResponse? result,
+        CancellationToken cancellationToken)
+    {
+        if (result is null || !string.IsNullOrWhiteSpace(result.ErrorMessage))
+            return;
+
+        var commit = result.State?.HeadCommit ?? result.Commit;
+        var branch = result.State?.BranchName ?? result.Branch;
+        await revisionRecorder.RecordAsync(workspaceId, contextId, repositoryId, branch, commit, cancellationToken);
     }
 
     private static async Task ApplyResultToDbAsync(

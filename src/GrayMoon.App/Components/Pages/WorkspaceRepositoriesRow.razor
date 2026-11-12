@@ -32,6 +32,7 @@
         || MismatchedFileVersionLines.Count > 0
         || CustomDependencyLines.Count > 0;
     var depOkBadgeInactive = ActionsDisabled || !Link.Allows(RepositoryOperation.UpdateDependencies);
+    var depOkBadgeInactiveTitle = Link.IsReference ? RepositoryOperationPolicy.ReferenceMessage : RepositoryOperationPolicy.OnTagMessage;
     var versionCell = DetermineVersionCell(Link.GitVersion, Link.IsVersionUnresolved, WorkspaceUsesRepositoryVersioning);
     var singleRepoPrPullMap = (!string.IsNullOrEmpty(repoUrl) && PrInfo != null
         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
@@ -156,6 +157,10 @@
                           title="Repository is pinned to a tag. Click to switch.">
                         <i class="bi bi-tag me-1" aria-hidden="true"></i>@Link.CheckedOutTag
                     </span>
+                    @if (Link.IsReference)
+                    {
+                        <span class="badge bg-secondary ms-1" title="Read-only repository">ro</span>
+                    }
                 </div>
             }
             else if (!string.IsNullOrEmpty(Link.BranchName))
@@ -164,6 +169,10 @@
                     <span class="branch-inner @(ActionsDisabled ? "branch-inner--disabled" : "")"
                           @onclick="HandleBranchClick"
                           title="Click to switch branch">@Link.BranchName</span>
+                    @if (Link.IsReference)
+                    {
+                        <span class="badge bg-secondary ms-1" title="Read-only repository">ro</span>
+                    }
                 </div>
             }
             else
@@ -190,7 +199,7 @@
                                     IsPrMergeBlocked="@(PrInfo != null
                                         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
                                         && PrInfo.Mergeable == false)"
-                                    OnUpdateBranchClick="@OnUpdateBranchClick" />
+                                    OnUpdateBranchClick="@(Link.Allows(RepositoryOperation.UpdateBranchFromDefault) ? OnUpdateBranchClick : default)" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
@@ -202,6 +211,7 @@
                             FeatureBaseCommitSha="@Link.FeatureBaseCommitSha"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"
+                            CanCreate="@Link.Allows(RepositoryOperation.CreatePullRequest)"
                             HasNewerTag="@(Link.HasNewerTag == true)"
                             OnCreateClick="@(() => OnCreatePr.InvokeAsync(Link))"
                             OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))"
@@ -217,7 +227,7 @@
                                       role="button"
                                       tabindex="@(depOkBadgeInactive ? -1 : 0)"
                                       style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                      title="@(depOkBadgeInactive ? RepositoryOperationPolicy.OnTagMessage : "Manage custom dependencies")"
+                                      title="@(depOkBadgeInactive ? depOkBadgeInactiveTitle : "Manage custom dependencies")"
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">0</span>
@@ -239,7 +249,7 @@
                                       role="button"
                                       tabindex="@(depOkBadgeInactive ? -1 : 0)"
                                       style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                      title="@(depOkBadgeInactive ? RepositoryOperationPolicy.OnTagMessage : "Manage dependencies")"
+                                      title="@(depOkBadgeInactive ? depOkBadgeInactiveTitle : "Manage dependencies")"
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">@totalWithFiles</span>
@@ -485,6 +495,7 @@
                                   BranchName="@Link.BranchName"
                                   Disabled="@(ActionsDisabled || Link.IsOnTag)"
                                   IsOnTag="@Link.IsOnTag"
+                                  PullOnly="@(!Link.Allows(RepositoryOperation.Push) && Link.Allows(RepositoryOperation.Pull))"
                                   OnPushClick="OnPushBadgeClick"
                                   OnPullClick="OnPullBadgeClick" />
                 </span>

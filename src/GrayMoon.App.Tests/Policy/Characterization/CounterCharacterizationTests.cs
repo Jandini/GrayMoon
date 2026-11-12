@@ -238,6 +238,61 @@ public sealed class CounterCharacterizationTests
         Assert.False(PRBadge.ShowsCreateBadge(isOnTag: true, isPrVerified: true, pullRequest: null, defaultBranchAheadCommits: 4));
     }
 
+    /// <summary>
+    /// A read-only repository with work in every column: it counts for incoming commits (a pull is allowed) and for
+    /// nothing that would write to it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Header_counters_for_a_read_only_repository(bool dependencyGraph)
+    {
+        await using var ctx = await CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.IsReference = true;
+            link.SyncStatus = RepoSyncStatus.InSync;
+            link.BranchName = "feature/x";
+            link.OutgoingCommits = 3;
+            link.IncomingCommits = 2;
+            link.DefaultBranchAheadCommits = 4;
+            link.BranchHasUpstream = true;
+            link.UnmatchedDeps = 1;
+            link.OutOfDateFileRepos = 1;
+            link.DependencyLevel = 2;
+        });
+
+        var header = await HeaderAsync(ctx, await ctx.GetSpecialContextIdAsync(), isSpecial: true, dependencyGraph ? WorkspaceCapabilities.Legacy : Basic);
+
+        Assert.Equal(1, header.TotalCount);
+        Assert.True(header.HasIncomingCommits);
+        Assert.False(header.IsPushRecommended);
+        Assert.False(header.HasCreatablePr);
+        Assert.False(header.HasUnmatchedDependencies);
+        Assert.Null(header.LowestLevelNeedingWork);
+        Assert.False(header.HasOutOfDateFiles);
+    }
+
+    [Fact]
+    public void Notification_and_panel_sets_keep_a_read_only_repository_for_incoming_commits_only()
+    {
+        var readOnly = Dto(1, "a", branch: "main", outgoing: 2, incoming: 1, unmatchedDeps: 1, outOfDateFiles: 1, level: 1) with { IsReference = true };
+        var links = new[] { readOnly };
+
+        var notification = WorkspacePendingActionsService.ComputeNotification(7, "ws", links);
+
+        Assert.NotNull(notification);
+        Assert.True(notification.HasIncomingCommits);
+        Assert.False(notification.IsPushRecommended);
+        Assert.False(notification.HasUnmatchedDependencies);
+        Assert.Null(notification.LowestLevelNeedingWork);
+        Assert.Equal([1], NotificationPanelRepoSets.WithIncoming(links));
+        Assert.Empty(NotificationPanelRepoSets.NeedingUpdate(links));
+        Assert.Empty(NotificationPanelRepoSets.UpdateOnDefaultBranch(links));
+        Assert.Empty(NotificationPanelRepoSets.PushOnDefaultBranch(links));
+        Assert.Empty(NotificationPanelRepoSets.WithOutgoing(links));
+    }
+
     private static async Task<WorkspaceRepositoryHeaderStateDto> HeaderAsync(
         SyncStateTestContext ctx, WorkspaceFeatureContextId contextId, bool isSpecial, WorkspaceCapabilities capabilities)
     {

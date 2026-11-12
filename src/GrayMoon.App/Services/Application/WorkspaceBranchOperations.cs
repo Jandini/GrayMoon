@@ -37,6 +37,7 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceManifestService manifestService,
     IServiceScopeFactory scopeFactory,
     IWorkspaceRepositoryOperationPolicy operationPolicy,
+    ReferenceRevisionRecorder revisionRecorder,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
     /// <summary>A bad-request outcome with the policy message when the operation may not run on this repository, else null.</summary>
@@ -439,11 +440,20 @@ public sealed class WorkspaceBranchOperations(
                     return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(false, pinError));
             }
 
+            // A read-only repository that was switched through GrayMoon: the Workspace definition records the
+            // new branch and commit. A failed write is a warning; the switch itself succeeded.
+            string? recordWarning = null;
+            if (wr is { IsReference: true, Role: WorkspaceRepositoryRole.Source })
+            {
+                recordWarning = await revisionRecorder.RecordAsync(
+                    workspaceId, contextId, repositoryId, localBranchName, checkoutResponse?.Commit, cancellationToken);
+            }
+
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             await TriggerManifestDriftCheckAsync(wr, workspaceId, contextId, cancellationToken);
 
-            return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch });
+            return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch, Warning = recordWarning });
         }
         catch (Exception ex)
         {

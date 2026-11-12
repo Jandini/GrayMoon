@@ -68,6 +68,7 @@ public sealed partial class WorkspaceRepositories
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;
     private int? lowestLevelNeedingWork => _headerState?.LowestLevelNeedingWork;
     private bool hasTaggedRepos => _headerState?.HasTaggedRepos ?? false;
+    private bool hasReferenceRepos => _linkByRepoId.Values.Any(link => link.IsReference);
     private bool hasIncomingCommits => _headerState?.HasIncomingCommits ?? false;
     private bool? isOutOfSync => _headerState?.IsOutOfSync;
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);

@@ -336,3 +336,32 @@ New tests:
 - The manual smoke list and mutation checks.
 - No test for: the Workspaces page calling the import guard and showing the warning (page code); `GitService.CheckoutBranchAtCommitAsync` failing at the set-upstream step.
 - Restore was tested against the fake Worker in the App and against real git in the Worker separately; no test runs a restore end to end through both.
+
+## Phase 1, third group (WP8-WP9) - 2026-11-12
+
+Base: commit `4b6590bf` plus uncommitted changes. Same machine and commands as before. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| Worker tests | 1034 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4390 passed, 0 failed, 0 skipped |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once after the last code change.
+
+Failure on the way, fixed before the run above:
+
+- `State_reports_none_mixed_and_all_and_leaves_the_Workspace_repository_out` gave two links the Workspace role, which the database refuses. The no-Sources case now asks for a Workspace without links.
+
+New tests:
+
+- App `WorkspaceReferenceOperationsTests` (23): the state; one blocked repository of two refuses the whole change, nothing is saved, written or broadcast; a successful change writes the definition and then records the checked HEAD; the default with and without the batch; making writable runs no check; a default-only change touches no link; one repository alone and the Workspace repository refused; no Worker; a definition that cannot be written; the change refused while a context operation holds the lock; a context operation refused while the change runs (signals, no timing); recording after a pull and after a manual switch; nothing for a writable repository, a failed pull, a Feature, or a Workspace without a Workspace repository; a failed write fails neither the pull nor the switch; a hook report and a Sync with a new head write nothing.
+- App `CounterCharacterizationTests` (+3): header counters for a read-only repository in both projections of the special Workspace, and the notification with its panel sets - incoming only.
+
+### Not run
+
+- The manual smoke list and mutation checks. Nothing in this group was looked at in a browser.
+- No test for: the Razor changes (section, badges, dialog lines, the Workspaces and Repositories pages passing the new parameters); the header counters of a read-only snapshot in a Feature; two pulls recording at the same moment (the queue and the single write were not exercised in parallel).

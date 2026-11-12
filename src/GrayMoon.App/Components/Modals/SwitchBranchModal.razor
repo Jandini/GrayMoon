@@ -35,6 +35,12 @@
                     }
                     else
                     {
+                        @if (IsReference && UncommittedChangedFileCount > 0)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                This read-only repository has uncommitted changes. A switch keeps them, and fails when they conflict with the target.
+                            </div>
+                        }
                         @if (IsFeatureContext && FeatureBranchPolicy.IsOffFeatureBranch(FeatureBranchName, CurrentBranch))
                         {
                             <div class="gm-callout gm-callout--warning d-flex align-items-center justify-content-between gap-2 mb-3" role="alert">
@@ -623,6 +629,10 @@
     [Parameter] public string? FeatureBranchName { get; set; }
     /// <summary>The tag this repository is pinned to in the viewed Feature; null in the Workspace and for a repository on its Feature branch (I3).</summary>
     [Parameter] public string? PinnedTag { get; set; }
+    /// <summary>True for a read-only repository of the Workspace.</summary>
+    [Parameter] public bool IsReference { get; set; }
+    /// <summary>Uncommitted files in the repository, as the grid row knows them.</summary>
+    [Parameter] public int UncommittedChangedFileCount { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }

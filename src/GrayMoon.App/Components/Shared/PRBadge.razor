@@ -39,7 +39,7 @@ else if (PullRequest != null && (PullRequest.IsMerged || PullRequest.IsClosed ||
         </span>
     }
 }
-else if (ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits, HeadCommit, FeatureBaseCommitSha))
+else if (CanCreate && ShowsCreateBadge(IsOnTag, IsPrVerified, PullRequest, DefaultBranchAheadCommits, HeadCommit, FeatureBaseCommitSha))
 {
     <span class="badge pr-badge pr-badge-create"
           role="button"
@@ -75,6 +75,8 @@ else
     [Parameter] public bool IsPrVerified { get; set; }
     /// <summary>True when the repository is checked out at a tag (detached HEAD); PRs require a branch, so render blank.</summary>
     [Parameter] public bool IsOnTag { get; set; }
+    /// <summary>False when a pull request may not be created from this repository (a read-only repository): "create" is not offered.</summary>
+    [Parameter] public bool CanCreate { get; set; } = true;
     /// <summary>True when the repo is on a tag and at least one newer tag exists. Shows the yellow "upgrade" badge.</summary>
     [Parameter] public bool HasNewerTag { get; set; }
     /// <summary>Raised when the user clicks the yellow "upgrade" badge.</summary>

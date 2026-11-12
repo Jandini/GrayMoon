@@ -479,6 +479,37 @@ Not committed (base `d0f00d30`). Results are in the test log, "Phase 1, first gr
 - Nothing sets `IsReference` or `ReferenceDefault` from the UI, and nothing calls `SetRepositoryReferenceRevisionsAsync`: both are WP8-WP9.
 - `ReplaceRepositoriesCoreAsync` (the Workspace editor) gives new Sources the default without an activation check. Those repositories are normally not cloned yet; a folder that already exists is the import path, which is checked.
 
+### Phase 1, third group as built: WP8-WP9 (2026-11-12)
+
+Not committed (base `4b6590bf`). Results are in the test log, "Phase 1, third group". The manual smoke list was **not run**. This group makes read-only mode reachable from the UI for the first time.
+
+**Built**
+
+- WP8, facade: `IWorkspaceReferenceOperations` (`GetStateAsync`, `SetAllAsync`, `SetDefaultAsync`, `SetRepositoryAsync`) and `WorkspaceReferenceOperations`. Every change runs inside `TryStartStructural(workspaceId, "reference-mode", ...)`; a refused start returns "An operation is running for this Workspace." Turning read-only on runs the activation check on every repository that changes; one block refuses the whole call, returns every block and warning, and writes nothing. Turning it off runs no check. The Workspace-role link is never selected. Flags and the default are saved in one `SaveChanges`; then the definition is written; then the branch and commit from the check are recorded; then `WorkspaceSynced` is broadcast.
+- WP8, recording: `ReferenceRevisionRecorder` (singleton, own DI scope, one write at a time per Workspace; changes that arrive during a write go out together in the next one). Called after a pull-only pull (`WorkspaceCommitSyncHandler`, single and level), after a manual branch checkout of a read-only Source (`WorkspaceBranchOperations.CheckoutAsync`), and by the facade when read-only is turned on. It records only the special Workspace, only read-only Source links, only when a Workspace repository exists, and only a full commit hash. It never throws.
+- WP9, Edit Workspace: `WorkspaceReferenceSection` inside `WorkspaceModal` shows the state sentence (none / some / all, no count), "Make all read-only", "Make all writable" and the "New repositories are read-only" switch. A batch action first asks, with a checkbox for the default. A refusal lists each blocked checkout. Everything is disabled while `IsBusy(workspaceId)`.
+- WP9, grid: `ro` badge beside the branch or tag; the dependency badge tooltip gives the read-only message; `CommitsBadge` has `PullOnly` (click pulls when there are incoming commits, never pushes); `PRBadge` has `CanCreate`; the behind count is not a button on a read-only row.
+- WP9, dialogs: `BranchModal` and `PrepareWorkspaceModal` show "Read-only repositories are not affected"; `SwitchBranchModal` warns when a read-only repository has uncommitted changes.
+
+**Deviations and decisions made while building**
+
+- The read-only section applies each action at once, not with the Save button of the modal: the change needs the lock and the activation check and can be refused, which a Save of the other fields cannot express. The section is shown only when editing; a new Workspace gets its default after it is created.
+- `PendingActionsService.RefreshAsync` is not called by the facade: it needs the circuit-scoped repositories of the page. The `WorkspaceSynced` broadcast makes open pages reload, which recomputes the notification.
+- Making a repository writable does not call the recorder to remove `branch` and `commit`: the definition write from the database already drops them for an entry that is not read-only (WP3). One write, not two.
+- When the definition cannot be written after the flags were saved, the result is a success with a warning and nothing is recorded (the file does not have the flags yet, so a branch would be refused, D9). The flags stay; the drift banner will show the difference.
+- Turning read-only on needs a connected Worker (the check cannot run without it); the call is refused otherwise. Turning it off and the default-only change do not.
+- A pull has no place to show a warning that is not an error, so a failed recording after a pull is logged only. After a manual switch it is returned in `CheckoutBranchApiResult.Warning` (also in the REST body), but the Repositories page does not show it yet: `WorkspaceBranchHandler.CheckoutBranchAsync` returns only success and error.
+- A switch answered by an old Worker without `commit` succeeds with the warning that the commit could not be read.
+- The header counters and notification sets needed no code change: they already go through the policy expressions with `IsReference` (first group). Tests were added.
+- The fixed line in the two dialogs is shown only when the Workspace has a read-only repository.
+- "The conflict result shows which files block": the git error text, which lists the files, is shown as the checkout error as before. `localChangesBlockCheckout` is still not read by the App.
+- The finding has no separate reason field; its message is the whole sentence ("Repository X in Feature F: it has 2 unpushed commits.").
+
+**Not done in this group**
+
+- Per-repository switch in the UI (`SetRepositoryAsync` is built and tested; the UI is Phase 2).
+- No component test renders the new section, the badges or the dialog lines.
+
 ### WP8 - Mode-change facade and recording
 
 - `IWorkspaceReferenceOperations` (`GrayMoon.Application`), implementation in `Services/Application/`:
