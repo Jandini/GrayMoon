@@ -3,7 +3,8 @@ namespace GrayMoon.Common.Git;
 /// <summary>
 /// A repository entry in <c>graymoon.json</c> that is checked out on a tag stores the tag name and the
 /// full commit hash that tag pointed at. Restore checks out that commit. These are the value rules for a pin;
-/// reading them from the file is <see cref="Manifest.IWorkspaceManifestFile.ReadTagPinCommit"/>.
+/// reading them from the file is <see cref="Manifest.IWorkspaceManifestFile.ReadPinnedRevision"/>. The wider rules,
+/// which also cover a read-only repository on a branch, are <see cref="WorkspaceDefinitionRevisionPin"/>.
 /// </summary>
 public static class WorkspaceDefinitionTagPin
 {

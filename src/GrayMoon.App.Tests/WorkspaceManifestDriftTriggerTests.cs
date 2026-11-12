@@ -164,6 +164,9 @@ public sealed class WorkspaceManifestDriftTriggerTests
         public Task<OperationResult> SetRepositoryTagPinsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryTagPinChange> changes, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<OperationResult> SetRepositoryReferenceRevisionsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryReferenceRevisionChange> changes, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<OperationResult> WriteManagedGitIgnoreAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

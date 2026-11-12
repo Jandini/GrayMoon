@@ -145,6 +145,8 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<RepositoryBranchWriter>();
         services.AddScoped<WorkspaceRepositoryStateWriter>();
         services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ReferenceImportGuard>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddSingleton<SyncRecomputeCoalescer>();
         services.AddSingleton<FileVersionCheckCoalescer>();

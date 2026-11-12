@@ -10,25 +10,33 @@ public interface IWorkspaceManifestFile
     /// <summary>File name at the root of the Workspace repository (<see cref="WorkspaceManifestFile.FileName"/>).</summary>
     string FileName { get; }
 
-    /// <summary>Schema version this GrayMoon writes and the newest it reads.</summary>
+    /// <summary>
+    /// The newest schema version this GrayMoon reads. <see cref="Serialize"/> chooses the version it writes from the
+    /// content: 2 when the definition holds <c>reference</c> or <c>branch</c>, otherwise 1.
+    /// </summary>
     int CurrentSchemaVersion { get; }
 
     /// <summary>Byte-stable text: fixed property order, connectors and repositories sorted, LF line endings and a trailing newline.</summary>
     string Serialize(WorkspaceManifest manifest);
 
-    /// <summary>Strict parse of the whole definition. False with <paramref name="error"/> for empty, invalid or newer-schema content, a missing <c>workspace</c> object or an invalid tag pin. A leftover <c>workspace.name</c> is ignored.</summary>
+    /// <summary>
+    /// Strict parse of the whole definition. False with <paramref name="error"/> for empty, invalid or newer-schema
+    /// content, a missing <c>workspace</c> object, an invalid recorded revision, or <c>reference</c> / <c>branch</c> in a
+    /// version-1 file. A leftover <c>workspace.name</c> is ignored.
+    /// </summary>
     bool TryParse(string? content, out WorkspaceManifest? manifest, out string? error);
 
     /// <summary>True when the content is JSON whose <c>version</c> is newer than this GrayMoon understands.</summary>
     bool IsNewerSchema(string? content);
 
     /// <summary>
-    /// The commit to check out for <paramref name="repositoryUrl"/>, or null when that repository is not pinned.
-    /// <paramref name="content"/> null means the definition file is absent (nothing to check out). An unreadable file
-    /// or an invalid pin of that repository is an error, so the caller does not check out another revision. Entries for
-    /// other repositories are not validated.
+    /// The revision to check out for <paramref name="repositoryUrl"/>: the recorded commit, and the branch to create
+    /// at it when the entry is a read-only repository on a branch (null for a tag pin). Commit null means that
+    /// repository has no recorded revision. <paramref name="content"/> null means the definition file is absent
+    /// (nothing to check out). An unreadable file or an invalid entry for that repository is an error, so the caller
+    /// does not check out another revision. Entries for other repositories are not validated.
     /// </summary>
-    (string? Commit, string? Error) ReadTagPinCommit(string? content, string? repositoryUrl);
+    (string? Commit, string? Branch, string? Error) ReadPinnedRevision(string? content, string? repositoryUrl);
 
     /// <summary>
     /// Folder names of the listed repositories, each an immediate child folder of the Workspace repository's working

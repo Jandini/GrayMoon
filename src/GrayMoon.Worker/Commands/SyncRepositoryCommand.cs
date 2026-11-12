@@ -426,13 +426,14 @@ public sealed class SyncRepositoryCommand(
 
     /// <summary>
     /// A repository just cloned into a Workspace that has a Workspace repository is checked out to the commit
-    /// recorded for it when that entry is on a tag. A missing definition file means there is no pin. An invalid
-    /// pin or a missing commit fails the sync and removes the clone so the next sync tries again.
+    /// recorded for it: detached for a tag pin, and on the recorded local branch (tracking origin) for a read-only
+    /// repository on a branch. A missing definition file means there is nothing recorded. An invalid entry or a
+    /// missing commit fails the sync and removes the clone so the next sync tries again.
     /// </summary>
     private async Task<string?> CheckoutPinnedCommitAsync(string workspacePath, string repoPath, string? cloneUrl, CancellationToken cancellationToken)
     {
         var definition = await _manifestFile.ReadFromDirectoryAsync(workspacePath, cancellationToken);
-        var (commit, error) = _manifestFile.ReadTagPinCommit(definition, cloneUrl);
+        var (commit, branch, error) = _manifestFile.ReadPinnedRevision(definition, cloneUrl);
         if (error is not null)
         {
             RemoveFailedClone(workspacePath, repoPath);
@@ -442,7 +443,9 @@ public sealed class SyncRepositoryCommand(
         if (commit is null)
             return null;
 
-        var (success, checkoutError) = await git.CheckoutCommitAsync(repoPath, commit, cancellationToken);
+        var (success, checkoutError) = branch is null
+            ? await git.CheckoutCommitAsync(repoPath, commit, cancellationToken)
+            : await git.CheckoutBranchAtCommitAsync(repoPath, branch, commit, cancellationToken);
         if (success)
             return null;
 

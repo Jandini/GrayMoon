@@ -65,6 +65,14 @@ public interface IGitService
     Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct);
     /// <summary>Checks out the full commit hash (detached HEAD). Returns (success, errorMessage). Does not substitute another revision when the commit is missing.</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutCommitAsync(string repoPath, string commit, CancellationToken ct);
+
+    /// <summary>
+    /// Puts the local branch <paramref name="branchName"/> at <paramref name="commit"/> and checks it out
+    /// (<c>git checkout -B</c>), then sets its upstream to <c>origin/&lt;branch&gt;</c> when that ref exists. Used for a
+    /// fresh clone of a read-only repository: the branch is left where the Workspace definition recorded it, and
+    /// commits the remote has since gained show as incoming. Fails when the commit is not in the repository.
+    /// </summary>
+    Task<(bool Success, string? ErrorMessage)> CheckoutBranchAtCommitAsync(string repoPath, string branchName, string commit, CancellationToken ct);
     /// <summary>
     /// Persists or clears the worktree-local divergence base branch (Feature PR parent). Stored under the
     /// worktree-specific git dir so linked Feature worktrees do not share Workspace state. Pass null/empty to clear.

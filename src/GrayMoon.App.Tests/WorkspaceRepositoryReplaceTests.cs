@@ -373,6 +373,77 @@ public sealed class WorkspaceRepositoryReplaceTests
         Assert.False(await verify.Workspaces.AnyAsync(w => w.WorkspaceId == fx.WorkspaceId));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateAsync_gives_a_new_repository_the_read_only_default_and_leaves_existing_ones_alone(bool referenceDefault)
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        var catalog = fx.CreateWorkspaceRepository();
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", [fx.RepositoryIds[1]], null);
+        await using (var db = fx.Factory.CreateDbContext())
+        {
+            (await db.Workspaces.SingleAsync(w => w.WorkspaceId == fx.WorkspaceId)).ReferenceDefault = referenceDefault;
+            // The repository that stays has the opposite of the default, so a copied default would show.
+            (await db.WorkspaceRepositories.SingleAsync(l => l.WorkspaceId == fx.WorkspaceId)).IsReference = !referenceDefault;
+            await db.SaveChangesAsync();
+        }
+
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", fx.RepositoryIds, null);
+
+        await using var after = fx.Factory.CreateDbContext();
+        var links = await after.WorkspaceRepositories.AsNoTracking().Where(l => l.WorkspaceId == fx.WorkspaceId).ToListAsync();
+        Assert.Equal(referenceDefault, links.Single(l => l.RepositoryId == fx.RepositoryIds[0]).IsReference);
+        Assert.Equal(!referenceDefault, links.Single(l => l.RepositoryId == fx.RepositoryIds[1]).IsReference);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AddRepositoriesAsync_gives_a_new_repository_the_read_only_default_and_leaves_existing_ones_alone(bool referenceDefault)
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        var catalog = fx.CreateWorkspaceRepository();
+        await catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", [fx.RepositoryIds[1]], null);
+        await using (var db = fx.Factory.CreateDbContext())
+        {
+            (await db.Workspaces.SingleAsync(w => w.WorkspaceId == fx.WorkspaceId)).ReferenceDefault = referenceDefault;
+            (await db.WorkspaceRepositories.SingleAsync(l => l.WorkspaceId == fx.WorkspaceId)).IsReference = !referenceDefault;
+            await db.SaveChangesAsync();
+        }
+
+        // The circuit context forgets the membership it loaded before the removal; it may still hold the Workspace.
+        var staleWorkspace = await fx.CircuitDb.Workspaces.AsNoTracking().SingleAsync(w => w.WorkspaceId == fx.WorkspaceId);
+        staleWorkspace.ReferenceDefault = !referenceDefault;
+        fx.CircuitDb.ChangeTracker.Clear();
+        fx.CircuitDb.Attach(staleWorkspace);
+        await catalog.AddRepositoriesAsync(fx.WorkspaceId, fx.RepositoryIds);
+
+        await using var after = fx.Factory.CreateDbContext();
+        var links = await after.WorkspaceRepositories.AsNoTracking().Where(l => l.WorkspaceId == fx.WorkspaceId).ToListAsync();
+        Assert.Equal(referenceDefault, links.Single(l => l.RepositoryId == fx.RepositoryIds[0]).IsReference);
+        Assert.Equal(!referenceDefault, links.Single(l => l.RepositoryId == fx.RepositoryIds[1]).IsReference);
+    }
+
+    [Fact]
+    public async Task Changing_only_the_read_only_default_changes_no_repository()
+    {
+        await using var fx = await Fixture.CreateAsync(linkCount: 2);
+        await using (var db = fx.Factory.CreateDbContext())
+        {
+            (await db.Workspaces.SingleAsync(w => w.WorkspaceId == fx.WorkspaceId)).ReferenceDefault = true;
+            await db.SaveChangesAsync();
+        }
+
+        // The same membership saved again, as the editor does when only other settings changed.
+        await fx.CreateWorkspaceRepository().UpdateAsync(fx.WorkspaceId, "test-workspace", fx.RepositoryIds, null);
+
+        await using var after = fx.Factory.CreateDbContext();
+        Assert.All(
+            await after.WorkspaceRepositories.AsNoTracking().Where(l => l.WorkspaceId == fx.WorkspaceId).ToListAsync(),
+            link => Assert.False(link.IsReference));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

@@ -131,13 +131,22 @@ public sealed class WorkspaceManifestFileTests
     }
 
     [Fact]
-    public void Parse_rejects_schema_version_2()
+    public void Parse_rejects_schema_version_3()
     {
-        const string json = """{ "version": 2, "workspace": { "name": "AVR" } }""";
+        const string json = """{ "version": 3, "workspace": { "name": "AVR" } }""";
 
         Assert.False(ManifestFile.TryParse(json, out var manifest, out var error));
         Assert.Null(manifest);
-        Assert.Equal("Workspace definition schema 2 is newer than this GrayMoon", error);
+        Assert.Equal("Workspace definition schema 3 is newer than this GrayMoon", error);
+    }
+
+    [Fact]
+    public void Parse_accepts_schema_version_2()
+    {
+        const string json = """{ "version": 2, "workspace": { "name": "AVR" } }""";
+
+        Assert.True(ManifestFile.TryParse(json, out var manifest, out var error), error);
+        Assert.Equal(2, manifest!.SchemaVersion);
     }
 
     [Fact]

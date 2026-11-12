@@ -357,6 +357,7 @@ public sealed class WorkspaceRepositoryOperations(
         // D14 step 4
         progress.Report("Applying Workspace profile...");
         await ApplyProfileAsync(workspaceId, plan.Type, plan.Versioning, plan.Ci, cancellationToken);
+        await ApplyReferenceDefaultAsync(workspaceId, plan.ReferenceDefault, cancellationToken);
 
         // D14 steps 5-6: every Source repository that resolves locally; the rest is reported, never fabricated.
         progress.Report(plan.SourceRepositoryIds.Count > 0
@@ -373,6 +374,8 @@ public sealed class WorkspaceRepositoryOperations(
                     RepositoryId = resolvedId,
                     Role = WorkspaceRepositoryRole.Source,
                     SyncStatus = RepoSyncStatus.NeedsSync,
+                    // Set before the caller's first Sync, so a read-only repository is never cloned as a writable one.
+                    IsReference = plan.ReferenceBySourceRepositoryId.GetValueOrDefault(resolvedId),
                 });
             }
 
@@ -427,7 +430,7 @@ public sealed class WorkspaceRepositoryOperations(
         if (!manifestFile.TryParse(fileContent, out var fileManifest, out _) || fileManifest is null)
             return true;
 
-        var database = WorkspaceRepositoryTagPins.CopyOnto(
+        var database = WorkspaceRepositoryRevisionPins.CopyOnto(
             await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken),
             fileManifest) with
         {
@@ -689,6 +692,18 @@ public sealed class WorkspaceRepositoryOperations(
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var workspace = await db.Workspaces.FirstAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
         await WorkspaceProfileTransition.ApplyAsync(db, workspace, type, versioning, ci, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>The read-only default for repositories added later. It changes no existing link.</summary>
+    private async Task ApplyReferenceDefaultAsync(int workspaceId, bool referenceDefault, CancellationToken cancellationToken)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var workspace = await db.Workspaces.FirstAsync(w => w.WorkspaceId == workspaceId, cancellationToken);
+        if (workspace.ReferenceDefault == referenceDefault)
+            return;
+
+        workspace.ReferenceDefault = referenceDefault;
         await db.SaveChangesAsync(cancellationToken);
     }
 

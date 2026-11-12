@@ -11,6 +11,10 @@ internal sealed class InspectWorktreeWorkerResponse
     [JsonPropertyName("exists")]
     public bool Exists { get; set; }
 
+    /// <summary>Full sha of HEAD, or null when it could not be read.</summary>
+    [JsonPropertyName("headSha")]
+    public string? HeadSha { get; set; }
+
     /// <summary>Current branch short name, or null when HEAD is detached or the Worker did not report it (09 SB-2).</summary>
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }

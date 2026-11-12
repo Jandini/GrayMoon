@@ -527,13 +527,22 @@ public sealed class WorkspaceRepository(
         if (toAdd.Count == 0)
             return;
 
+        // A new Source starts with the Workspace's read-only default. Read as a value from the database: this
+        // context is circuit-scoped and may hold the Workspace as it was before the default changed.
+        var referenceDefault = await _dbContext.Workspaces
+            .AsNoTracking()
+            .Where(w => w.WorkspaceId == workspaceId)
+            .Select(w => w.ReferenceDefault)
+            .FirstOrDefaultAsync(cancellationToken);
         foreach (var repositoryId in toAdd)
         {
             _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
-                SyncStatus = RepoSyncStatus.NeedsSync
+                SyncStatus = RepoSyncStatus.NeedsSync,
+                // Existing links are not touched.
+                IsReference = referenceDefault
             });
         }
 
@@ -629,13 +638,20 @@ public sealed class WorkspaceRepository(
                 .ExecuteDeleteAsync();
         }
 
+        // A new Source starts with the Workspace's read-only default. Links that stay keep their own state.
+        var referenceDefault = toAdd.Count > 0
+            && await db.Workspaces
+                .Where(w => w.WorkspaceId == workspaceId)
+                .Select(w => w.ReferenceDefault)
+                .FirstOrDefaultAsync();
         foreach (var repositoryId in toAdd)
         {
             db.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
-                SyncStatus = RepoSyncStatus.NeedsSync
+                SyncStatus = RepoSyncStatus.NeedsSync,
+                IsReference = referenceDefault
             });
         }
 

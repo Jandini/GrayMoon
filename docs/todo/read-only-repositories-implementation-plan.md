@@ -427,8 +427,8 @@ Not committed (base `d0f00d30`). Results are in the test log, "Phase 1, first gr
 
 **Not done in this group**
 
-- WP5 activation check, App half: the rule per checkout (block, warn, pass and the messages) is not written. Its only caller is the mode change in WP8, so it is built there. The Worker half is done, see "Leftovers closed" below.
-- WP5 restore at the recorded revision: needs `ReadPinnedRevision` from WP2. Moves to the WP2-WP3 group.
+- WP5 activation check, App half: built ahead of WP8 on the owner's decision, see "Activation check, App half" below.
+- WP5 restore at the recorded revision: built with WP2-WP3, see "Phase 1, second group as built".
 - WP5: the App does not yet use `commit` or `localChangesBlockCheckout` from the checkout response (recording is WP8; the bulk checkout already continues with the other repositories on any failure).
 - Tests listed under "Not run" in the test log.
 
@@ -444,6 +444,40 @@ Not committed (base `d0f00d30`). Results are in the test log, "Phase 1, first gr
 - `GetCommonBranchesAsync` already excluded read-only repositories (`wr.Allows(RepositoryOperation.WorkspaceCheckout)`); the earlier "not done" line was wrong.
 - Actions row list (`WorkspaceActions.Loading.cs`): rows are built from the Workspace links, which carry `IsReference`, and every run and rerun guard reads the row's link. Nothing to add.
 - Pipelined push lane: the lane leaves read-only repositories out (`LoadPushSkippedRepoIdsAsync`), and `UpdateAndPushResult.Skipped` already names them through the update half, which evaluates the same set (tag or read-only). Adding them to the push half as well would list every repository twice in the REST body. Deviation from the plan text; not covered by a test.
+
+**Activation check, App half (2026-11-12, built before WP8 on the owner's decision)**
+
+- `ReferenceActivationRule` (`Services/Policy`): the rule of WP5 on one `InspectWorktree` answer, with the messages. Pure.
+- `ReferenceActivationChecker.CheckAsync(workspaceId, repositoryIds)`: inspects the Workspace checkout and every Feature worktree of each Source and returns the findings (block or warning, each naming the repository and the Feature) and the HEAD (branch and commit) of every Workspace checkout that is not blocked - WP8 records from it. It reads only. The Workspace-role repository is left out.
+- A repository that is not cloned on this machine is a warning and its Feature rows are not inspected. The Worker reports that case as `Repository not found.`; a Worker test pins the text.
+- The App mirror of the response gained `headSha`.
+- Nothing calls the checker for a mode change yet; that is WP8. Its one caller today is the import guard of the second group.
+
+### Phase 1, second group as built: WP2-WP3 (2026-11-12)
+
+**Built**
+
+- WP2: `WorkspaceManifestWorkspace.Reference`, `WorkspaceManifestRepository.Reference` and `.Branch` (all omitted when null). `WorkspaceManifestFile.MaxSchemaVersion = 2`; `Serialize` writes version 2 when any `reference` or `branch` is present and version 1 otherwise, whatever version the caller passes. `TryParse` reads 1 and 2 and rejects `reference` or `branch` in a version-1 file. `reference` uses the lenient boolean with its own property name in the message; the `codegraph` message is unchanged. `WorkspaceDefinitionRevisionPin.TryNormalize` holds the revision rules (nothing, `tag` + `commit`, or `branch` + `commit` with `reference: true`); `ReadTagPinCommit` became `ReadPinnedRevision` and returns the commit and the branch.
+- WP3: `BuildFromDatabaseAsync` writes `workspace.reference` and every `repositories[].reference` only when the default is on or a Source is read-only (D3). `WorkspaceRepositoryTagPins` is now `WorkspaceRepositoryRevisionPins`: `CopyOnto` carries `branch` + `commit` onto entries the database marks read-only and drops them otherwise; a tag pin is always carried. `SetRepositoryReferenceRevisionsAsync` records a branch and commit; it shares the per-Workspace gate and the read-apply-write body with `SetRepositoryTagPinsAsync`. Drift has `ChangedReference` and `ReferenceDefaultChanged`. `RestoreDefinitionPlan` has `ReferenceDefault` and `ReferenceBySourceRepositoryId`; restore sets both before the first Sync. New Source links take `Workspace.ReferenceDefault` in `AddRepositoriesAsync` and `ReplaceRepositoriesCoreAsync`.
+- D6: `ReferenceImportGuard` runs the activation check on imported folders that start read-only; a blocked one is made writable and the Workspaces page shows the warning.
+- WP5, restore at the recorded revision: `GitService.CheckoutBranchAtCommitAsync` (`git checkout -B <branch> <sha>`, then upstream `origin/<branch>` when that ref exists); `CheckoutPinnedCommitAsync` uses it when the entry has a branch. A missing commit or an invalid entry removes the clone and fails that repository's sync.
+
+**Deviations and decisions made while building**
+
+- An entry without its own `reference` takes `workspace.reference`, in `TryParse`, `ReadPinnedRevision`, drift and restore alike (the plan stated the rule for restore only). Otherwise a legacy file with the workspace value and a `branch` would parse in one place and fail in another.
+- The drift banner text is unchanged. The banner shows one fixed sentence for every kind of drift and the page keeps only a timestamp, so there is no place where it names anything today. The two new fields are on the result for a caller that wants them.
+- `WorkspaceRepositoryOperations.cs:563` is the Workspace-role link, which is never read-only. Not changed.
+- `AddRepositoriesAsync` does not run the activation check itself: it is a data class. The check runs in `ReferenceImportGuard`, called by the page right after the add. Between the two calls a blocked repository is read-only for a moment, which is the safe side.
+- `AddRepositoriesAsync` reads the default as a value from the database, not from the tracked Workspace: the context is circuit-scoped and can hold the Workspace as it was before the default changed.
+- Clearing a tag pin (`SetRepositoryTagPinsAsync` with no tag and no commit) now leaves an entry that has a branch alone. Before, it removed any `commit`.
+- Recording a branch revision for an entry that is not read-only in the file returns a failed result and writes nothing (D9). WP8 must write the flags before it records.
+- A file that says `false` everywhere equals a Workspace with no read-only state for drift, but is rewritten as version 1 by a restore that is complete on this machine (canonical form).
+- "A version-2 file read by a parser pinned to 1" cannot be tested against this code: the refusal is the unchanged `version > 1` check of older releases. The tests show that a file with read-only data says `"version": 2` and that version 3 is refused here with the same message.
+
+**Not done in this group**
+
+- Nothing sets `IsReference` or `ReferenceDefault` from the UI, and nothing calls `SetRepositoryReferenceRevisionsAsync`: both are WP8-WP9.
+- `ReplaceRepositoriesCoreAsync` (the Workspace editor) gives new Sources the default without an activation check. Those repositories are normally not cloned yet; a folder that already exists is the import path, which is checked.
 
 ### WP8 - Mode-change facade and recording
 

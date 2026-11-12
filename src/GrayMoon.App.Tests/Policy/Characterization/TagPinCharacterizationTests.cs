@@ -283,6 +283,9 @@ public sealed class TagPinCharacterizationTests
             return Task.FromResult(Failure is null ? OperationResult.Ok() : OperationResult.Fail(Failure));
         }
 
+        public Task<OperationResult> SetRepositoryReferenceRevisionsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryReferenceRevisionChange> changes, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             Task.FromResult(new WorkspaceManifestDrift(false, null, [], [], [], [], []));
 

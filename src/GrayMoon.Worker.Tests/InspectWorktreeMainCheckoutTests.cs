@@ -262,6 +262,16 @@ public sealed class InspectWorktreeMainCheckoutTests : IDisposable
         Assert.False(local.HeadOnRemote);
     }
 
+    /// <summary>The App's activation check reads this exact text to tell "not cloned here" from "could not be read".</summary>
+    [Fact]
+    public async Task A_main_checkout_folder_that_does_not_exist_reports_Repository_not_found()
+    {
+        var result = await InspectMainAsync(Path.Combine(_root, "never-cloned"));
+
+        Assert.False(result.Exists);
+        Assert.Equal("Repository not found.", result.Error);
+    }
+
     private Task<InspectWorktreeResponse> InspectMainAsync(string repo) =>
         _inspect.ExecuteAsync(new InspectWorktreeRequest
         {

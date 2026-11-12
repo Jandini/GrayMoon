@@ -31,6 +31,7 @@
 @using GrayMoon.Application.WorkspaceManifest
 @inject IWorkspaceManifestService ManifestService
 @inject IToastService ToastService
+@inject GrayMoon.App.Services.Policy.ReferenceImportGuard ReferenceImportGuard
 @using GrayMoon.App.Data
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<AppDbContext> DbContextFactory
@@ -1252,6 +1253,10 @@
         try
         {
             await WorkspaceRepository.AddRepositoriesAsync(editingWorkspaceId.Value, importRepositoryIds);
+            // These folders already exist and may hold commits that are only on this machine: one that would start
+            // read-only with such commits is kept writable.
+            foreach (var warning in await ReferenceImportGuard.ApplyAsync(editingWorkspaceId.Value, importRepositoryIds))
+                ToastService.ShowWarning(warning);
             if (adoptedExistingWorkspaceRepository)
                 await ImportVersionFilesAsync(editingWorkspaceId.Value);
             else

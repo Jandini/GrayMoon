@@ -299,3 +299,40 @@ New tests:
 
 - The manual smoke list and mutation checks.
 - No test for: the Repositories page code that routes a read-only row to the plain checkout (page logic), `PackageProducerDiagnostic.IsReference` being set from the link and the `ReadOnly` status, `ReturnToDefaultRepositoryPlan.IsReference` from the analysis, and the pipelined run's `Skipped`.
+
+## Phase 1, second group (WP2-WP3) and the activation rule - 2026-11-12
+
+Base: commit `d0f00d30` plus uncommitted changes. Same machine and commands as the first group. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| Worker tests | 1034 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4364 passed, 0 failed, 0 skipped |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once after the last code change.
+
+Failures on the way, both fixed before the run above:
+
+- `WorkspaceManifestFileTests.Parse_rejects_schema_version_2` failed as expected once version 2 became readable. It is now `Parse_rejects_schema_version_3`, with `Parse_accepts_schema_version_2` beside it.
+- The two new `AddRepositoriesAsync_gives_a_new_repository_the_read_only_default...` cases failed twice because of the test's own setup of the shared circuit context. The second attempt led to one product change: the default is read as a value from the database.
+
+New tests:
+
+- Common `WorkspaceManifestReferenceTests` (29 cases): the note's sample round trips as version 2 byte for byte; property order; default true with one writable Source; no read-only data stays version 1; `"yes"`, `1` and `""` are rejected with the property name, on the repository and on the workspace; `codegraph` keeps its message; `reference` or `branch` in a version-1 file is refused; the revision rules; `ReadPinnedRevision`.
+- Common `WorkspaceDefinitionRevisionPinTests` (23 cases).
+- App `WorkspaceManifestReferenceTests` (14): what is written from the database; branch and commit kept for a read-only repository and dropped for a writable one; a tag pin survives turning read-only off; recording, repeating, replacing a tag pin and clearing a revision; a writable entry is refused without a write; drift names a flag difference, reports a default difference, ignores branch and commit.
+- App `ReferenceRestoreTests` (8): the mixed sample restores each state and leaves the file alone; workspace value only; default false with one read-only Source; version 1; read-only data under version 1 creates nothing; the import guard keeps a folder with unpushed commits writable, does not inspect writable repositories, and lets uncommitted changes pass.
+- App `WorkspaceRepositoryReplaceTests` (+5): a new Source takes the default through the editor and through import while the existing one keeps the opposite state; saving the same membership changes nothing.
+- App `ReferenceActivationTests` (23): the rule and the checker (first reported in the previous check-in message, recorded here).
+- Worker `SyncRepositoryTagPinTests` (+6, real git): a fresh clone of a read-only repository is on its branch at the recorded commit, tracks `origin`, and is one commit behind with nothing outgoing; the workspace value applies; a branch the remote no longer has gets no upstream; an existing checkout is not moved; a missing commit and a branch on a writable entry fail the sync and remove the clone.
+- Worker `InspectWorktreeMainCheckoutTests` (+1): a main checkout folder that does not exist reports `Repository not found.`.
+
+### Not run
+
+- The manual smoke list and mutation checks.
+- No test for: the Workspaces page calling the import guard and showing the warning (page code); `GitService.CheckoutBranchAtCommitAsync` failing at the set-upstream step.
+- Restore was tested against the fake Worker in the App and against real git in the Worker separately; no test runs a restore end to end through both.
