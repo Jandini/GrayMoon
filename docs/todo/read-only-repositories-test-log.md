@@ -365,3 +365,44 @@ New tests:
 
 - The manual smoke list and mutation checks. Nothing in this group was looked at in a browser.
 - No test for: the Razor changes (section, badges, dialog lines, the Workspaces and Repositories pages passing the new parameters); the header counters of a read-only snapshot in a Feature; two pulls recording at the same moment (the queue and the single write were not exercised in parallel).
+
+## Phase 2 - 2026-11-12
+
+Base: commit `fb8df758` (the third group of Phase 1) plus the uncommitted Phase 2 changes. Same machine and commands as before. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| Worker tests | 1034 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4413 passed, 0 failed, 0 skipped (4390 before) |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once after the last code change. No test failed on the way.
+
+New tests (23):
+
+- App `ReferencePerRepositoryTests` (20 cases): `ro:yes` and `ro:no` split 30 repositories 7 / 23 and are not case sensitive; another value matches nothing; an unknown field matches everything; `ro:` combined with a text term; none / some / all for 0, 1, 19 and 20 of 20; the Workspaces list leaves the Workspace repository out; the drift text with names, the default, and more than 5 names; the Restore preview text for six combinations; where the per-repository control is offered.
+- App `WorkspaceReferenceOperationsTests` (+2): one of twenty repositories made read-only changes no sibling and not the default, and only that one is checked; with all twenty read-only and the default on, one made writable changes no sibling and not the default; setting a repository to the state it has changes nothing and checks nothing.
+- App `ReferenceRestoreTests` (+1): a definition with default true and one writable repository is previewed as "Some repositories, and new repositories", restored with that repository writable and the default on, and listed as "Some".
+- No assertion of an older test was changed.
+
+### Not run
+
+- The manual smoke list M1-M13 and mutation checks. Nothing in Phase 2 was looked at in a browser.
+- No test for: the Razor markup (checkbox, column, banner text, preview row); the checkbox being recreated after a refusal; the second drift comparison of the page (Worker read, no-Worker path); `ro:` in a Feature view.
+
+## Badge tooltips (Appendix B, P2) - 2026-11-12
+
+Base: commit `fb8df758` plus the uncommitted Phase 2 changes. Change: tooltip text of the `archived` and `ro` badges, one new file with the texts. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| App tests | 4413 passed, 0 failed, 0 skipped |
+
+### Not run
+
+- Common tests, Worker tests and both `Category=Long` runs were **not run again** after this change. Their last run is the Phase 2 run above. The change touches only the App project (Razor markup and one class of constants), but the full command list must run on the final tree for the reference-mode gate.
+- No test reads the tooltips. Not looked at in a browser.

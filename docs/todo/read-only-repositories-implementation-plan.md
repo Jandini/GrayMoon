@@ -510,6 +510,35 @@ Not committed (base `4b6590bf`). Results are in the test log, "Phase 1, third gr
 - Per-repository switch in the UI (`SetRepositoryAsync` is built and tested; the UI is Phase 2).
 - No component test renders the new section, the badges or the dialog lines.
 
+### Phase 2 as built (2026-11-12)
+
+Not committed (base `fb8df758`, which holds the third group of Phase 1). Results are in the test log, "Phase 2". The manual smoke list was **not run**. Appendix B (archived repositories) is a proposal only; none of it is built.
+
+**Built**
+
+- Switch Branch dialog: a "Read-only" checkbox in the footer, left side, wired to `SetRepositoryAsync`. It is hidden in a Feature view, for the Workspace repository, and while the "branch already exists" question is shown. It is disabled while the dialog works, while a page job runs and while `IWorkspaceOperationRunner.IsBusy(workspaceId)`. A refusal is shown in the dialog body with one line per blocked checkout; warnings are listed below it. It never reads or changes the default.
+- Search: `ro:yes` and `ro:no` in `WorkspaceRepositoryLinkSearchExpressions`. The field name and the value are not case sensitive. Any other value of `ro:` matches nothing. An unknown field still matches everything, as before. The unused `WorkspaceRepositoryLinkSearchMatcher` is deleted (no caller in production or tests).
+- Workspaces list: a "Read-only" column with `None`, `Some`, `All`, or `-` for a Workspace without Source repositories. The Workspace repository is not counted. `WorkspaceReferenceAggregates` (`Of`, `Label`) is the one place that decides it; the facade uses it too.
+- Drift banner: when the banner is shown, the page compares once more and appends the read-only differences ("The read-only state differs for Api, Web." / "The read-only default for new repositories differs."; at most 5 names, then "and N more"). `WorkspaceManifestDrift.DescribeReferenceDifferences()` builds the text.
+- Restore dialog: the preview has a "Read-only" row ("All repositories", "Some repositories", "New repositories only", each with ", and new repositories" when the definition's default is on). The row is absent when the definition has no read-only data. `RestoreWorkspacePreflight` carries `ReferenceAggregate` and `ReferenceDefault`; the count behind it includes listed repositories that are not found locally.
+- Fix to the third group: a refused change left the checkbox ticked in the browser, because the stored value had not changed and Blazor saw nothing to update. The switch in the Edit Workspace section and the new checkbox are now recreated after every attempt (`@key`).
+
+**Deviations and decisions made while building**
+
+- The drift banner needs a second comparison because the database stores only the time drift was found, not what differs, and Phase 2 has no migration. So each page that shows the banner asks the Worker for the definition file once. Without a Worker, or when the file cannot be read, the plain banner stays. If the second comparison finds no drift, the banner goes away.
+- The text is read once per banner. A read-only change made while the banner is open does not refresh it until the banner is hidden and shown again or the page is reloaded.
+- `ro:` in a Feature view filters by the Workspace flag of the link, not by the Feature snapshot. The grid badge in a Feature shows the snapshot, so the two can differ for a repository whose flag changed after the Feature was created.
+- `ro:no` also matches the Workspace repository (it is never read-only).
+- The Workspaces list uses a column, not text beside the name: the name cell already holds the star, the link and the Default badge.
+- The checkbox stays visible on the New Branch tab; the plan names only the footer.
+
+**Not done**
+
+- Appendix B, except the tooltips of P2 (see B.7): the "archived - make it read-only?" hint and the open questions.
+- The warning of a manual switch (`CheckoutBranchApiResult.Warning`) is still not shown by the Repositories page.
+- No component test renders the checkbox, the column, the banner or the preview row. The decisions behind them are tested as functions.
+- Section 11 (architecture documents, `AGENTS.md`, Desktop README) is not started; it follows the gate.
+
 ### WP8 - Mode-change facade and recording
 
 - `IWorkspaceReferenceOperations` (`GrayMoon.Application`), implementation in `Services/Application/`:
@@ -661,3 +690,119 @@ No service-side check today (F5): `WorkspaceCommitSyncHandler.cs:31/124`, `Works
 Worker (`worker-git-state`, unchanged in 0B): `SyncRepositoryCommand`, the hook sync commands, `RepositoryStateProbe`, `LibGit2SharpLocalGitSnapshotReader`, `GitCliRepositoryReader`, `LocalGitSnapshot`, `StageAndCommitCommand`, `ReturnToDefaultBranchCommand`, `CreateBranchCommand`, `GetHeadCommitsCommand`, `GetBranchesCommand`, `FetchCommitsCommand`, `RefreshBranchesCommand`, `RefreshRepositoryVersionCommand`.
 
 Existing tests that already pin tag behavior (keep green throughout): `ReturnToDefaultAnalyzeTests`, `ReturnToDefaultUnattendedBatchTests`, `ReturnToDefaultPersistenceTests`, `WorkspaceRepositoryLinkListQueryServiceTests`, `WorkspaceRepositoryLinkListQueryServiceRoleTests`, `WorkspacePushStrategyTests`, `WorkspaceUpdateAndPushOperationsTests`, `FeatureBranchGuardTests`, `FeatureContextBranchRefreshScopingTests`, `CreateFeatureParentBranchTests`, `WorkspaceB4ContextLeakTests`, `BranchRefsSyncTests`, `SyncCommandHandlerTests`, `WorkspaceRepositoryStateWriterTests`, `ModalAndSharedUiGuardTests`, `WorkspaceManifestServiceTests`, `WorkspaceManifestFileTests`, `WorkspaceDefinitionTagPinTests`, `WorkspaceOperationLockTests`, `WorkspacePageJobDisciplineTests`, `Conventions/ServiceConventionTests`, Worker `SyncRepositoryTagPinTests`, `ReturnToDefaultBranchCommandTests`.
+
+## Appendix B - Archived repositories and the read only badge
+
+Written 2026-11-12, after WP8-WP9. Line numbers are of commit `fb8df758` (the third group of Phase 1). All paths are under `src/GrayMoon.App/`. This appendix records what the code does and proposes a rule. Nothing in it is built, and the proposal is not a decision.
+
+### B.1 What the code does today
+
+**The flag is `Repository.Archived`, not `IsArchived`.** A search for `IsArchived` finds only `PushErrorFormatter.IsArchivedRejection`, which is a text test on a push error and not a stored flag.
+
+**Stored**
+
+- `Models/Repository.cs:28`: `public bool Archived { get; set; }`. It is on the repository, so it is the same in every Workspace that links the repository.
+- `Data/AppDbContext.cs:111-112`: the column has default `false`. A search of the App project found no migration file that names the column.
+
+**Set**
+
+- `Models/GitHubDtos.cs:37-38`: the provider answer carries `archived`.
+- `Services/GitHub/GitHubRepositoryService.cs:198`: `FetchConnectorAsync` copies `repo.Archived` to the new `Repository` object.
+- `Repositories/RepositoryRepository.cs:114` (`MergeRepositoriesAsync`): a difference in `Archived` counts as a change (line 173) and the value is written in all three match paths (lines 200, 236, 293).
+- Nothing else writes it. No push, pull, Sync, hook or Worker answer changes it.
+
+**Refreshed**
+
+- Only by `GitHubRepositoryService.RefreshRepositoriesAsync` (line 31; the merge is at line 115). It has three callers, all of them a "fetch repositories" action that the user starts: `Components/Pages/Repositories.razor.cs:243`, `Components/Pages/Workspaces.razor:953` and `Components/Pages/WorkspaceRepositories.RepositoriesModal.cs:133`.
+- There is no timer and no background refresh. A repository that is archived on the provider stays not archived in GrayMoon until the next fetch, and the other way round.
+
+**Read**
+
+- The grid row gets it through the list query: `Services/Queries/WorkspaceRepositoryLinkListModels.cs:49`, `WorkspaceRepositoryLinkListQueryService.cs:685` and `:758`, `WorkspaceRepositoryLinkListMapper.cs:46`. A test covers the round trip (`WorkspaceRepositoryLinkListQueryServiceTests.cs:158`).
+- It is also copied in `Components/Pages/WorkspaceActions.Loading.cs:75` and `Services/Ci/GitHubActionsPushRunWatch.cs:90`.
+- The operation policy does not read it. `RepositoryPolicySubject` has no archived field, and no file under `Services/Policy` or `GrayMoon.Application/Repositories/Policy` names it. The header counters do not read it either.
+
+**Shown**
+
+- Yes, the grid already shows an archived badge: `Components/Pages/WorkspaceRepositoriesRow.razor:55-58` (name is a link) and `:86-89` (name is plain text). It is the text `archived` in a purple badge, class `repo-archived-badge` (`Components/Pages/WorkspaceRepositories.razor.css:213-219`), in the name cell, with no tooltip.
+- The same class is also used for the `no connector` and `not found on provider` badges in the same cell (`WorkspaceRepositoriesRow.razor:61`, `:65`, `:92`, `:96`).
+- Other places: the repository picker (`Components/Modals/WorkspaceRepositoriesModal.razor:114-117`) and the Repositories page (`Components/Pages/Repositories.razor:199-202`, class `badge-archived`).
+
+**What happens on a write today**
+
+- Nothing stops it in GrayMoon. A push to an archived repository goes to the provider, is rejected there, and the error is rewritten to "Push rejected: this repository is archived on GitHub and is read-only." (`Services/Workspaces/PushErrorFormatter.cs:9-10`, test `PushErrorFormatterTests.cs:8`).
+- A local commit, a branch, a dependency update and a version file update all succeed locally. Only the push fails.
+
+**The read only badge**
+
+- `ro`, gray (`badge bg-secondary`), tooltip "Read-only repository", in the branch cell: `WorkspaceRepositoriesRow.razor:145` (snapshot in a Feature), `:162` (on a tag) and `:174` (on a branch). In the Git Changes tree: `Components/GitChanges/GitChangesTree.razor:67`.
+- It shows `WorkspaceRepositoryLink.IsReference` (per Workspace, chosen by the user) or `IsReferenceSnapshot`.
+
+### B.2 The two states are different things
+
+| | Archived | Read-only (reference) |
+|---|---|---|
+| Who decides | the provider | the user, in GrayMoon |
+| Scope | the repository, in every Workspace | one Workspace link |
+| Stored in | `Repository.Archived` | `WorkspaceRepositoryLink.IsReference` |
+| Written to `graymoon.json` | no | yes (`reference`) |
+| Can be stale | yes, until the next fetch | no |
+| Enforced by | the provider, on push | the policy, before the Worker is asked |
+| Badge | `archived`, purple, name cell | `ro`, gray, branch cell |
+
+So a repository can be archived and writable in GrayMoon (today's case: writes work locally, push fails), read-only and not archived (the normal read-only case), or both.
+
+### B.3 Problems
+
+1. **An archived repository looks writable.** The badges for commit, push, create pull request and update are active on it. The user finds out at push time.
+2. **Two badges that both say "read-only" in words.** The push error calls an archived repository "read-only", and the `ro` tooltip says "Read-only repository". A user who sees `ro` cannot tell from the badge whether GrayMoon or the provider is the cause.
+3. **Both badges on one row.** An archived repository that is also read-only shows `archived` in the name cell and `ro` in the branch cell. That is correct but says the same thing twice from the user's side.
+4. **The flag can be wrong.** Any rule built on `Archived` acts on the value of the last fetch.
+
+### B.4 Proposal (for the owner to decide)
+
+Keep the two states and the two badges separate. Do not show `ro` for an archived repository that is not read-only, and do not set `IsReference` from `Archived`.
+
+- **P1. Badges stay as they are.** `archived` means the provider refuses writes. `ro` means GrayMoon does not write. A row with both shows both.
+- **P2. Tooltips say who decided.** `archived`: "Archived on the provider. Pushes are rejected." `ro`: "Read-only in this Workspace. GrayMoon does not commit, push or update it."
+- **P3. Suggest, do not force.** In the read-only section of Edit Workspace (and in the per-repository control of Phase 2), an archived repository that is writable gets a hint: "Archived on the provider. Make it read-only?" The user decides. The activation check runs as for any other repository, so unpushed commits still block.
+- **P4. No policy rule on `Archived` in Phase 2.** The reason is problem 4: a stale value would refuse a commit in a repository that was un-archived an hour ago, with no way out except a fetch. The push error text already names the cause.
+- **P5. Archived does not enter `graymoon.json`.** It is a provider fact, read again on every fetch.
+
+### B.5 Open questions
+
+1. Is P4 right, or should the policy leave an archived repository out of bulk push with a skip reason of its own (`Archived`), accepting the stale value? If yes, single-repository push must stay possible so that a stale flag does not lock the user out.
+2. Should a repository that becomes archived on a fetch raise a one-time notice in the Workspaces that link it as writable?
+3. Should the hint of P3 also appear when a repository is added to a Workspace whose default is writable?
+4. Is `ro` the right text once both badges can be on one row, or should the read-only badge say `read-only`? (The grid width was the reason for `ro`.)
+
+### B.6 Work, if the proposal is accepted
+
+Small, UI only, belongs to Phase 2:
+
+- Tooltips of P2 on the three `archived` badge places and the four `ro` places listed in B.1.
+- The hint of P3 in `WorkspaceReferenceSection.razor` and in the Phase 2 per-repository control. `IWorkspaceReferenceOperations.GetStateAsync` returns `Archived` per repository for that.
+- Tests: the state carries `Archived`; the hint is shown only for archived and writable.
+- No schema change, no manifest change, no policy change.
+
+### B.7 Decision and what is built (2026-11-12)
+
+The owner decided: the tooltips of P2 now, everything else about archived repositories after the feature ships.
+
+**Built (not committed)**
+
+- `Services/Ui/RepositoryBadgeTitles.cs` holds the four texts, so each badge place uses the same words.
+- `archived` badge, tooltip "Archived on the provider. Pushes are rejected.": the grid row (both places), the repository picker and the Repositories page.
+- `ro` badge on a branch or tag in the grid, tooltip "Read-only in this Workspace. GrayMoon does not commit, push or update it."
+- `ro` badge on a snapshot in a Feature, tooltip "Read-only in this Feature. GrayMoon does not commit, push or update it."
+- `ro` badge in the Git Changes tree, tooltip "Read-only in this Workspace. GrayMoon does not commit or push it, and actions on all repositories leave it out."
+- The `ro` badge itself was already built in the third group of Phase 1 (commit `fb8df758`): beside the branch, beside the tag, and on a Feature snapshot. Only its tooltip changed here.
+
+**Deferred**
+
+- P3 (the hint "Archived on the provider. Make it read-only?") and `Archived` in the state of `IWorkspaceReferenceOperations`.
+- Open questions 1-4 of B.5. P4 and P5 stand as they are until then: no policy rule on `Archived`, nothing about it in `graymoon.json`.
+
+**Not tested**
+
+- The tooltips are text in Razor markup. No test reads them and they were not looked at in a browser.
