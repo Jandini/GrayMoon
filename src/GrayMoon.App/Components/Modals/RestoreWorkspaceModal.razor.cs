@@ -646,6 +646,24 @@ public static class RestoreWorkspaceFlow
 
     public const string UnknownFolderNote = "The folder already exists. Restore continues only if it is empty.";
 
+    /// <summary>
+    /// What the definition says about read-only repositories, for the preview; null when it says nothing (no read-only
+    /// repository and a writable default), so a definition without read-only data shows no extra row.
+    /// </summary>
+    public static string? ReferenceSummary(RestoreWorkspacePreflight preview)
+    {
+        var repositories = preview.ReferenceAggregate switch
+        {
+            WorkspaceReferenceAggregate.All => "All repositories",
+            WorkspaceReferenceAggregate.Mixed => "Some repositories",
+            _ => null,
+        };
+        if (repositories is null)
+            return preview.ReferenceDefault ? "New repositories only" : null;
+
+        return preview.ReferenceDefault ? $"{repositories}, and new repositories" : repositories;
+    }
+
     /// <summary>"org/name" for every repository; when two entries would read the same, the connector is added.</summary>
     public static IReadOnlyList<RestoreRepositoryChoice> BuildChoices(IEnumerable<RestoreRepositorySource> repositories)
     {

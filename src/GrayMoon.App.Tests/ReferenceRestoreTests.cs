@@ -63,6 +63,38 @@ public sealed class ReferenceRestoreTests
     }
 
     [Fact]
+    public async Task A_default_of_true_with_one_writable_repository_is_previewed_and_restored_as_mixed()
+    {
+        var (fixture, root, billing, platform) = await SeedAsync();
+        await using var _ = fixture;
+        fixture.UseDefinition(Definition(
+            true,
+            Entry("Billing"),
+            Entry("Platform", reference: false)));
+
+        // What the Restore dialog shows before the user confirms.
+        var preview = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId);
+
+        Assert.True(preview.Success, preview.Error);
+        Assert.Equal(GrayMoon.Application.Workspaces.WorkspaceReferenceAggregate.Mixed, preview.ReferenceAggregate);
+        Assert.True(preview.ReferenceDefault);
+        Assert.Equal(
+            "Some repositories, and new repositories",
+            GrayMoon.App.Components.Modals.RestoreWorkspaceFlow.ReferenceSummary(preview));
+
+        var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "restored");
+
+        // The default does not override the one repository the definition keeps writable.
+        Assert.True(result.Success, result.Error);
+        var links = await fixture.GetLinksAsync(result.WorkspaceId!.Value);
+        Assert.True(links.Single(link => link.RepositoryId == billing.RepositoryId).IsReference);
+        Assert.False(links.Single(link => link.RepositoryId == platform.RepositoryId).IsReference);
+        Assert.True(await ReferenceDefaultAsync(fixture, result.WorkspaceId.Value));
+        // What the Workspaces list shows for it.
+        Assert.Equal("Some", GrayMoon.App.Components.Pages.Workspaces.ReferenceLabel(new Workspace { Repositories = [.. links] }));
+    }
+
+    [Fact]
     public async Task A_definition_with_only_the_workspace_value_makes_every_repository_read_only()
     {
         var (fixture, root, _, _) = await SeedAsync();

@@ -98,6 +98,7 @@
                                 <th class="col-path">Path</th>
                                 <th class="col-count">Repos</th>
                                 <th class="col-count">Projects</th>
+                                <th class="col-count" title="Read-only repositories of the Workspace">Read-only</th>
                                 <th class="col-actions">Actions</th>
                             </tr>
                         </thead>
@@ -105,7 +106,7 @@
                             @if (workspaces == null)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="6" class="text-center text-muted py-4">
                                         Loading workspaces...
                                     </td>
                                 </tr>
@@ -113,7 +114,7 @@
                             else if (workspaces.Count == 0)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="6" class="text-center text-muted py-4">
                                         No workspaces found. Add your first workspace to get started.
                                     </td>
                                 </tr>
@@ -121,7 +122,7 @@
                             else if (NoWorkspacesMatchSearch)
                             {
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="6" class="text-center text-muted py-4">
                                         No workspaces match your search.
                                     </td>
                                 </tr>
@@ -159,6 +160,7 @@
                                         <td class="col-path text-muted">@WorkspaceService.GetWorkspacePath(workspace.Name, workspace.RootPath)</td>
                                         <td class="col-count">@workspace.Repositories.Count</td>
                                         <td class="col-count">@workspace.Repositories.Sum(r => r.Projects ?? 0)</td>
+                                        <td class="col-count">@ReferenceLabel(workspace)</td>
                                         <td class="col-actions">
                                             <button class="btn btn-sm btn-outline-primary me-2"
                                                     @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
@@ -451,6 +453,14 @@
         await LoadWorkspacesAsync();
         if (WorkerBridge.IsWorkerConnected)
             await WorkspaceService.GetRootPathAsync();
+    }
+
+    /// <summary>None / Some / All for the Source repositories of a Workspace; the Workspace repository is not counted.</summary>
+    internal static string ReferenceLabel(WorkspaceModel workspace)
+    {
+        var sources = workspace.Repositories.Where(link => link.Role == WorkspaceRepositoryRole.Source).ToList();
+        return GrayMoon.Application.Workspaces.WorkspaceReferenceAggregates.Label(
+            GrayMoon.Application.Workspaces.WorkspaceReferenceAggregates.Of(sources.Count, sources.Count(link => link.IsReference)));
     }
 
     private string WorkspaceEntryHref(int workspaceId)

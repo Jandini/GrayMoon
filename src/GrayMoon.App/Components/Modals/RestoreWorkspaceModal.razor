@@ -112,6 +112,11 @@
                                         <dd>@RestoreWorkspaceFlow.CiLabel(preview.CiProvider)</dd>
                                         <dt>Repositories</dt>
                                         <dd>@preview.RepositoryCount</dd>
+                                        @if (RestoreWorkspaceFlow.ReferenceSummary(preview) is { } referenceSummary)
+                                        {
+                                            <dt>Read-only</dt>
+                                            <dd>@referenceSummary</dd>
+                                        }
                                         <dt>Connectors</dt>
                                         <dd>@preview.ConfiguredConnectorCount configured locally<br />@preview.MissingConnectors.Count missing</dd>
                                     </dl>

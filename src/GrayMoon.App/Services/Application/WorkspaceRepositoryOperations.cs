@@ -135,6 +135,8 @@ public sealed class WorkspaceRepositoryOperations(
                 ConnectorCount = plan.Plan.ConnectorCount,
                 MissingConnectors = plan.Plan.MissingConnectors,
                 MissingRepositories = plan.Plan.MissingRepositories,
+                ReferenceAggregate = WorkspaceReferenceAggregates.Of(plan.Plan.RepositoryCount, plan.Plan.ReferenceRepositoryCount),
+                ReferenceDefault = plan.Plan.ReferenceDefault,
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

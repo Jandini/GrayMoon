@@ -54,10 +54,7 @@ public sealed class WorkspaceReferenceOperations(
             .Select(link => new WorkspaceReferenceRepositoryState(link.RepositoryId, link.RepositoryName, link.IsReference))
             .ToList();
         var referenceCount = sources.Count(source => source.IsReference);
-        var aggregate = sources.Count == 0 ? WorkspaceReferenceAggregate.NoSources
-            : referenceCount == 0 ? WorkspaceReferenceAggregate.None
-            : referenceCount == sources.Count ? WorkspaceReferenceAggregate.All
-            : WorkspaceReferenceAggregate.Mixed;
+        var aggregate = WorkspaceReferenceAggregates.Of(sources.Count, referenceCount);
 
         return new WorkspaceReferenceState(
             referenceDefault,

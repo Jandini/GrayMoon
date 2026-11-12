@@ -5,6 +5,8 @@
 @using GrayMoon.Application.Features
 @inject IWorkspaceBranchOperations BranchOperations
 @inject IWorkspaceBranchOccupancyService OccupancyService
+@inject GrayMoon.Application.Workspaces.IWorkspaceReferenceOperations ReferenceOperations
+@inject GrayMoon.App.Services.Jobs.IWorkspaceOperationRunner OperationRunner
 @inject GrayMoon.Application.Features.IWorkspaceExternalWorktreeOperations ExternalWorktreeOperations
 @inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
@@ -527,6 +529,32 @@
                         }
 
                     }
+                    @if (_referenceError is not null)
+                    {
+                        <div class="gm-callout gm-callout--error mt-3" role="alert">
+                            <div>@_referenceError</div>
+                            @if (_referenceBlocks.Count > 0)
+                            {
+                                <ul class="mb-0 mt-1 ps-3">
+                                    @foreach (var block in _referenceBlocks)
+                                    {
+                                        <li>@block.Message</li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                    @if (_referenceWarnings.Count > 0)
+                    {
+                        <div class="gm-callout gm-callout--warning mt-3" role="alert">
+                            <ul class="mb-0 ps-3">
+                                @foreach (var warning in _referenceWarnings)
+                                {
+                                    <li>@warning</li>
+                                }
+                            </ul>
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer d-flex justify-content-between flex-row">
                     <div class="d-flex gap-2 align-items-center">
@@ -559,6 +587,22 @@
                                     <i class="bi bi-rewind me-1" aria-hidden="true"></i>
                                     Return to @defaultBranch
                                 </button>
+                            }
+                        }
+                        @if (ShowReferenceToggle)
+                        {
+                            @* Recreated after every attempt (key): a refused change must show the stored value again. *@
+                            <div class="form-check mb-0 flex-shrink-0" @key="_referenceAttempt">
+                                <input class="form-check-input form-check-input-gray" type="checkbox" id="switch-branch-reference"
+                                       checked="@_reference"
+                                       disabled="@ReferenceToggleDisabled"
+                                       title="@(ReferenceToggleBusy ? "An operation is running for this Workspace." : "GrayMoon pulls a read-only repository but never commits, pushes or updates it.")"
+                                       @onchange="OnReferenceChangedAsync" />
+                                <label class="form-check-label text-nowrap" for="switch-branch-reference">Read-only</label>
+                            </div>
+                            @if (_referenceRunning)
+                            {
+                                <span class="spinner-border spinner-border-sm flex-shrink-0"></span>
                             }
                         }
                     </div>
@@ -631,6 +675,8 @@
     [Parameter] public string? PinnedTag { get; set; }
     /// <summary>True for a read-only repository of the Workspace.</summary>
     [Parameter] public bool IsReference { get; set; }
+    /// <summary>True for the Workspace repository itself: it is never read-only, so the control is hidden.</summary>
+    [Parameter] public bool IsWorkspaceRepository { get; set; }
     /// <summary>Uncommitted files in the repository, as the grid row knows them.</summary>
     [Parameter] public int UncommittedChangedFileCount { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
@@ -714,8 +760,79 @@
     private ElementReference worktreeCleanupConfirmElementRef;
     private bool _scrollToWorktreeCleanupConfirm;
 
+    // Per-repository read-only control. The flag belongs to the Workspace link, so it is not offered in a Feature.
+    private bool _reference;
+    private bool _referenceParameter;
+    private bool _referenceRunning;
+    private int _referenceAttempt;
+    private string? _referenceError;
+    private IReadOnlyList<GrayMoon.Application.Workspaces.WorkspaceReferenceFinding> _referenceBlocks = [];
+    private IReadOnlyList<string> _referenceWarnings = [];
+
+    private bool ShowReferenceToggle =>
+        ShouldShowReferenceToggle(IsFeatureContext, IsWorkspaceRepository, RepositoryId)
+        && !(activeTab == "newbranch" && showBranchExistsConfirmation);
+
+    /// <summary>Only a Source repository, and only in the Workspace view.</summary>
+    internal static bool ShouldShowReferenceToggle(bool isFeatureContext, bool isWorkspaceRepository, int repositoryId) =>
+        !isFeatureContext && !isWorkspaceRepository && repositoryId > 0;
+
+    private bool ReferenceToggleBusy => IsBusy || OperationRunner.IsBusy(WorkspaceId);
+
+    private bool ReferenceToggleDisabled => _referenceRunning || isRefreshing || isProcessing || isCreating || ReferenceToggleBusy;
+
+    private async Task OnReferenceChangedAsync(ChangeEventArgs e)
+    {
+        if (_referenceRunning)
+            return;
+
+        var value = e.Value is true;
+        _referenceRunning = true;
+        _referenceError = null;
+        _referenceBlocks = [];
+        _referenceWarnings = [];
+        try
+        {
+            var result = await ReferenceOperations.SetRepositoryAsync(WorkspaceId, RepositoryId, value);
+            _referenceWarnings = result.Warnings;
+            if (result.Success)
+            {
+                _reference = value;
+            }
+            else
+            {
+                _referenceError = result.Error ?? "The change failed.";
+                _referenceBlocks = result.Blocks;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Changing the read-only state failed for repository {RepositoryId} in workspace {WorkspaceId}", RepositoryId, WorkspaceId);
+            _referenceError = ex.Message;
+        }
+        finally
+        {
+            _referenceRunning = false;
+            _referenceAttempt++;
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
+        if (IsVisible && !_prevVisible)
+        {
+            _referenceError = null;
+            _referenceBlocks = [];
+            _referenceWarnings = [];
+        }
+
+        // The stored value wins whenever the page hands over a new one (the change is broadcast and the row reloads).
+        if (!_prevVisible || _referenceParameter != IsReference)
+        {
+            _reference = IsReference;
+            _referenceParameter = IsReference;
+        }
+
         var busyJustEnded = _wasBusy && !IsBusy;
         _wasBusy = IsBusy;
 

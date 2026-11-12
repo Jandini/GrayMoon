@@ -49,7 +49,7 @@
             </div>
         }
 
-        <div class="form-check form-switch mb-0">
+        <div class="form-check form-switch mb-0" @key="_attempt">
             <input class="form-check-input form-check-input-gray" type="checkbox" role="switch" id="workspaceReferenceDefault"
                    checked="@_state.ReferenceDefault"
                    disabled="@Disabled"
@@ -105,6 +105,8 @@
     private bool? _pending;
     private bool _alsoSetDefault;
     private bool _running;
+    /// <summary>Changes after every attempt so the switch is recreated: a refused change must show the stored value again.</summary>
+    private int _attempt;
     private string? _error;
     private string? _notice;
     private IReadOnlyList<WorkspaceReferenceFinding> _blocks = [];
@@ -199,6 +201,7 @@
         finally
         {
             _running = false;
+            _attempt++;
             // Also after a refusal: the switch must show the stored value again.
             await ReloadAsync();
         }

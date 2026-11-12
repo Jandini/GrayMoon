@@ -22,7 +22,11 @@ public sealed record RestoreDefinitionPlan(
     IReadOnlyList<string> MissingConnectors,
     IReadOnlyList<string> MissingRepositories,
     bool ReferenceDefault,
-    IReadOnlyDictionary<int, bool> ReferenceBySourceRepositoryId);
+    IReadOnlyDictionary<int, bool> ReferenceBySourceRepositoryId)
+{
+    /// <summary>Listed Source repositories that are read-only in the definition, found locally or not.</summary>
+    public int ReferenceRepositoryCount { get; init; }
+}
 
 /// <summary>One imported repository, as the evaluator needs it.</summary>
 public sealed record RestoreCatalogEntry(int RepositoryId, string CloneUrl);
@@ -94,6 +98,7 @@ public static class RestoreDefinitionEvaluator
         var referenceByRepositoryId = new Dictionary<int, bool>();
         var missingRepositories = new List<string>();
         var repositoryCount = 0;
+        var referenceRepositoryCount = 0;
         foreach (var repository in manifest.Repositories)
         {
             var key = RepositoryUrlIdentity.NormalizeRepositoryUrl(repository.RepositoryUrl);
@@ -101,6 +106,8 @@ public static class RestoreDefinitionEvaluator
                 continue;
 
             repositoryCount++;
+            if (WorkspaceRepositoryRevisionPins.IsReference(manifest, repository))
+                referenceRepositoryCount++;
             if (catalogByUrl.TryGetValue(key, out var resolvedId))
             {
                 if (resolvedIds.Add(resolvedId))
@@ -121,7 +128,10 @@ public static class RestoreDefinitionEvaluator
             missingConnectors,
             missingRepositories.Order(StringComparer.OrdinalIgnoreCase).ToList(),
             manifest.Workspace.Reference ?? false,
-            referenceByRepositoryId), null);
+            referenceByRepositoryId)
+        {
+            ReferenceRepositoryCount = referenceRepositoryCount,
+        }, null);
     }
 
     /// <summary>"owner/name" from the repository URL when it has that shape; otherwise the name, then the URL.</summary>

@@ -511,6 +511,85 @@ public sealed class WorkspaceReferenceOperationsTests
         hasUpstream = true,
     };
 
+    [Fact]
+    public async Task Toggling_one_of_twenty_repositories_changes_no_sibling_and_not_the_default()
+    {
+        var manifest = new FakeManifest();
+        await using var ctx = await CreateAsync(manifest);
+        var graph = await SeedGraphAsync(ctx);
+        var siblings = await AddSourcesAsync(ctx, 18);
+        RespondInspect(ctx, _ => Clean());
+
+        var on = await RunAsync(ctx, operations => operations.SetRepositoryAsync(ctx.WorkspaceId, graph.ConsumerId, true));
+        var afterOn = await StateAsync(ctx);
+
+        Assert.True(on.Success, on.Error);
+        Assert.Equal(1, on.ChangedRepositoryCount);
+        Assert.Equal(20, afterOn.Repositories.Count);
+        Assert.Equal(WorkspaceReferenceAggregate.Mixed, afterOn.Aggregate);
+        Assert.Equal([graph.ConsumerId], afterOn.Repositories.Where(repository => repository.IsReference).Select(repository => repository.RepositoryId).ToArray());
+        Assert.False(afterOn.ReferenceDefault);
+        // Only the changed repository was checked.
+        Assert.Single(InspectedPaths(ctx));
+
+        // The other direction: all twenty read-only and the default on, then one made writable.
+        var all = await RunAsync(ctx, operations => operations.SetAllAsync(ctx.WorkspaceId, true, alsoSetDefault: true));
+        var off = await RunAsync(ctx, operations => operations.SetRepositoryAsync(ctx.WorkspaceId, siblings[3], false));
+        var afterOff = await StateAsync(ctx);
+
+        Assert.True(all.Success, all.Error);
+        Assert.True(off.Success, off.Error);
+        Assert.Equal(1, off.ChangedRepositoryCount);
+        Assert.Equal(WorkspaceReferenceAggregate.Mixed, afterOff.Aggregate);
+        Assert.Equal([siblings[3]], afterOff.Repositories.Where(repository => !repository.IsReference).Select(repository => repository.RepositoryId).ToArray());
+        Assert.True(afterOff.ReferenceDefault);
+    }
+
+    [Fact]
+    public async Task Setting_a_repository_to_the_state_it_already_has_changes_nothing()
+    {
+        var manifest = new FakeManifest();
+        await using var ctx = await CreateAsync(manifest);
+        var graph = await SeedGraphAsync(ctx);
+        RespondInspect(ctx, _ => Clean());
+
+        var result = await RunAsync(ctx, operations => operations.SetRepositoryAsync(ctx.WorkspaceId, graph.ProducerId, false));
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(0, result.ChangedRepositoryCount);
+        Assert.Empty(InspectedPaths(ctx));
+        Assert.False((await ReadLinkAsync(ctx, graph.ProducerId)).IsReference);
+    }
+
+    /// <summary>Adds writable Source repositories to the Workspace and returns their ids.</summary>
+    private static async Task<List<int>> AddSourcesAsync(SyncStateTestContext ctx, int count)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var connectorId = await db.Repositories.Where(r => r.RepositoryId == ctx.RepositoryId).Select(r => r.ConnectorId).SingleAsync();
+        var repositories = Enumerable.Range(1, count)
+            .Select(i => new Repository
+            {
+                ConnectorId = connectorId,
+                RepositoryName = $"Sibling{i:00}",
+                OrgName = "acme",
+                Visibility = "Public",
+                CloneUrl = $"https://github.com/acme/Sibling{i:00}.git",
+            })
+            .ToList();
+        db.Repositories.AddRange(repositories);
+        await db.SaveChangesAsync();
+        db.WorkspaceRepositories.AddRange(repositories.Select(repository => new WorkspaceRepositoryLink
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = repository.RepositoryId,
+            BranchName = "main",
+            DefaultBranchName = "main",
+            BranchHasUpstream = true,
+        }));
+        await db.SaveChangesAsync();
+        return repositories.Select(repository => repository.RepositoryId).ToList();
+    }
+
     private static Task<SyncStateTestContext> CreateAsync(FakeManifest manifest) =>
         Characterization.PolicyHarness.CreateAsync(services => services.AddScoped<IWorkspaceManifestService>(_ => manifest));
 

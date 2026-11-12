@@ -74,5 +74,11 @@ public sealed record RestoreWorkspacePreflight
 
     public int ConfiguredConnectorCount => ConnectorCount - MissingConnectors.Count;
 
+    /// <summary>None / mixed / all of the listed Source repositories that the definition marks read-only.</summary>
+    public WorkspaceReferenceAggregate ReferenceAggregate { get; init; }
+
+    /// <summary>True when the definition makes new repositories read-only.</summary>
+    public bool ReferenceDefault { get; init; }
+
     public static RestoreWorkspacePreflight Failed(string error) => new() { Success = false, Error = error };
 }

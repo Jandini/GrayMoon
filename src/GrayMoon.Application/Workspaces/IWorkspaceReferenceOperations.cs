@@ -78,3 +78,22 @@ public sealed record WorkspaceReferenceChangeResult
 
     public static WorkspaceReferenceChangeResult Failed(string error) => new() { Success = false, Error = error };
 }
+
+/// <summary>The none / mixed / all summary of the Source repositories of a Workspace, and its short text.</summary>
+public static class WorkspaceReferenceAggregates
+{
+    public static WorkspaceReferenceAggregate Of(int sourceCount, int referenceCount) =>
+        sourceCount <= 0 ? WorkspaceReferenceAggregate.NoSources
+        : referenceCount <= 0 ? WorkspaceReferenceAggregate.None
+        : referenceCount >= sourceCount ? WorkspaceReferenceAggregate.All
+        : WorkspaceReferenceAggregate.Mixed;
+
+    /// <summary>One word for a list cell. Never a count.</summary>
+    public static string Label(WorkspaceReferenceAggregate aggregate) => aggregate switch
+    {
+        WorkspaceReferenceAggregate.All => "All",
+        WorkspaceReferenceAggregate.Mixed => "Some",
+        WorkspaceReferenceAggregate.None => "None",
+        _ => "-",
+    };
+}

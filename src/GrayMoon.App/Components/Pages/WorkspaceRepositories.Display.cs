@@ -18,6 +18,47 @@ public sealed partial class WorkspaceRepositories
 
     private bool ShowManifestDriftBanner => !_isFeatureContext && workspace?.ManifestDriftDetectedAt != null;
 
+    private const string ManifestDriftBannerBaseText = "Workspace definition on disk differs from this Workspace.";
+
+    /// <summary>The read-only differences of the last comparison made by this page; null until it ran or when there are none.</summary>
+    private string? _manifestDriftReferenceText;
+    private bool _manifestDriftDetailsRequested;
+
+    private string ManifestDriftBannerText => _manifestDriftReferenceText is null
+        ? ManifestDriftBannerBaseText
+        : $"{ManifestDriftBannerBaseText} {_manifestDriftReferenceText}";
+
+    /// <summary>
+    /// The database stores only that the definition differs, not how. While the banner is shown the page compares once
+    /// more to name the read-only differences. A failure (no Worker, unreadable file) leaves the plain banner.
+    /// </summary>
+    private async Task LoadManifestDriftDetailsOnceAsync()
+    {
+        if (!ShowManifestDriftBanner)
+        {
+            _manifestDriftDetailsRequested = false;
+            _manifestDriftReferenceText = null;
+            return;
+        }
+
+        if (_manifestDriftDetailsRequested || _isResolvingManifestDrift)
+            return;
+
+        _manifestDriftDetailsRequested = true;
+        try
+        {
+            var drift = await ManifestService.DetectDriftAsync(WorkspaceId);
+            _manifestDriftReferenceText = drift.DescribeReferenceDifferences();
+            if (!drift.HasDrift)
+                await ReloadWorkspaceHeaderRowAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "Reading the Workspace definition differences failed for workspace {WorkspaceId}", WorkspaceId);
+        }
+    }
+
     private async Task ReloadWorkspaceHeaderRowAsync()
     {
         var refreshed = await ScopedExecutor.ExecuteAsync<WorkspaceRepository, Workspace?>(
