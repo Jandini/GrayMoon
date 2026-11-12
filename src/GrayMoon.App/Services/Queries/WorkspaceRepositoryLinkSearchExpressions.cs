@@ -20,9 +20,11 @@ internal static class WorkspaceRepositoryLinkSearchExpressions
     {
         if (!string.IsNullOrEmpty(term.Field))
         {
-            return term.Field switch
+            return term.Field.ToLowerInvariant() switch
             {
                 "topic" => _ => false,
+                // ro:yes / ro:no - the read-only state of the Workspace link. Any other value matches nothing.
+                "ro" => BuildReferencePredicate(term.Value),
                 _ => _ => true,
             };
         }
@@ -42,4 +44,12 @@ internal static class WorkspaceRepositoryLinkSearchExpressions
                 : wr.SyncStatus == RepoSyncStatus.Error ? "error"
                 : "sync").Contains(termValue);
     }
+
+    private static Expression<Func<WorkspaceRepositoryLink, bool>> BuildReferencePredicate(string value) =>
+        value.Trim().ToLowerInvariant() switch
+        {
+            "yes" => wr => wr.IsReference,
+            "no" => wr => !wr.IsReference,
+            _ => _ => false,
+        };
 }

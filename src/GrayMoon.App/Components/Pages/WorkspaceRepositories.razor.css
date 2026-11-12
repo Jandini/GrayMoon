@@ -783,6 +783,9 @@
 ::deep .repositories-table td .repo-link:hover,
 ::deep .repositories-table td a.repo-link:hover {
     text-decoration: underline !important;
+    /* The hover color too: app.css `.table tbody td a:not(.badge):hover` is more specific than the rule above, and
+       the underline takes the color of the link, not of the <strong> inside it. */
+    color: inherit !important;
 }
 
 /* Shared highlight look for version and branch (single element, no swap) */

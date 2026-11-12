@@ -185,7 +185,14 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         var repoInfoById = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => workspaceRepositoryIds.Contains(wr.WorkspaceRepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
+            .Select(wr => new
+            {
+                wr.WorkspaceRepositoryId,
+                wr.RepositoryId,
+                RepositoryName = wr.Repository!.RepositoryName,
+                wr.DefaultBranchName,
+                IsReference = wr.IsReference && wr.Role != WorkspaceRepositoryRole.Workspace,
+            })
             .ToDictionaryAsync(r => r.WorkspaceRepositoryId, cancellationToken);
 
         var kindCountsByRepo = await LoadChangedKindCountsAsync(db, contextId.Value, workspaceRepositoryIds, cancellationToken);
@@ -202,6 +209,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                     WorkspaceRepositoryId = s.WorkspaceRepositoryId,
                     RepositoryId = info.RepositoryId,
                     RepositoryName = info.RepositoryName,
+                    IsReference = info.IsReference,
                     BranchName = s.BranchName,
                     DefaultBranchName = info.DefaultBranchName,
                     HeadCommit = s.HeadCommit,
@@ -247,7 +255,14 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         var link = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId)
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
+            .Select(wr => new
+            {
+                wr.WorkspaceRepositoryId,
+                wr.RepositoryId,
+                RepositoryName = wr.Repository!.RepositoryName,
+                wr.DefaultBranchName,
+                IsReference = wr.IsReference && wr.Role != WorkspaceRepositoryRole.Workspace,
+            })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null)
             return null;
@@ -267,7 +282,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                         && e.WorkspaceRepositoryId == link.WorkspaceRepositoryId)
             .ToListAsync(cancellationToken);
 
-        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, entries);
+        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, link.IsReference, entries);
     }
 
     public async Task<WorkspaceGitChangesRepositoryView?> GetRepositorySummaryAsync(
@@ -281,7 +296,14 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         var link = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && wr.RepositoryId == repositoryId)
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
+            .Select(wr => new
+            {
+                wr.WorkspaceRepositoryId,
+                wr.RepositoryId,
+                RepositoryName = wr.Repository!.RepositoryName,
+                wr.DefaultBranchName,
+                IsReference = wr.IsReference && wr.Role != WorkspaceRepositoryRole.Workspace,
+            })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null)
             return null;
@@ -298,7 +320,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         var kindCounts = await LoadChangedKindCountsAsync(
             db, contextId.Value, [link.WorkspaceRepositoryId], cancellationToken);
 
-        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, [])
+        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, link.IsReference, [])
             with
             {
                 ChangedKindCounts = kindCounts.GetValueOrDefault(link.WorkspaceRepositoryId)
@@ -864,7 +886,14 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         var repoInfoById = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => workspaceRepositoryIds.Contains(wr.WorkspaceRepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, RepositoryName = wr.Repository!.RepositoryName, wr.DefaultBranchName })
+            .Select(wr => new
+            {
+                wr.WorkspaceRepositoryId,
+                wr.RepositoryId,
+                RepositoryName = wr.Repository!.RepositoryName,
+                wr.DefaultBranchName,
+                IsReference = wr.IsReference && wr.Role != WorkspaceRepositoryRole.Workspace,
+            })
             .ToDictionaryAsync(r => r.WorkspaceRepositoryId, cancellationToken);
 
         var entriesByRepo = (await db.WorkspaceGitContextChangeEntries
@@ -883,7 +912,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                 var list = entriesByRepo.TryGetValue(s.WorkspaceRepositoryId, out var entries)
                     ? entries
                     : [];
-                return MapRepository(s, info.RepositoryId, info.RepositoryName, info.DefaultBranchName, list);
+                return MapRepository(s, info.RepositoryId, info.RepositoryName, info.DefaultBranchName, info.IsReference, list);
             })
             .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -896,12 +925,14 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         int repositoryId,
         string repositoryName,
         string? defaultBranchName,
+        bool isReference,
         IReadOnlyList<WorkspaceGitContextChangeEntry> entries) =>
         new()
         {
             WorkspaceRepositoryId = s.WorkspaceRepositoryId,
             RepositoryId = repositoryId,
             RepositoryName = repositoryName,
+            IsReference = isReference,
             BranchName = s.BranchName,
             DefaultBranchName = defaultBranchName,
             HeadCommit = s.HeadCommit,

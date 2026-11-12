@@ -21,6 +21,9 @@ public sealed record WorkspaceGitChangesRepositorySummary
     public required int RepositoryId { get; init; }
     public required string RepositoryName { get; init; }
 
+    /// <inheritdoc cref="WorkspaceGitChangesRepositoryView.IsReference"/>
+    public bool IsReference { get; init; }
+
     public string? BranchName { get; init; }
     public string? DefaultBranchName { get; init; }
     public string? HeadCommit { get; init; }

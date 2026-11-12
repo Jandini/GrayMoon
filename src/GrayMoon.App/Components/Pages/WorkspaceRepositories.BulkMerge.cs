@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Components.Modals;
 using GrayMoon.App.Models;
 using Microsoft.AspNetCore.Components;
@@ -133,7 +134,7 @@ public sealed partial class WorkspaceRepositories
                 continue;
             if (!linkByRepoId.TryGetValue(repositoryId, out var link) || link.Repository == null)
                 continue;
-            if (link.IsOnTag)
+            if (!Allows(link, RepositoryOperation.MergePullRequest))
                 continue;
             noOpenPrRepositories.Add(new BulkMergeNoOpenPrRepository(repositoryId, link.Repository.RepositoryName));
         }

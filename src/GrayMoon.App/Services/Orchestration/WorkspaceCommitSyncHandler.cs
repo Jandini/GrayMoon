@@ -3,11 +3,13 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -26,6 +28,8 @@ public sealed class WorkspaceCommitSyncHandler(
     IHubContext<WorkspaceSyncHub> hubContext,
     IServiceScopeFactory serviceScopeFactory,
     IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
+    ReferenceRevisionRecorder revisionRecorder,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
     public async Task CommitSyncAsync(
@@ -53,6 +57,14 @@ public sealed class WorkspaceCommitSyncHandler(
             return;
         }
 
+        var decision = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.Pull, repositoryId, cancellationToken: cancellationToken);
+        if (!decision.IsAllowed)
+        {
+            setRepositoryError(repositoryId, decision.Message);
+            return;
+        }
+
         if (!workerBridge.IsWorkerConnected)
         {
             setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
@@ -73,6 +85,10 @@ public sealed class WorkspaceCommitSyncHandler(
                 where r.WorkspaceFeatureContextId == contextId.Value && l.RepositoryId == repositoryId
                 select r.ParentBranchName
             ).FirstOrDefaultAsync(cancellationToken);
+
+            // A read-only repository only takes incoming commits by fast-forward and is never pushed.
+            var subjects = await operationPolicy.GetSubjectsAsync(workspaceId, contextId, cancellationToken: cancellationToken);
+            var pullOnly = subjects.TryGetValue(repositoryId, out var subject) && subject is { IsReference: true, IsWorkspaceRepository: false };
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -82,7 +98,8 @@ public sealed class WorkspaceCommitSyncHandler(
                 workspaceId,
                 workspaceRoot,
                 workspaceRepositoryName,
-                divergenceBaseBranch
+                divergenceBaseBranch,
+                pullOnly
             };
 
             var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
@@ -99,6 +116,8 @@ public sealed class WorkspaceCommitSyncHandler(
 
             var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
             await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+            if (pullOnly)
+                await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -121,7 +140,8 @@ public sealed class WorkspaceCommitSyncHandler(
         }
     }
 
-    public async Task CommitSyncLevelAsync(
+    /// <summary>Pulls the given repositories. Returns the ones the policy left out; they are not sent to the Worker.</summary>
+    public async Task<IReadOnlyList<RepositorySkip>> CommitSyncLevelAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         IReadOnlyList<int> repositoryIds,
@@ -131,20 +151,28 @@ public sealed class WorkspaceCommitSyncHandler(
         Action<string?> setPageError)
     {
         if (repositoryIds.Count == 0)
-            return;
+            return [];
 
         if (!workerBridge.IsWorkerConnected)
         {
             setPageError("Worker not connected. Start the GrayMoon Worker to sync repositories.");
-            return;
+            return [];
         }
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
         {
             setPageError("Workspace not found.");
-            return;
+            return [];
         }
+
+        var eligibility = await operationPolicy.PartitionAsync(
+            workspaceId, contextId, RepositoryOperation.Pull, repositoryIds, cancellationToken: cancellationToken);
+        var skippedIds = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+        if (skippedIds.Count > 0)
+            repositoryIds = repositoryIds.Where(id => !skippedIds.Contains(id)).ToList();
+        if (repositoryIds.Count == 0)
+            return eligibility.Skipped;
 
         var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
         var workspaceRoot = workerArgs.WorkspaceRoot;
@@ -160,6 +188,13 @@ public sealed class WorkspaceCommitSyncHandler(
             where r.WorkspaceFeatureContextId == contextId.Value
             select new { l.RepositoryId, r.ParentBranchName }
         ).ToDictionaryAsync(x => x.RepositoryId, x => x.ParentBranchName, cancellationToken);
+
+        // A read-only repository only takes incoming commits by fast-forward and is never pushed. Decided per
+        // repository, so one bulk pull mixes both modes.
+        var pullOnlyIds = (await operationPolicy.GetSubjectsAsync(workspaceId, contextId, cancellationToken: cancellationToken))
+            .Where(pair => pair.Value is { IsReference: true, IsWorkspaceRepository: false })
+            .Select(pair => pair.Key)
+            .ToHashSet();
 
         var tasks = repositoryIds.Select(async repositoryId =>
         {
@@ -191,7 +226,8 @@ public sealed class WorkspaceCommitSyncHandler(
                     workspaceId,
                     workspaceRoot,
                     workspaceRepositoryName,
-                    divergenceBaseBranch
+                    divergenceBaseBranch,
+                    pullOnly = pullOnlyIds.Contains(repositoryId)
                 };
 
                 var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
@@ -208,6 +244,8 @@ public sealed class WorkspaceCommitSyncHandler(
 
                 var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
                 await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+                if (pullOnlyIds.Contains(repositoryId))
+                    await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
                 if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -237,6 +275,27 @@ public sealed class WorkspaceCommitSyncHandler(
         {
             // Caller handles reload on cancel.
         }
+
+        return eligibility.Skipped;
+    }
+
+    /// <summary>
+    /// After a pull of a read-only repository the Workspace definition records where it is now. The recorder
+    /// leaves out a Feature and never fails the pull: a failed write is logged there.
+    /// </summary>
+    private async Task RecordReferenceRevisionAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CommitSyncResponse? result,
+        CancellationToken cancellationToken)
+    {
+        if (result is null || !string.IsNullOrWhiteSpace(result.ErrorMessage))
+            return;
+
+        var commit = result.State?.HeadCommit ?? result.Commit;
+        var branch = result.State?.BranchName ?? result.Branch;
+        await revisionRecorder.RecordAsync(workspaceId, contextId, repositoryId, branch, commit, cancellationToken);
     }
 
     private static async Task ApplyResultToDbAsync(

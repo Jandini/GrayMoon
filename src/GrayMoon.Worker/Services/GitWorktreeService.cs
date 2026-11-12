@@ -708,7 +708,34 @@ public sealed class GitWorktreeService(
             featureBranchSha,
             featureBranchAheadOfDefault,
             featureBranchHasUpstream,
-            featureBranchAheadOfUpstream);
+            featureBranchAheadOfUpstream,
+            headSha != null && hasUpstream != true ? await ProbeHeadOnRemoteAsync(canonicalWorktreePath, ct) : null);
+    }
+
+    /// <summary>
+    /// True when HEAD is contained in at least one remote-tracking branch; null when git could not say. Nothing is
+    /// fetched, so the answer is about the local remote-tracking refs.
+    /// </summary>
+    private async Task<bool?> ProbeHeadOnRemoteAsync(string repoPath, CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            ["branch", "-r", "--contains", "HEAD", "--format=%(refname)"],
+            repoPath,
+            null,
+            ct,
+            GitLockIntent.Read,
+            streamStderrAsStdout: true,
+            mirrorFailureOutputAsStderr: false);
+        if (exitCode != 0)
+        {
+            logger.LogWarning("Git branch -r --contains (InspectWorktree head on remote) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
+            return null;
+        }
+
+        return (stdout ?? "")
+            .Split('\n')
+            .Any(line => line.Trim().StartsWith("refs/remotes/", StringComparison.Ordinal));
     }
 
     /// <summary>

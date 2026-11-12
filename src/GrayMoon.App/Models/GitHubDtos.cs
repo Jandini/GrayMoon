@@ -334,6 +334,10 @@ public sealed class GitHubRepositoryMergeSettingsDto
 
     [JsonPropertyName("allow_rebase_merge")]
     public bool? AllowRebaseMerge { get; set; }
+
+    /// <summary>Whether the repository is archived. Null when the answer does not say.</summary>
+    [JsonPropertyName("archived")]
+    public bool? Archived { get; set; }
 }
 
 /// <summary>Item from GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews.</summary>

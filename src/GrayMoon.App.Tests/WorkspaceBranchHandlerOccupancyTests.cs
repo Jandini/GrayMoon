@@ -169,6 +169,7 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
             occupancy,
             guard ?? new AllowAllFeatureBranchGuard(),
             Options.Create(new WorkspaceOptions { MaxParallelOperations = maxParallelOperations }),
+            new Policy.AllowAllRepositoryOperationPolicy(),
             NullLogger<WorkspaceBranchHandler>.Instance);
     }
 

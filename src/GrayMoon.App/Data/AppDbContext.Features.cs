@@ -67,6 +67,8 @@ public partial class AppDbContext
             entity.Property(r => r.BaseCommitSha).IsRequired().HasMaxLength(64);
             entity.Property(r => r.ParentBranchName).HasMaxLength(200);
             entity.Property(r => r.PinnedTag).HasMaxLength(200);
+            entity.Property(r => r.IsReferenceSnapshot).HasDefaultValue(false);
+            entity.Property(r => r.SourceBranchName).HasMaxLength(200);
             entity.Property(r => r.LastError).HasMaxLength(2000);
             entity.Property(r => r.State).HasConversion<int>();
             entity.HasOne(r => r.WorkspaceFeatureContext)

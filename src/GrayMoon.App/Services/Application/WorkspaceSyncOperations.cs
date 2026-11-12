@@ -105,7 +105,7 @@ public sealed class WorkspaceSyncOperations(
     {
         string? pageError = null;
         var repoErrors = new Dictionary<int, string>();
-        await commitSyncHandler.CommitSyncLevelAsync(
+        var skipped = await commitSyncHandler.CommitSyncLevelAsync(
             workspaceId,
             contextId,
             repositoryIds,
@@ -123,11 +123,11 @@ public sealed class WorkspaceSyncOperations(
             err => pageError = err);
 
         if (repoErrors.Count > 0)
-            return OperationResult.Fail("Pull failed.", repoErrors);
+            return OperationResult.Fail("Pull failed.", repoErrors) with { Skipped = skipped };
         if (!string.IsNullOrWhiteSpace(pageError))
             return OperationResult.Fail(pageError);
 
-        return OperationResult.Ok();
+        return OperationResult.Ok() with { Skipped = skipped };
     }
 
     public async Task<OperationResult> UndoPushAsync(

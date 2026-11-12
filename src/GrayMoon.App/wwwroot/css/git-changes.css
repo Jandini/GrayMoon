@@ -719,6 +719,12 @@
     white-space: nowrap;
 }
 
+/* Read-only repository marker beside the repository name. */
+.git-changes-tree__reference-lock {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+}
+
 .git-changes-tree__repo-branch {
     flex: 0 1 auto;
     min-width: 0;

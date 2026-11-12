@@ -11,6 +11,9 @@ public sealed record BranchCreationOutcome(
     IReadOnlyDictionary<int, string?> CheckedOutBranchByRepositoryId,
     IReadOnlyDictionary<int, string> ErrorsByRepositoryId)
 {
+    /// <summary>Repositories the policy left out (reference repositories). They were not attempted and are not targeted.</summary>
+    public IReadOnlyList<GrayMoon.Application.Repositories.Policy.RepositorySkip> Skipped { get; init; } = [];
+
     public static BranchCreationOutcome Empty { get; } =
         new(new HashSet<int>(), new Dictionary<int, string?>(), new Dictionary<int, string>());
 }

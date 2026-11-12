@@ -1,0 +1,245 @@
+@using GrayMoon.Application.Workspaces
+@using GrayMoon.App.Services.Jobs
+@implements IDisposable
+@inject IWorkspaceReferenceOperations ReferenceOperations
+@inject IWorkspaceOperationRunner OperationRunner
+@inject IToastService ToastService
+
+@* Read-only repositories of one Workspace. Every action here is applied at once, not with the modal's Save. *@
+<div class="mb-3 workspace-reference-section">
+    <label class="form-label">Read only repositories</label>
+    @if (_state is null)
+    {
+        <div class="form-text">Loading...</div>
+    }
+    else
+    {
+        <div class="form-text mt-0 mb-2">@StateText(_state.Aggregate) GrayMoon pulls a read only repository but never commits, pushes or updates it.</div>
+        <div class="d-flex flex-nowrap align-items-center gap-2 mb-2">
+            <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0"
+                    disabled="@(Disabled || _state.Aggregate is WorkspaceReferenceAggregate.All or WorkspaceReferenceAggregate.NoSources)"
+                    @onclick="() => Ask(true)">Make all read only</button>
+            <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0"
+                    disabled="@(Disabled || _state.Aggregate is WorkspaceReferenceAggregate.None or WorkspaceReferenceAggregate.NoSources)"
+                    @onclick="() => Ask(false)">Make all writable</button>
+        </div>
+
+        @if (_pending is { } pending)
+        {
+            <div class="gm-callout gm-callout--warning" role="alert">
+                <div class="mb-2">@(pending ? "Make all repositories read only?" : "Make all repositories writable?")</div>
+                <div class="d-flex flex-nowrap gap-2">
+                    <button type="button" class="btn btn-primary btn-sm text-nowrap flex-shrink-0" disabled="@Disabled" @onclick="ApplyAsync">
+                        @(pending ? "Make read only" : "Make writable")
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0" @onclick="() => _pending = null">Cancel</button>
+                </div>
+            </div>
+        }
+
+        <div class="form-check form-switch mb-0" @key="_attempt">
+            <input class="form-check-input form-check-input-gray" type="checkbox" role="switch" id="workspaceReferenceDefault"
+                   checked="@_state.ReferenceDefault"
+                   disabled="@Disabled"
+                   @onchange="OnDefaultChangedAsync" />
+            <label class="form-check-label text-nowrap" for="workspaceReferenceDefault">New repositories are read only</label>
+        </div>
+
+        var suggested = _state.Repositories.Where(repository => repository.SuggestReference).ToList();
+        @if (suggested.Count > 0)
+        {
+            <div class="gm-callout gm-callout--warning mt-2" role="status">
+                <div>@WorkspaceReferenceSuggestions.ArchivedList</div>
+                <ul class="list-unstyled mb-0 mt-1">
+                    @foreach (var repository in suggested)
+                    {
+                        <li class="d-flex flex-nowrap align-items-center gap-2 mb-1" @key="repository.RepositoryId">
+                            <span class="text-truncate" title="@repository.RepositoryName">@repository.RepositoryName</span>
+                            <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0 ms-auto"
+                                    disabled="@Disabled"
+                                    @onclick="() => MakeReferenceAsync(repository)">Make read only</button>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (IsBusy && !_running)
+        {
+            <div class="form-text">An operation is running for this Workspace.</div>
+        }
+
+        @if (_error is not null)
+        {
+            <div class="gm-callout gm-callout--error mt-2" role="alert">
+                <div>@_error</div>
+                @if (_blocks.Count > 0)
+                {
+                    <ul class="mb-0 mt-1 ps-3">
+                        @foreach (var block in _blocks)
+                        {
+                            <li>@block.Message</li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+
+        @if (_warnings.Count > 0)
+        {
+            <div class="gm-callout gm-callout--warning mt-2" role="alert">
+                <ul class="mb-0 ps-3">
+                    @foreach (var warning in _warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (_notice is not null)
+        {
+            <div class="form-text">@_notice</div>
+        }
+    }
+</div>
+
+<LoadingOverlay IsVisible="@(_running && _progressMessage is not null)" Message="@_progressMessage"
+                TerminalBuffer="@(_running ? OperationRunner.GetRunning(WorkspaceId)?.Terminal : null)" />
+
+@code {
+    [Parameter, EditorRequired] public int WorkspaceId { get; set; }
+
+    private WorkspaceReferenceState? _state;
+    private int _loadedWorkspaceId;
+    private bool? _pending;
+    private bool _running;
+    /// <summary>The step that is running, shown in the overlay.</summary>
+    private string? _progressMessage;
+    /// <summary>Changes after every attempt so the switch is recreated: a refused change must show the stored value again.</summary>
+    private int _attempt;
+    private string? _error;
+    private string? _notice;
+    private IReadOnlyList<WorkspaceReferenceFinding> _blocks = [];
+    private IReadOnlyList<string> _warnings = [];
+
+    private bool IsBusy => OperationRunner.IsBusy(WorkspaceId);
+
+    private bool Disabled => _running || IsBusy;
+
+    public static string StateText(WorkspaceReferenceAggregate aggregate) => aggregate switch
+    {
+        WorkspaceReferenceAggregate.All => "All repositories are read only.",
+        WorkspaceReferenceAggregate.Mixed => "Some repositories are read only.",
+        WorkspaceReferenceAggregate.None => "No repository is read only.",
+        _ => "This Workspace has no repositories yet.",
+    };
+
+    protected override void OnInitialized() => OperationRunner.Changed += OnRunnerChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedWorkspaceId == WorkspaceId)
+            return;
+
+        _loadedWorkspaceId = WorkspaceId;
+        _pending = null;
+        _error = null;
+        _notice = null;
+        _blocks = [];
+        _warnings = [];
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync() => _state = await ReferenceOperations.GetStateAsync(WorkspaceId);
+
+    private void OnRunnerChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void Ask(bool reference) => _pending = reference;
+
+    /// <summary>Progress arrives from the operation's own thread; the overlay is updated on the renderer.</summary>
+    private sealed class ProgressSink(Action<string> onMessage) : IProgress<OperationProgress>
+    {
+        public void Report(OperationProgress value) => onMessage(value.Message);
+    }
+
+    private IProgress<OperationProgress> OverlayProgress() =>
+        new ProgressSink(message => _ = InvokeAsync(() =>
+        {
+            if (!_running || _progressMessage is null)
+                return;
+            _progressMessage = message;
+            StateHasChanged();
+        }));
+
+    private async Task ApplyAsync()
+    {
+        if (_pending is not { } reference)
+            return;
+
+        _pending = null;
+        // The default for new repositories is not touched here; it has its own switch below.
+        await RunAsync(
+            reference ? "Making repositories read only..." : "Making repositories writable...",
+            () => ReferenceOperations.SetAllAsync(WorkspaceId, reference, alsoSetDefault: false, OverlayProgress()),
+            reference ? "Repositories are read only." : "Repositories are writable.");
+    }
+
+    /// <summary>The suggestion for an archived repository. The same check runs as for any other repository.</summary>
+    private Task MakeReferenceAsync(WorkspaceReferenceRepositoryState repository) =>
+        RunAsync(
+            $"Making {repository.RepositoryName} read only...",
+            () => ReferenceOperations.SetRepositoryAsync(WorkspaceId, repository.RepositoryId, true, OverlayProgress()),
+            $"{repository.RepositoryName} is read only.");
+
+    private Task OnDefaultChangedAsync(ChangeEventArgs e)
+    {
+        var value = e.Value is true;
+        // A quick save: no overlay.
+        return RunAsync(
+            null,
+            () => ReferenceOperations.SetDefaultAsync(WorkspaceId, value),
+            value ? "New repositories are read only." : "New repositories are writable.");
+    }
+
+    private async Task RunAsync(string? startMessage, Func<Task<WorkspaceReferenceChangeResult>> change, string doneMessage)
+    {
+        if (_running)
+            return;
+
+        _running = true;
+        _progressMessage = startMessage;
+        _error = null;
+        _blocks = [];
+        _warnings = [];
+        try
+        {
+            var result = await change();
+            _notice = result.Notice;
+            _warnings = result.Warnings;
+            if (result.Success)
+            {
+                ToastService.Show(doneMessage);
+            }
+            else
+            {
+                _error = result.Error ?? "The change failed.";
+                _blocks = result.Blocks;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+            _progressMessage = null;
+            _attempt++;
+            // Also after a refusal: the switch must show the stored value again.
+            await ReloadAsync();
+        }
+    }
+
+    public void Dispose() => OperationRunner.Changed -= OnRunnerChanged;
+}

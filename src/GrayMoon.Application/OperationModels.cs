@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using GrayMoon.Application.Repositories.Policy;
+
 namespace GrayMoon.Application;
 
 public sealed record OperationProgress(string Message, int? Completed = null, int? Total = null);
@@ -8,6 +11,12 @@ public sealed record OperationResult(
     IReadOnlyDictionary<int, string>? RepoErrors = null,
     IReadOnlyDictionary<int, string>? LevelErrors = null)
 {
+    /// <summary>
+    /// Repositories the policy left out of the run, with the reason. Part of the REST response and shown
+    /// to the user as information.
+    /// </summary>
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
     /// <summary>
     /// Per-repository outcome of a successful Remove Feature (D2): worktree removed, local branch
     /// outcome and leftover-files report. Null for every other operation that returns this type, and
@@ -101,6 +110,12 @@ public sealed record RemoveFeatureRepositoryReport(
 /// </summary>
 public sealed record DependencyUpdateRunResult(bool Success, IReadOnlySet<int> SyncedRepoIds)
 {
+    /// <summary>
+    /// Repositories the policy left out of the run, with the reason. Part of the REST response and shown
+    /// to the user as information.
+    /// </summary>
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
     public static DependencyUpdateRunResult Ok(IReadOnlySet<int>? syncedRepoIds = null)
         => new(true, syncedRepoIds ?? new HashSet<int>());
 
@@ -120,6 +135,9 @@ public sealed record UpdateAndPushResult(bool Pipelined, DependencyUpdateRunResu
     public static UpdateAndPushResult NotPipelined { get; } = new(false, DependencyUpdateRunResult.Ok(), null);
 
     public bool Success => Update.Success && (Push?.Success ?? true);
+
+    /// <summary>Repositories the policy left out of either lane.</summary>
+    public IReadOnlyList<RepositorySkip> Skipped => [.. Update.Skipped, .. Push?.Skipped ?? []];
 }
 
 /// <summary>
@@ -136,6 +154,13 @@ public sealed record PrepareWorkspaceResult(
     UpdateAndPushExecutionResult? Combined = null,
     bool PushPending = false)
 {
+    /// <summary>Repositories the policy left out of the branch stage (reference repositories).</summary>
+    public IReadOnlyList<RepositorySkip> BranchSkipped { get; init; } = [];
+
+    /// <summary>Repositories the policy left out of any stage, each named once.</summary>
+    public IReadOnlyList<RepositorySkip> Skipped =>
+        [.. BranchSkipped.Concat(Update?.Skipped ?? []).Concat(Combined?.Skipped ?? []).DistinctBy(skip => skip.RepositoryId)];
+
     public const string BranchesStoppedMessage =
         "Prepare Workspace stopped: branches could not be created in all selected repositories. No dependency updates or pushes were started.";
 
@@ -166,8 +191,26 @@ public static class OperationProgressExtensions
     /// goes to <paramref name="showWarning"/> (to <paramref name="showError"/> when the caller has no warning
     /// surface, so it is never dropped).
     /// </summary>
-    public static void ShowRepoErrors(this OperationResult result, Action<string> showError, Action<string>? showWarning = null)
+    /// <param name="showInformation">
+    /// Receives the sentence that names the repositories the run left out (read-only, on a tag). Only called when
+    /// there is no error and no warning to report, so it never replaces one. Without it skips are not shown.
+    /// </param>
+    public static void ShowRepoErrors(
+        this OperationResult result,
+        Action<string> showError,
+        Action<string>? showWarning = null,
+        Action<string>? showInformation = null)
     {
+        if (showInformation != null
+            && result.Success
+            && !result.HasWarnings
+            && result.RepoErrors is not { Count: > 0 }
+            && RepositorySkipSummary.Describe(result.Skipped) is { } skipped)
+        {
+            showInformation(skipped);
+            return;
+        }
+
         if (result.HasWarnings)
         {
             (showWarning ?? showError)(result.WarningSummary ?? string.Join(Environment.NewLine, result.Warnings!));

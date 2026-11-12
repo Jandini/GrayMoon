@@ -37,6 +37,9 @@ public sealed record GitChangesTreeRow
     public int WorkspaceRepositoryId { get; init; }
     public string? RepositoryName { get; init; }
 
+    /// <summary>True on the Repository row of a read-only repository.</summary>
+    public bool IsReference { get; init; }
+
     /// <summary>Current branch name. Set only on Repository rows.</summary>
     public string? BranchName { get; init; }
 
@@ -136,6 +139,7 @@ public static class GitChangesTreeBuilder
                 WorkspaceRepositoryId = s.WorkspaceRepositoryId,
                 RepositoryId = s.RepositoryId,
                 RepositoryName = s.RepositoryName,
+                IsReference = s.IsReference,
                 BranchName = s.BranchName,
                 DefaultBranchName = s.DefaultBranchName,
                 HeadCommit = s.HeadCommit,
@@ -225,6 +229,7 @@ public static class GitChangesTreeBuilder
                 IsStagedSection = isStagedSection,
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
+                IsReference = repo.IsReference,
                 BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,
@@ -381,6 +386,7 @@ public static class GitChangesTreeBuilder
                 IsStagedSection = isStagedSection,
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
+                IsReference = repo.IsReference,
                 BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,

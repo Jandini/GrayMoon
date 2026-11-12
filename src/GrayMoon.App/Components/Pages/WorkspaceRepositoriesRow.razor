@@ -1,3 +1,5 @@
+@using GrayMoon.App.Services.Policy
+@using GrayMoon.Application.Repositories.Policy
 @using GrayMoon.App.Models
 @using GrayMoon.App.Services
 @using GrayMoon.App.Services.Features
@@ -29,7 +31,8 @@
         || AllFileVersionLines.Count > 0
         || MismatchedFileVersionLines.Count > 0
         || CustomDependencyLines.Count > 0;
-    var depOkBadgeInactive = ActionsDisabled || Link.IsOnTag;
+    var depOkBadgeInactive = ActionsDisabled || !Link.Allows(RepositoryOperation.UpdateDependencies);
+    var depOkBadgeInactiveTitle = Link.IsReference ? RepositoryOperationPolicy.ReferenceMessage : RepositoryOperationPolicy.OnTagMessage;
     var versionCell = DetermineVersionCell(Link.GitVersion, Link.IsVersionUnresolved, WorkspaceUsesRepositoryVersioning);
     var singleRepoPrPullMap = (!string.IsNullOrEmpty(repoUrl) && PrInfo != null
         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
@@ -45,13 +48,17 @@
                     <a href="@repoUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
                         <strong>@repositoryDisplayName</strong>
                     </a>
+                    @if (Link.IsReference || Link.IsReferenceSnapshot)
+                    {
+                        <ReferenceLockIcon AdditionalClass="text-muted" Title="@(Link.IsReferenceSnapshot ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)" />
+                    }
                     @if (isWorkspaceRepository)
                     {
                         <span class="badge workspace-role-badge text-nowrap">Workspace</span>
                     }
                     @if (repo.Archived)
                     {
-                        <span class="badge repo-archived-badge">archived</span>
+                        <span class="badge repo-archived-badge" title="@RepositoryBadgeTitles.Archived">archived</span>
                     }
                     @if (repo.Connector?.IsRemoved == true)
                     {
@@ -76,13 +83,17 @@
             {
                 <span class="repo-name-cell">
                     <strong>@repositoryDisplayName</strong>
+                    @if (Link.IsReference || Link.IsReferenceSnapshot)
+                    {
+                        <ReferenceLockIcon AdditionalClass="text-muted" Title="@(Link.IsReferenceSnapshot ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)" />
+                    }
                     @if (isWorkspaceRepository)
                     {
                         <span class="badge workspace-role-badge text-nowrap">Workspace</span>
                     }
                     @if (repo.Archived)
                     {
-                        <span class="badge repo-archived-badge">archived</span>
+                        <span class="badge repo-archived-badge" title="@RepositoryBadgeTitles.Archived">archived</span>
                     }
                     @if (repo.Connector?.IsRemoved == true)
                     {
@@ -122,7 +133,30 @@
             </td>
         }
         <td class="col-branch">
-            @if (Link.IsOnTag)
+            @if (Link.IsReferenceSnapshot)
+            {
+                // A read-only snapshot in a Feature: where the Source was and the commit it stays at.
+                var snapshotSource = Link.IsOnTag ? Link.CheckedOutTag : Link.FeatureSourceBranchName;
+                var snapshotCommit = string.IsNullOrEmpty(Link.HeadCommit) ? null : Link.HeadCommit[..Math.Min(7, Link.HeadCommit.Length)];
+                <div class="branch-container">
+                    <span class="branch-inner branch-inner--disabled"
+                          title="Read only snapshot. It stays at the commit the Feature was created from; use the Workspace to move the repository.">
+                        @if (Link.IsOnTag)
+                        {
+                            <i class="bi bi-tag me-1" aria-hidden="true"></i>
+                        }
+                        @if (!string.IsNullOrEmpty(snapshotSource))
+                        {
+                            @snapshotSource<span class="text-muted"> (source)</span>
+                        }
+                    </span>
+                    @if (snapshotCommit is not null)
+                    {
+                        <span class="text-muted small font-monospace ms-1" title="@Link.HeadCommit">@snapshotCommit</span>
+                    }
+                </div>
+            }
+            else if (Link.IsOnTag)
             {
                 <div class="branch-container">
                     <span class="branch-inner branch-inner--tag"
@@ -164,7 +198,7 @@
                                     IsPrMergeBlocked="@(PrInfo != null
                                         && string.Equals(PrInfo.State, "open", StringComparison.OrdinalIgnoreCase)
                                         && PrInfo.Mergeable == false)"
-                                    OnUpdateBranchClick="@OnUpdateBranchClick" />
+                                    OnUpdateBranchClick="@(Link.Allows(RepositoryOperation.UpdateBranchFromDefault) ? OnUpdateBranchClick : default)" />
                 </span>
                 <span class="metrics-block metrics-pr text-nowrap">
                     <PRBadge PullRequest="@PrInfo"
@@ -176,6 +210,7 @@
                             FeatureBaseCommitSha="@Link.FeatureBaseCommitSha"
                             IsPrVerified="@IsPrVerified"
                             IsOnTag="@Link.IsOnTag"
+                            CanCreate="@Link.Allows(RepositoryOperation.CreatePullRequest)"
                             HasNewerTag="@(Link.HasNewerTag == true)"
                             OnCreateClick="@(() => OnCreatePr.InvokeAsync(Link))"
                             OnUpgradeClick="@(() => OnUpgradeClick.InvokeAsync(Link))"
@@ -191,7 +226,7 @@
                                       role="button"
                                       tabindex="@(depOkBadgeInactive ? -1 : 0)"
                                       style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                      title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage custom dependencies")"
+                                      title="@(depOkBadgeInactive ? depOkBadgeInactiveTitle : "Manage custom dependencies")"
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">0</span>
@@ -213,7 +248,7 @@
                                       role="button"
                                       tabindex="@(depOkBadgeInactive ? -1 : 0)"
                                       style="cursor: @(depOkBadgeInactive ? "default" : "pointer");"
-                                      title="@(depOkBadgeInactive ? "Repository is on a tag; checkout a branch first." : "Manage dependencies")"
+                                      title="@(depOkBadgeInactive ? depOkBadgeInactiveTitle : "Manage dependencies")"
                                       @onclick="HandleCustomDependenciesClick"
                                       @onclick:preventDefault
                                       @onkeydown="HandleCustomDependenciesKeydown">@totalWithFiles</span>
@@ -424,7 +459,7 @@
                                         <div class="dependency-badge-tooltip-footer dependency-badge-tooltip-footer--split">
                                             @if (depBadgeOnTag)
                                             {
-                                                <span class="dependency-badge-tooltip-footer-hint">Repository is on a tag; checkout a branch first.</span>
+                                                <span class="dependency-badge-tooltip-footer-hint">@RepositoryOperationPolicy.OnTagMessage</span>
                                             }
                                             else if (unmatchedDeps > 0 && hasOutOfDateFiles)
                                             {
@@ -457,8 +492,10 @@
                                   Incoming="@Link.IncomingCommits"
                                   BranchHasUpstream="@Link.BranchHasUpstream"
                                   BranchName="@Link.BranchName"
-                                  Disabled="@(ActionsDisabled || Link.IsOnTag)"
+                                  Disabled="@(ActionsDisabled || !(Link.Allows(RepositoryOperation.Pull) || Link.Allows(RepositoryOperation.Push)))"
                                   IsOnTag="@Link.IsOnTag"
+                                  PullOnly="@(!Link.Allows(RepositoryOperation.Push) && Link.Allows(RepositoryOperation.Pull))"
+                                  PullOnlyTitle="@(repo.Archived && !Link.IsReference ? RepositoryOperationPolicy.ArchivedMessage : null)"
                                   OnPushClick="OnPushBadgeClick"
                                   OnPullClick="OnPullBadgeClick" />
                 </span>
@@ -466,7 +503,7 @@
                     <RepoSyncStatusBadge RepositoryId="repo.RepositoryId"
                                         Status="@RepoSyncStatus"
                                         IsSyncing="@IsSyncing"
-                                        Disabled="@(ActionsDisabled || Link.IsOnTag)"
+                                        Disabled="@(ActionsDisabled || !Link.Allows(RepositoryOperation.SyncFromRow))"
                                         OnSyncClick="OnSyncClick" />
                 </span>
             </div>
@@ -655,7 +692,7 @@
 
     private async Task HandleDependencyBadgeClick()
     {
-        if (ActionsDisabled || Link?.IsOnTag == true)
+        if (ActionsDisabled || Link?.Allows(RepositoryOperation.UpdateDependencies) == false)
             return;
         if ((Link?.UnmatchedDeps ?? 0) > 0)
             await OnDependencyBadgeClick.InvokeAsync();
@@ -665,14 +702,14 @@
 
     private async Task HandleCustomDependenciesClick()
     {
-        if (ActionsDisabled || Link?.IsOnTag == true)
+        if (ActionsDisabled || Link?.Allows(RepositoryOperation.UpdateDependencies) == false)
             return;
         await OnCustomDependenciesClick.InvokeAsync();
     }
 
     private async Task HandleShowDependenciesClick()
     {
-        if (ActionsDisabled || Link?.IsOnTag == true)
+        if (ActionsDisabled || Link?.Allows(RepositoryOperation.UpdateDependencies) == false)
             return;
         await OnCustomDependenciesClick.InvokeAsync();
     }

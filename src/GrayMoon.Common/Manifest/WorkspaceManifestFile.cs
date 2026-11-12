@@ -9,7 +9,14 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
     /// <summary>File name of the Workspace definition. Use <see cref="IWorkspaceManifestFile.FileName"/> where the service is at hand; this constant is for compile-time contexts such as messages.</summary>
     public const string FileName = "graymoon.json";
 
+    /// <summary>The version of a definition that records no read-only state. Every GrayMoon reads it.</summary>
     public const int SchemaVersion = 1;
+
+    /// <summary>
+    /// The newest version this GrayMoon reads, and the one it writes when the definition holds <c>reference</c> or
+    /// <c>branch</c>. An older GrayMoon refuses such a file by its version rather than misreading a commit without a tag.
+    /// </summary>
+    public const int MaxSchemaVersion = 2;
 
     private static readonly JsonSerializerOptions WriteOptions = new()
     {
@@ -25,7 +32,7 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
 
     string IWorkspaceManifestFile.FileName => FileName;
 
-    public int CurrentSchemaVersion => SchemaVersion;
+    public int CurrentSchemaVersion => MaxSchemaVersion;
 
     public string Serialize(WorkspaceManifest manifest)
     {
@@ -33,6 +40,9 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
 
         var sorted = manifest with
         {
+            // The content decides the version, not the caller: a definition without read-only data stays readable
+            // by every GrayMoon.
+            SchemaVersion = UsesReferenceData(manifest) ? MaxSchemaVersion : SchemaVersion,
             Connectors = (manifest.Connectors ?? [])
                 .OrderBy(c => c.Url, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
@@ -65,7 +75,7 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
         try
         {
             var schemaVersion = ReadSchemaVersion(content);
-            if (schemaVersion > SchemaVersion)
+            if (schemaVersion > MaxSchemaVersion)
             {
                 error = $"Workspace definition schema {schemaVersion} is newer than this GrayMoon";
                 return false;
@@ -84,8 +94,15 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 return false;
             }
 
+            if (schemaVersion < MaxSchemaVersion && UsesReferenceData(parsed))
+            {
+                error = $"Workspace definition uses reference or branch, which needs \"version\": {MaxSchemaVersion}";
+                return false;
+            }
+
             var profile = parsed.Workspace.Profile
                 ?? new WorkspaceManifestProfile("basic", "none", "none");
+            var referenceDefault = parsed.Workspace.Reference;
 
             var repositories = new List<WorkspaceManifestRepository>();
             foreach (var repository in parsed.Repositories ?? [])
@@ -93,11 +110,16 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 if (repository is null)
                     continue;
 
-                if (!WorkspaceDefinitionTagPin.TryNormalize(
+                // An entry without its own reference takes the workspace value (a file written before per-repository
+                // state, or edited by hand).
+                if (!WorkspaceDefinitionRevisionPin.TryNormalize(
                         repository.Tag,
+                        repository.Branch,
                         repository.Commit,
+                        repository.Reference ?? referenceDefault ?? false,
                         repository.Name,
                         out var tag,
+                        out var branch,
                         out var commit,
                         out var pinError))
                 {
@@ -110,7 +132,9 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                     repository.RepositoryUrl ?? string.Empty,
                     repository.ConnectorUrl ?? string.Empty,
                     tag,
-                    commit));
+                    commit,
+                    repository.Reference,
+                    branch));
             }
 
             if (!TryNormalizeVersionFiles(parsed.VersionFiles, out var versionFiles, out var versionFileError))
@@ -131,7 +155,8 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                     new WorkspaceManifestProfile(
                         profile.Type ?? "basic",
                         profile.Versioning ?? "none",
-                        profile.Ci ?? "none")),
+                        profile.Ci ?? "none"),
+                    referenceDefault),
                 (parsed.Connectors ?? [])
                     .Where(c => c is not null)
                     .Select(c => new WorkspaceManifestConnector(c.Type ?? string.Empty, c.Url ?? string.Empty))
@@ -156,7 +181,7 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
 
         try
         {
-            return ReadSchemaVersion(content) > SchemaVersion;
+            return ReadSchemaVersion(content) > MaxSchemaVersion;
         }
         catch (JsonException)
         {
@@ -164,10 +189,10 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
         }
     }
 
-    public (string? Commit, string? Error) ReadTagPinCommit(string? content, string? repositoryUrl)
+    public (string? Commit, string? Branch, string? Error) ReadPinnedRevision(string? content, string? repositoryUrl)
     {
         if (content is null)
-            return (null, null);
+            return (null, null, null);
 
         JsonDocument document;
         try
@@ -176,25 +201,25 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
         }
         catch (JsonException ex)
         {
-            return (null, $"Workspace definition is not valid JSON: {ex.Message}");
+            return (null, null, $"Workspace definition is not valid JSON: {ex.Message}");
         }
 
         using (document)
         {
             if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return (null, "Workspace definition is not valid JSON: the root element must be an object.");
+                return (null, null, "Workspace definition is not valid JSON: the root element must be an object.");
 
             if (!TryProperty(document.RootElement, "repositories", out var repositories)
                 || repositories.ValueKind == JsonValueKind.Null)
-                return (null, null);
+                return (null, null, null);
 
             if (repositories.ValueKind != JsonValueKind.Array)
-                return (null, "Workspace definition repositories must be an array.");
+                return (null, null, "Workspace definition repositories must be an array.");
 
             foreach (var repository in repositories.EnumerateArray())
             {
                 if (repository.ValueKind != JsonValueKind.Object)
-                    return (null, "Workspace definition repositories must be objects.");
+                    return (null, null, "Workspace definition repositories must be objects.");
 
                 if (!TryProperty(repository, "repositoryUrl", out var urlElement)
                     || urlElement.ValueKind != JsonValueKind.String
@@ -206,17 +231,69 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                     : null;
 
                 if (!TryReadString(repository, "tag", name, out var tag, out var tagError))
-                    return (null, tagError);
+                    return (null, null, tagError);
+                if (!TryReadString(repository, "branch", name, out var branch, out var branchError))
+                    return (null, null, branchError);
                 if (!TryReadString(repository, "commit", name, out var commit, out var commitError))
-                    return (null, commitError);
-                if (!WorkspaceDefinitionTagPin.TryNormalize(tag, commit, name, out _, out var normalizedCommit, out var pinError))
-                    return (null, pinError);
+                    return (null, null, commitError);
+                if (!TryReadReference(repository, name, out var reference, out var referenceError))
+                    return (null, null, referenceError);
+                if (reference is null && branch is not null)
+                {
+                    // The entry has no reference of its own: the workspace value applies, as in TryParse.
+                    if (!TryReadWorkspaceReference(document.RootElement, out reference, out var defaultError))
+                        return (null, null, defaultError);
+                }
 
-                return (normalizedCommit, null);
+                if (!WorkspaceDefinitionRevisionPin.TryNormalize(
+                        tag, branch, commit, reference ?? false, name, out _, out var normalizedBranch, out var normalizedCommit, out var pinError))
+                    return (null, null, pinError);
+
+                return (normalizedCommit, normalizedBranch, null);
             }
 
-            return (null, null);
+            return (null, null, null);
         }
+    }
+
+    private static bool UsesReferenceData(WorkspaceManifest manifest) =>
+        manifest.Workspace?.Reference is not null
+        || (manifest.Repositories ?? []).Any(repository =>
+            repository is not null && (repository.Reference is not null || !string.IsNullOrWhiteSpace(repository.Branch)));
+
+    private static bool TryReadWorkspaceReference(JsonElement root, out bool? reference, out string? error)
+    {
+        reference = null;
+        error = null;
+        return !TryProperty(root, "workspace", out var workspace)
+            || workspace.ValueKind != JsonValueKind.Object
+            || TryReadReference(workspace, null, out reference, out error, "Workspace definition workspace.reference");
+    }
+
+    /// <summary>The same lenient boolean as <see cref="ReferenceBooleanJsonConverter"/>, read from an element.</summary>
+    private static bool TryReadReference(JsonElement owner, string? repositoryName, out bool? reference, out string? error, string? label = null)
+    {
+        reference = null;
+        error = null;
+        if (!TryProperty(owner, "reference", out var element) || element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return true;
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.True:
+                reference = true;
+                return true;
+            case JsonValueKind.False:
+                reference = false;
+                return true;
+            case JsonValueKind.String when bool.TryParse(element.GetString()?.Trim(), out var value):
+                reference = value;
+                return true;
+        }
+
+        label ??= string.IsNullOrWhiteSpace(repositoryName) ? "A repository reference" : $"Repository '{repositoryName}' reference";
+        error = $"{label} must be true or false.";
+        return false;
     }
 
     public IReadOnlyList<string> ReadRepositoryFolderNames(string? content)

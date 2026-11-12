@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Components.Modals;
 using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
@@ -59,7 +60,7 @@ public sealed partial class WorkspaceRepositories
         {
             var repo = wr.Repository;
             if (repo == null) continue;
-            if (wr.IsOnTag) continue;
+            if (!Allows(wr, RepositoryOperation.CreatePullRequest)) continue;
             if (string.IsNullOrWhiteSpace(wr.BranchName)) continue;
             if (string.IsNullOrWhiteSpace(wr.DefaultBranchName)) continue;
             if (string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)) continue;
@@ -295,7 +296,7 @@ public sealed partial class WorkspaceRepositories
             IReadOnlyList<CreatePullRequestResult> results;
             try
             {
-                results = await PullRequestOperations.CreateAsync(requests, progress, ct);
+                results = await PullRequestOperations.CreateAsync(WorkspaceId, requests, progress, ct);
             }
             catch (OperationCanceledException)
             {

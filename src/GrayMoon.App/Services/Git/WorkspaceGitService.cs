@@ -33,6 +33,7 @@ public sealed partial class WorkspaceGitService(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IWorkspaceManifestService manifestService,
     ILogger<WorkspaceGitService> logger,
+    GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy operationPolicy,
     IHubContext<WorkspaceSyncHub>? hubContext = null,
     PackageRegistrySyncService? packageRegistrySyncService = null,
     NuGetService? nuGetService = null,
@@ -53,6 +54,7 @@ public sealed partial class WorkspaceGitService(
     private readonly WorkspaceStateRecomputeScope _recomputeScope = recomputeScope ?? throw new ArgumentNullException(nameof(recomputeScope));
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly IWorkspaceFeatureContextResolver _contextResolver = contextResolver ?? throw new ArgumentNullException(nameof(contextResolver));
+    private readonly GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy _operationPolicy = operationPolicy ?? throw new ArgumentNullException(nameof(operationPolicy));
     private readonly IWorkspaceContextPathResolver _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
     private readonly IWorkspaceCapabilitiesResolver _capabilitiesResolver = capabilitiesResolver ?? throw new ArgumentNullException(nameof(capabilitiesResolver));
     private readonly IWorkspaceManifestService _manifestService = manifestService ?? throw new ArgumentNullException(nameof(manifestService));

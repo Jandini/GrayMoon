@@ -61,15 +61,7 @@
                       @onmousedown:preventDefault="@(row.Kind == GitChangesTreeRowKind.File)">
                     @if (row.Kind == GitChangesTreeRowKind.Repository)
                     {
-                        <span class="git-changes-tree__repo-name">@row.Label</span>
-                        @if (!string.IsNullOrEmpty(row.BranchName))
-                        {
-                            <span class="git-changes-tree__repo-branch" title="@row.BranchName">@row.BranchName</span>
-                        }
-                        @if (row.Count.HasValue)
-                        {
-                            <span class="git-changes-tree__count-badge">@row.Count</span>
-                        }
+                        <GitChangesRepositoryLabel Row="row" />
                     }
                     else if (row.Kind == GitChangesTreeRowKind.Section)
                     {

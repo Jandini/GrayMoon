@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -21,7 +22,7 @@ public sealed partial class WorkspaceRepositories
             return;
 
         var allLinks = await GetAllLinksForOperationAsync();
-        if (allLinks.All(wr => wr.IsOnTag))
+        if (allLinks.All(wr => !Allows(wr, RepositoryOperation.UpdateDependencies)))
         {
             ToastService.Show("All repositories are on tags; checkout a branch first.");
             return;
@@ -33,7 +34,7 @@ public sealed partial class WorkspaceRepositories
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         var reposOnDefault = allLinks
-            .Where(wr => !wr.IsOnTag
+            .Where(wr => Allows(wr, RepositoryOperation.UpdateDependencies)
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
                 && repoIdsWithUpdates.Contains(wr.RepositoryId))
@@ -110,7 +111,10 @@ public sealed partial class WorkspaceRepositories
                     includeDepsInCommitMessage: includeDepsInCommitMessage));
 
             if (updateResult.Success)
+            {
                 SafeInvoke(() => ClearRepositoryErrorsFor(updateResult.SyncedRepoIds));
+                ShowSkippedRepositories(updateResult.Skipped);
+            }
         }, new PageJobOptions
         {
             RefreshOnCancel = true,
@@ -132,7 +136,7 @@ public sealed partial class WorkspaceRepositories
             return;
 
         var allLinks = await GetAllLinksForOperationAsync();
-        if (allLinks.All(wr => wr.IsOnTag))
+        if (allLinks.All(wr => !Allows(wr, RepositoryOperation.UpdateDependencies)))
         {
             ToastService.Show("All repositories are on tags; checkout a branch first.");
             return;
@@ -144,14 +148,14 @@ public sealed partial class WorkspaceRepositories
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         _reviewedDefaultBranchRepoIds = allLinks
-            .Where(wr => !wr.IsOnTag
+            .Where(wr => Allows(wr, RepositoryOperation.UpdateDependencies)
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
 
         var reposOnDefault = allLinks
-            .Where(wr => !wr.IsOnTag
+            .Where(wr => Allows(wr, RepositoryOperation.UpdateDependencies)
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)
                 && repoIdsWithUpdates.Contains(wr.RepositoryId))
@@ -208,7 +212,7 @@ public sealed partial class WorkspaceRepositories
         }
 
         var allLinks = await GetAllLinksForOperationAsync();
-        if (allLinks.Where(wr => !wr.IsOnTag && (wr.DependencyLevel ?? 0) <= level).All(wr => wr.IsOnTag))
+        if (allLinks.Where(wr => Allows(wr, RepositoryOperation.UpdateDependencies) && (wr.DependencyLevel ?? 0) <= level).All(wr => !Allows(wr, RepositoryOperation.UpdateDependencies)))
         {
             ToastService.Show("All repositories at this level are on tags; checkout a branch first.");
             return;
@@ -220,7 +224,7 @@ public sealed partial class WorkspaceRepositories
         var repoIdsWithUpdates = updatePlan.Select(p => p.RepoId).ToHashSet();
 
         _reviewedDefaultBranchRepoIds = allLinks
-            .Where(wr => !wr.IsOnTag
+            .Where(wr => Allows(wr, RepositoryOperation.UpdateDependencies)
                 && (wr.DependencyLevel ?? 0) <= level
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal))
@@ -228,7 +232,7 @@ public sealed partial class WorkspaceRepositories
             .ToHashSet();
 
         var reposOnDefault = allLinks
-            .Where(wr => !wr.IsOnTag
+            .Where(wr => Allows(wr, RepositoryOperation.UpdateDependencies)
                 && (wr.DependencyLevel ?? 0) <= level
                 && !string.IsNullOrWhiteSpace(wr.DefaultBranchName)
                 && string.Equals(wr.BranchName, wr.DefaultBranchName, StringComparison.Ordinal)

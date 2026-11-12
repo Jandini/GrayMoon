@@ -11,6 +11,10 @@ internal sealed class InspectWorktreeWorkerResponse
     [JsonPropertyName("exists")]
     public bool Exists { get; set; }
 
+    /// <summary>Full sha of HEAD, or null when it could not be read.</summary>
+    [JsonPropertyName("headSha")]
+    public string? HeadSha { get; set; }
+
     /// <summary>Current branch short name, or null when HEAD is detached or the Worker did not report it (09 SB-2).</summary>
     [JsonPropertyName("branch")]
     public string? Branch { get; set; }
@@ -41,6 +45,13 @@ internal sealed class InspectWorktreeWorkerResponse
     /// <summary>Null on success; otherwise a short description of what could not be determined.</summary>
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+
+    /// <summary>
+    /// True when HEAD is contained in a remote-tracking branch. Reported only when the branch has no upstream or HEAD
+    /// is detached. Null otherwise, when git could not say, and from an older Worker.
+    /// </summary>
+    [JsonPropertyName("headOnRemote")]
+    public bool? HeadOnRemote { get; set; }
 
     /// <summary>True when the requested Feature branch exists. Null when none was requested, or the Worker is older than this unit (09 SB-2).</summary>
     [JsonPropertyName("featureBranchExists")]

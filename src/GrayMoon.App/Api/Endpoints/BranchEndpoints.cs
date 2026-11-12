@@ -225,6 +225,9 @@ public sealed class CheckoutBranchApiResult
     public string? CurrentBranch { get; set; }
     public string? ErrorMessage { get; set; }
 
+    /// <summary>Set on success when something beside the checkout did not work (the checkout itself is done).</summary>
+    public string? Warning { get; set; }
+
     public CheckoutBranchApiResult(bool success, string? errorMessage)
     {
         Success = success;

@@ -105,6 +105,112 @@ public sealed class SyncRepositoryTagPinTests : IDisposable
         Assert.False(Directory.Exists(RepoPath()));
     }
 
+    [Fact]
+    public async Task Fresh_clone_of_a_read_only_repository_is_on_its_branch_at_the_recorded_commit_and_behind_origin()
+    {
+        var (origin, recorded, tip) = await CreateOriginAsync();
+        await WriteReferenceDefinitionAsync(origin, "\"reference\": true, \"branch\": \"main\"", recorded);
+
+        var response = await SyncAsync(origin, applyRepositoryTagPin: true);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(recorded, await HeadAsync(RepoPath()));
+        Assert.NotEqual(tip, recorded);
+        Assert.Equal("main", await GitOutputAsync(RepoPath(), "rev-parse --abbrev-ref HEAD"));
+        Assert.Equal("origin/main", await GitOutputAsync(RepoPath(), "rev-parse --abbrev-ref main@{upstream}"));
+        // The commit the remote gained since shows as incoming; nothing is outgoing.
+        Assert.Equal("1", await GitOutputAsync(RepoPath(), "rev-list --count HEAD..origin/main"));
+        Assert.Equal("0", await GitOutputAsync(RepoPath(), "rev-list --count origin/main..HEAD"));
+        Assert.Equal("main", response.Branch);
+        Assert.Null(response.Tag);
+    }
+
+    [Fact]
+    public async Task Fresh_clone_of_a_read_only_repository_takes_the_workspace_value_when_the_entry_has_none()
+    {
+        var (origin, recorded, _) = await CreateOriginAsync();
+        await WriteReferenceDefinitionAsync(origin, "\"branch\": \"main\"", recorded, workspace: "\"reference\": true");
+
+        var response = await SyncAsync(origin, applyRepositoryTagPin: true);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(recorded, await HeadAsync(RepoPath()));
+        Assert.Equal("main", await GitOutputAsync(RepoPath(), "rev-parse --abbrev-ref HEAD"));
+    }
+
+    [Fact]
+    public async Task A_recorded_branch_the_remote_no_longer_has_is_created_without_an_upstream()
+    {
+        var (origin, recorded, _) = await CreateOriginAsync();
+        await WriteReferenceDefinitionAsync(origin, "\"reference\": true, \"branch\": \"release/gone\"", recorded);
+
+        var response = await SyncAsync(origin, applyRepositoryTagPin: true);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(recorded, await HeadAsync(RepoPath()));
+        Assert.Equal("release/gone", await GitOutputAsync(RepoPath(), "rev-parse --abbrev-ref HEAD"));
+        var (exit, _, _) = await GitVersionParityTests.RunProcessAsync("git", "rev-parse --abbrev-ref release/gone@{upstream}", RepoPath());
+        Assert.NotEqual(0, exit);
+    }
+
+    [Fact]
+    public async Task Existing_checkout_of_a_read_only_repository_is_not_moved_to_the_recorded_commit()
+    {
+        var (origin, recorded, tip) = await CreateOriginAsync();
+        await WriteReferenceDefinitionAsync(origin, "\"reference\": true, \"branch\": \"main\"", recorded);
+        await RunGitAsync(Path.Combine(_root, "ws"), $"clone \"{origin}\" repo");
+
+        var response = await SyncAsync(origin, applyRepositoryTagPin: true);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(tip, await HeadAsync(RepoPath()));
+    }
+
+    [Fact]
+    public async Task Missing_recorded_commit_of_a_read_only_repository_fails_the_sync_and_removes_the_clone()
+    {
+        var (origin, _, _) = await CreateOriginAsync();
+        await WriteReferenceDefinitionAsync(origin, "\"reference\": true, \"branch\": \"main\"", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        var response = await SyncAsync(origin, applyRepositoryTagPin: true);
+
+        Assert.False(response.Success);
+        Assert.Contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", response.ErrorMessage);
+        Assert.False(Directory.Exists(RepoPath()));
+    }
+
+    [Fact]
+    public async Task A_branch_recorded_for_a_writable_repository_fails_the_sync_and_removes_the_clone()
+    {
+        var (origin, recorded, _) = await CreateOriginAsync();
+        await WriteReferenceDefinitionAsync(origin, "\"reference\": false, \"branch\": \"main\"", recorded);
+
+        var response = await SyncAsync(origin, applyRepositoryTagPin: true);
+
+        Assert.False(response.Success);
+        Assert.Contains("not read only", response.ErrorMessage);
+        Assert.False(Directory.Exists(RepoPath()));
+    }
+
+    private async Task WriteReferenceDefinitionAsync(string origin, string revision, string commit, string workspace = "")
+    {
+        var workspacePath = Path.Combine(_root, "ws");
+        Directory.CreateDirectory(workspacePath);
+        var url = origin.Replace("\\", "\\\\");
+        await File.WriteAllTextAsync(
+            Path.Combine(workspacePath, "graymoon.json"),
+            $$"""
+            { "version": 2, "workspace": { {{workspace}} }, "repositories": [ { "name": "repo", "repositoryUrl": "{{url}}", {{revision}}, "commit": "{{commit}}" } ] }
+            """);
+    }
+
+    private static async Task<string> GitOutputAsync(string repoPath, string args)
+    {
+        var (exit, stdout, stderr) = await GitVersionParityTests.RunProcessAsync("git", args, repoPath);
+        Assert.True(exit == 0, stderr);
+        return stdout.Trim();
+    }
+
     private string RepoPath() => Path.Combine(_root, "ws", "repo");
 
     private Task<(string Origin, string TaggedCommit, string Tip)> CreateOriginAsync()

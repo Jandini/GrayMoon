@@ -93,7 +93,7 @@
         @if (ShowManifestDriftBanner)
         {
             <div class="page-warning-callout page-callout-with-actions page-callout" role="alert">
-                <span title="Workspace definition on disk differs from this Workspace.">Workspace definition on disk differs from this Workspace.</span>
+                <span title="@ManifestDriftBannerText">@ManifestDriftBannerText</span>
                 <button type="button" class="page-callout-action page-callout-action--primary"
                         disabled="@_isResolvingManifestDrift"
                         @onclick="WriteWorkspaceDefinitionToDiskAsync">Write Workspace definition to disk</button>
@@ -195,7 +195,7 @@
                                                                            ColSpan="@TableColSpan"
                                                                            Group="@wsGroup"
                                                                            RepositoryCount="@slot.LevelRepoCount"
-                                                                           ActionsDisabled="@AreAllOnTag(wsGroup)"
+                                                                           ActionsDisabled="@NoRepositoryAllowsLevelActions(wsGroup)"
                                                                            IsFeatureContext="@_isFeatureContext"
                                                                            OnReturnToDefault="async () => await ReturnToDefaultForIdsAsync(_workspaceRoleRepositoryIds)"
                                                                            OnSyncCommits="() => SyncCommitsForIds(_workspaceRoleRepositoryIds)"
@@ -222,7 +222,7 @@
                                                                            ColSpan="@TableColSpan"
                                                                            Group="@srcGroup"
                                                                            RepositoryCount="@slot.LevelRepoCount"
-                                                                           ActionsDisabled="@AreAllOnTag(srcGroup)"
+                                                                           ActionsDisabled="@NoRepositoryAllowsLevelActions(srcGroup)"
                                                                            IsFeatureContext="@_isFeatureContext"
                                                                            OnReturnToDefault="async () => await ReturnToDefaultForIdsAsync(_sourceRepositoryIds)"
                                                                            OnSyncCommits="() => SyncCommitsForIds(_sourceRepositoryIds)"
@@ -353,6 +353,7 @@
                    WorkspaceName="@(workspace?.Name)"
                    WorkspaceId="@WorkspaceId"
                    HasTaggedRepos="@hasTaggedRepos"
+                   HasReferenceRepos="@hasReferenceRepos"
                    IsBusy="@IsJobRunning"
                    InitialTab="@_branchModal.InitialTab"
                    CommonBranchNames="@_branchModal.CommonBranchNames"
@@ -373,6 +374,10 @@
                    IsFeatureContext="@_isFeatureContext"
                    FeatureBranchName="@GetSwitchBranchModalFeatureBranchName()"
                    PinnedTag="@GetSwitchBranchModalPinnedTag()"
+                   IsReference="@(TryGetLink(_switchBranchModal.RepositoryId)?.IsReference ?? false)"
+                   IsWorkspaceRepository="@(TryGetLink(_switchBranchModal.RepositoryId)?.Role == WorkspaceRepositoryRole.Workspace)"
+                   IsArchived="@(TryGetLink(_switchBranchModal.RepositoryId)?.Repository?.Archived ?? false)"
+                   UncommittedChangedFileCount="@(TryGetLink(_switchBranchModal.RepositoryId)?.UncommittedChangedFileCount ?? 0)"
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"
                    RepositoryUrl="@_switchBranchModal.RepositoryUrl"
@@ -526,6 +531,7 @@
                  CommonBranchNames="@_prepareWorkspaceModal.CommonBranchNames"
                  DefaultDisplayText="@_prepareWorkspaceModal.DefaultDisplayText"
                  HasTaggedRepos="@hasTaggedRepos"
+                 HasReferenceRepos="@hasReferenceRepos"
                  OnCreate="HandlePrepareWorkspaceAsync"
                  OnCancel="ClosePrepareWorkspaceModal" />
 

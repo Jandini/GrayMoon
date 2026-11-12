@@ -74,7 +74,7 @@ public sealed partial class WorkspaceActions
     internal async Task RerunAllFailedAsync()
     {
         var failedPairs = new List<(WorkspaceActionRow Row, WorkflowActionLine Line)>();
-        foreach (var row in rows)
+        foreach (var row in rows.Where(row => AllowsWorkflowRun(row, GrayMoon.Application.Repositories.Policy.RepositoryOperationScope.Bulk)))
         {
             foreach (var line in row.WorkflowLines)
             {
@@ -152,7 +152,7 @@ public sealed partial class WorkspaceActions
     internal async Task RerunAllFailedJobsOnlyAsync()
     {
         var failedPairs = new List<(WorkspaceActionRow Row, WorkflowActionLine Line)>();
-        foreach (var row in rows)
+        foreach (var row in rows.Where(row => AllowsWorkflowRun(row, GrayMoon.Application.Repositories.Policy.RepositoryOperationScope.Bulk)))
         {
             foreach (var line in row.WorkflowLines)
             {
@@ -231,7 +231,7 @@ public sealed partial class WorkspaceActions
     internal async Task RunAgainAllFailedAsync()
     {
         var eligiblePairs = new List<(WorkspaceActionRow Row, WorkflowActionLine Line)>();
-        foreach (var row in rows)
+        foreach (var row in rows.Where(row => AllowsWorkflowRun(row, GrayMoon.Application.Repositories.Policy.RepositoryOperationScope.Bulk)))
         {
             foreach (var line in row.WorkflowLines)
             {

@@ -14,6 +14,8 @@ public sealed class PrepareWorkspaceOrchestrator(
 {
     public const string NoRepositoriesMessage = "Prepare Workspace stopped: no repositories were selected.";
 
+    public const string OnlyReadOnlyRepositoriesMessage = "Prepare Workspace stopped: every selected repository is read only.";
+
     public async Task<PrepareWorkspaceResult> RunAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -52,11 +54,14 @@ public sealed class PrepareWorkspaceOrchestrator(
         {
             foreach (var (repoId, msg) in branchErrors)
                 sink.Repository(repoId, msg);
-            sink.Level(0, outcome.TargetedRepositoryIds.Count == 0 ? NoRepositoriesMessage : PrepareWorkspaceResult.BranchesStoppedMessage);
+            var stopMessage = outcome.TargetedRepositoryIds.Count > 0
+                ? PrepareWorkspaceResult.BranchesStoppedMessage
+                : outcome.Skipped.Count > 0 ? OnlyReadOnlyRepositoriesMessage : NoRepositoriesMessage;
+            sink.Level(0, stopMessage);
             logger.LogWarning(
                 "PrepareWorkspaceOrchestrator stopped for workspace {WorkspaceId}: branch creation failed in {FailedCount} of {TargetedCount} repositories",
                 workspaceId, branchErrors.Count, outcome.TargetedRepositoryIds.Count);
-            return PrepareWorkspaceResult.BranchesFailed(branchErrors);
+            return PrepareWorkspaceResult.BranchesFailed(branchErrors) with { BranchSkipped = outcome.Skipped };
         }
 
         var noBranchErrors = new Dictionary<int, string>();
@@ -72,7 +77,7 @@ public sealed class PrepareWorkspaceOrchestrator(
                 setLevelError,
                 cancellationToken);
             logger.LogInformation("PrepareWorkspaceOrchestrator completed for workspace {WorkspaceId} (combined). Status={Status}", workspaceId, combined.Status);
-            return new PrepareWorkspaceResult(true, noBranchErrors, Combined: combined);
+            return new PrepareWorkspaceResult(true, noBranchErrors, Combined: combined) { BranchSkipped = outcome.Skipped };
         }
 
         DependencyUpdateRunResult? update = null;
@@ -88,7 +93,10 @@ public sealed class PrepareWorkspaceOrchestrator(
             true,
             noBranchErrors,
             Update: update,
-            PushPending: pushChanges && (update?.Success ?? true));
+            PushPending: pushChanges && (update?.Success ?? true))
+        {
+            BranchSkipped = outcome.Skipped,
+        };
     }
 
     /// <summary>
@@ -105,7 +113,9 @@ public sealed class PrepareWorkspaceOrchestrator(
 
         if (requestedRepositoryIds != null)
         {
-            foreach (var repoId in requestedRepositoryIds.Where(id => !outcome.TargetedRepositoryIds.Contains(id)))
+            // A repository the policy left out (read-only) was not attempted on purpose; it is reported as skipped, not failed.
+            var skippedIds = outcome.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
+            foreach (var repoId in requestedRepositoryIds.Where(id => !outcome.TargetedRepositoryIds.Contains(id) && !skippedIds.Contains(id)))
                 failures.TryAdd(repoId, "Branch was not created: the repository was not found in this workspace.");
         }
 

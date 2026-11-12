@@ -16,6 +16,9 @@ public sealed record WorkspaceCommitTargetPlan(
 /// </summary>
 public static class WorkspaceCommitTargetPlanner
 {
+    /// <summary>The reason reported for a read-only repository that has changes the commit leaves alone.</summary>
+    public const string ReferenceReason = "it is read only";
+
     public static bool IsOnDefaultBranch(WorkspaceGitChangesRepositoryView repository) =>
         !string.IsNullOrWhiteSpace(repository.DefaultBranchName)
         && string.Equals(repository.BranchName, repository.DefaultBranchName, StringComparison.Ordinal);
@@ -43,6 +46,13 @@ public static class WorkspaceCommitTargetPlanner
             var wasClicked = clickIds.Contains(repository.WorkspaceRepositoryId);
             if (!wasClicked && !WorkspaceCommitModeHelper.IsRepositoryTarget(mode, repository.StagedCount, repository.ChangedCount))
                 continue;
+
+            // A read-only repository is never committed. It is named so its changes are not taken for committed.
+            if (repository.IsReference)
+            {
+                leftOut.Add((repository, ReferenceReason));
+                continue;
+            }
 
             // Never commit to a default branch the user did not confirm.
             if (IsOnDefaultBranch(repository) && !confirmedOnDefaultBranch.Contains(repository.WorkspaceRepositoryId))

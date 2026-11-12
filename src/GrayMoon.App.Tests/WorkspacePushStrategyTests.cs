@@ -147,6 +147,30 @@ public sealed class WorkspacePushStrategyTests
     }
 
     [Fact]
+    public async Task DotNet_synchronized_push_never_pushes_a_read_only_producer_whose_package_has_no_registry()
+    {
+        await using var ctx = await CreateContextAsync(new RecordingNuGetHandler());
+        await ctx.UseDotNetDependencyProfileAsync();
+        var graph = await SeedDependencyGraphAsync(ctx, matchConnector: false);
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var producer = await db.WorkspaceRepositories.SingleAsync(wr => wr.WorkspaceId == ctx.WorkspaceId && wr.RepositoryId == graph.ProducerId);
+            producer.IsReference = true;
+            await db.SaveChangesAsync();
+        }
+        RespondPushCommands(ctx);
+        var plan = await GetPlanAsync(ctx);
+
+        // The read only producer is still part of the graph, but it is not a push target, so nothing in this run
+        // publishes the package the consumer needs.
+        Assert.DoesNotContain(graph.ProducerId, plan.RepositoryIds);
+        await Assert.ThrowsAsync<SynchronizedPushNotPossibleException>(
+            () => PushAsync(ctx, plan.RepositoryIds, synchronizedPush: true, plan.RequiredPackageIds));
+        Assert.Empty(PushCalls(ctx));
+    }
+
+    [Fact]
     public async Task DotNet_synchronized_push_matches_a_package_after_the_level_that_publishes_it()
     {
         var nuget = new RecordingNuGetHandler { PublishedVersions = ["0.9.0"], UnavailablePackageLookups = 1 };

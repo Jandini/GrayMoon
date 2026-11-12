@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Components.Shared;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -66,6 +68,7 @@ public sealed partial class WorkspaceRepositories
     private bool isPushRecommended => _headerState?.IsPushRecommended ?? false;
     private int? lowestLevelNeedingWork => _headerState?.LowestLevelNeedingWork;
     private bool hasTaggedRepos => _headerState?.HasTaggedRepos ?? false;
+    private bool hasReferenceRepos => _linkByRepoId.Values.Any(link => link.IsReference);
     private bool hasIncomingCommits => _headerState?.HasIncomingCommits ?? false;
     private bool? isOutOfSync => _headerState?.IsOutOfSync;
     private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);
@@ -115,7 +118,7 @@ public sealed partial class WorkspaceRepositories
     private CancellationTokenSource? _refreshDebounceCts;
     private readonly object _refreshDebounceLock = new();
     private CancellationTokenSource? _backgroundWorkCts;
-    private const string TagBlockedActionMessage = "Repository is on a tag; checkout a branch first.";
+    private const string TagBlockedActionMessage = RepositoryOperationPolicy.OnTagMessage;
     private int TableColSpan => _presentation.ColumnCount;
     internal enum VirtualSlotKind
     {
@@ -132,8 +135,14 @@ public sealed partial class WorkspaceRepositories
         int RepositoryId,
         int LevelRepoCount,
         int StripeIndex);
-    private bool IsRepoOnTag(int repositoryId) =>
-        TryGetLink(repositoryId)?.IsOnTag == true;
+    /// <summary>Asks the policy about a row of the selected context.</summary>
+    private bool Allows(WorkspaceRepositoryLink link, RepositoryOperation operation) =>
+        link.Allows(operation, _isFeatureContext);
+
+    /// <summary>A repository whose row is not loaded is not held back here; the service decides when the operation runs.</summary>
+    private bool IsRepoAllowed(int repositoryId, RepositoryOperation operation) =>
+        TryGetLink(repositoryId) is not { } link || Allows(link, operation);
+
     private WorkspaceRepositoryLink? TryGetLink(int repositoryId) =>
         _linkByRepoId.TryGetValue(repositoryId, out var link) ? link : null;
     private async Task<WorkspaceRepositoryLink?> TryGetLinkAsync(int repositoryId)
@@ -189,7 +198,7 @@ public sealed partial class WorkspaceRepositories
 
         /// <summary>True when the repository is on a branch other than its default and so has somewhere to sync to.</summary>
         public bool NeedsReturnToDefault =>
-            !Link.IsOnTag
+            Link.Allows(RepositoryOperation.ReturnToDefault)
             && !string.IsNullOrWhiteSpace(Link.BranchName)
             && !string.Equals(Link.BranchName, Link.DefaultBranchName, StringComparison.Ordinal);
     }
@@ -383,15 +392,16 @@ public sealed partial class WorkspaceRepositories
         _linkByRepoId.Values.Where(wr => wr.Role == WorkspaceRepositoryRole.Workspace);
     private IEnumerable<WorkspaceRepositoryLink> GetHydratedSourceLinks() =>
         _linkByRepoId.Values.Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace);
-    private bool IsLevelActionsDisabled(int? levelKey) => AreAllOnTag(GetHydratedLinksAtLevel(levelKey));
-    private static bool AreAllOnTag(IEnumerable<WorkspaceRepositoryLink> group)
+    private bool IsLevelActionsDisabled(int? levelKey) => NoRepositoryAllowsLevelActions(GetHydratedLinksAtLevel(levelKey));
+    /// <summary>The level buttons are off when no loaded repository of the group takes part in a level action (today: all are on a tag).</summary>
+    private static bool NoRepositoryAllowsLevelActions(IEnumerable<WorkspaceRepositoryLink> group)
     {
         var hydrated = group.ToList();
         if (hydrated.Count == 0)
         {
             return false;
         }
-        return hydrated.All(wr => wr.IsOnTag);
+        return hydrated.All(wr => !wr.Allows(RepositoryOperation.SyncLevel));
     }
     /// <summary>Returns true when the visible window actually changed.</summary>
     private bool UpdateVisibleRange(int start, int end)

@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Abstractions.Workspaces;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
@@ -307,7 +308,7 @@ public sealed class WorkspaceRepository(
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream })
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.Role, wr.IsReference, wr.Repository!.Archived })
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
             return new HashSet<int>();
@@ -319,6 +320,7 @@ public sealed class WorkspaceRepository(
             .Select(s => new { s.WorkspaceRepositoryId, s.CheckedOutTag, s.OutgoingCommits, s.BranchHasUpstream })
             .ToListAsync(cancellationToken);
         var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+        var snapshotLinkIds = await LoadReferenceSnapshotLinkIdsAsync(db, workspaceFeatureContextId, isSpecialWorkspace, linkIds, cancellationToken);
 
         var result = new HashSet<int>();
         foreach (var link in links)
@@ -344,7 +346,15 @@ public sealed class WorkspaceRepository(
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(checkedOutTag))
+            var subject = RepositoryPolicySubject.ForCheckout(
+                null,
+                checkedOutTag,
+                isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
+                isFeatureContext: !isSpecialWorkspace,
+                isReference: link.IsReference,
+                isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId),
+                isArchived: link.Archived);
+            if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, subject))
                 continue;
             if ((outgoingCommits ?? 0) > 0 || branchHasUpstream == false)
                 result.Add(link.RepositoryId);
@@ -438,7 +448,7 @@ public sealed class WorkspaceRepository(
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.DependencyLevel })
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.DependencyLevel, wr.Role, wr.IsReference, wr.Repository!.Archived })
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
             return new HashSet<int>();
@@ -450,6 +460,7 @@ public sealed class WorkspaceRepository(
             .Select(s => new { s.WorkspaceRepositoryId, s.CheckedOutTag, s.OutgoingCommits, s.BranchHasUpstream, s.DependencyLevel })
             .ToListAsync(cancellationToken);
         var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
+        var snapshotLinkIds = await LoadReferenceSnapshotLinkIdsAsync(db, workspaceFeatureContextId, isSpecialWorkspace, linkIds, cancellationToken);
 
         var result = new HashSet<int>();
         foreach (var link in links)
@@ -478,7 +489,15 @@ public sealed class WorkspaceRepository(
                 continue;
             }
 
-            if (!string.IsNullOrWhiteSpace(checkedOutTag))
+            var subject = RepositoryPolicySubject.ForCheckout(
+                null,
+                checkedOutTag,
+                isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
+                isFeatureContext: !isSpecialWorkspace,
+                isReference: link.IsReference,
+                isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId),
+                isArchived: link.Archived);
+            if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, subject))
                 continue;
             if (maxLevel.HasValue && (dependencyLevel ?? 0) > maxLevel.Value)
                 continue;
@@ -510,13 +529,22 @@ public sealed class WorkspaceRepository(
         if (toAdd.Count == 0)
             return;
 
+        // A new Source starts with the Workspace's read-only default. Read as a value from the database: this
+        // context is circuit-scoped and may hold the Workspace as it was before the default changed.
+        var referenceDefault = await _dbContext.Workspaces
+            .AsNoTracking()
+            .Where(w => w.WorkspaceId == workspaceId)
+            .Select(w => w.ReferenceDefault)
+            .FirstOrDefaultAsync(cancellationToken);
         foreach (var repositoryId in toAdd)
         {
             _dbContext.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
-                SyncStatus = RepoSyncStatus.NeedsSync
+                SyncStatus = RepoSyncStatus.NeedsSync,
+                // Existing links are not touched.
+                IsReference = referenceDefault
             });
         }
 
@@ -612,13 +640,20 @@ public sealed class WorkspaceRepository(
                 .ExecuteDeleteAsync();
         }
 
+        // A new Source starts with the Workspace's read-only default. Links that stay keep their own state.
+        var referenceDefault = toAdd.Count > 0
+            && await db.Workspaces
+                .Where(w => w.WorkspaceId == workspaceId)
+                .Select(w => w.ReferenceDefault)
+                .FirstOrDefaultAsync();
         foreach (var repositoryId in toAdd)
         {
             db.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
             {
                 WorkspaceId = workspaceId,
                 RepositoryId = repositoryId,
-                SyncStatus = RepoSyncStatus.NeedsSync
+                SyncStatus = RepoSyncStatus.NeedsSync,
+                IsReference = referenceDefault
             });
         }
 
@@ -631,6 +666,27 @@ public sealed class WorkspaceRepository(
 
         if (toRemove.Count > 0)
             _gitChangesNotifier.Publish(workspaceId, IWorkspaceGitChangesNotifier.AllContexts);
+    }
+
+    /// <summary>Links the Feature context holds as detached reference snapshots. The Workspace itself has none.</summary>
+    private static async Task<HashSet<int>> LoadReferenceSnapshotLinkIdsAsync(
+        AppDbContext db,
+        int workspaceFeatureContextId,
+        bool isSpecialWorkspace,
+        IReadOnlyCollection<int> linkIds,
+        CancellationToken cancellationToken)
+    {
+        if (isSpecialWorkspace)
+            return [];
+
+        return (await db.WorkspaceFeatureRepositories
+                .AsNoTracking()
+                .Where(row => row.WorkspaceFeatureContextId == workspaceFeatureContextId
+                    && row.IsReferenceSnapshot
+                    && linkIds.Contains(row.WorkspaceRepositoryId))
+                .Select(row => row.WorkspaceRepositoryId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
     }
 
     private async Task<bool> NameExistsAsync(string name, int? ignoreId = null) =>

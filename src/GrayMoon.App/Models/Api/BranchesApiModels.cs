@@ -52,6 +52,14 @@ public sealed class CheckoutBranchResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>Full sha of HEAD after a successful checkout. Null from workers that predate it.</summary>
+    [JsonPropertyName("commit")]
+    public string? Commit { get; set; }
+
+    /// <summary>Git refused the checkout because local changes would be overwritten. Nothing was changed.</summary>
+    [JsonPropertyName("localChangesBlockCheckout")]
+    public bool LocalChangesBlockCheckout { get; set; }
 }
 
 /// <summary>Worker response for CheckoutTag command (camelCase).</summary>

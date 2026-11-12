@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Orchestration;
@@ -15,7 +16,10 @@ public sealed class WorkspacePushOperations(
     WorkspaceRepository workspaceRepository,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     WorkspacePushStrategySelector strategySelector,
-    WorkspaceOperationOutcomeStore outcomes) : IWorkspacePushOperations
+    WorkspaceOperationOutcomeStore outcomes,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
+    GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier archivedVerifier,
+    ILogger<WorkspacePushOperations> logger) : IWorkspacePushOperations
 {
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
@@ -23,6 +27,9 @@ public sealed class WorkspacePushOperations(
         int? maxLevel = null,
         CancellationToken cancellationToken = default)
     {
+        // A repository marked archived is left out of the plan, so ask the provider first whether it still is.
+        await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
+
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
@@ -70,6 +77,8 @@ public sealed class WorkspacePushOperations(
         string? runId = null,
         bool restorePackages = true)
     {
+        await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
+
         var (capabilities, strategy) = await SelectStrategyAsync(workspaceId, cancellationToken);
         var run = new WorkspacePushRun(
             workspaceId,
@@ -85,7 +94,16 @@ public sealed class WorkspacePushOperations(
         var result = await pushHandler.RunPushWithDependenciesAsync(strategy, run, progress, cancellationToken: cancellationToken);
         if (!result.Success)
             recorder.Result(result);
-        return result;
+
+        var skipped = (await operationPolicy.PartitionAsync(
+            workspaceId, contextId, RepositoryOperation.Push, repositoryIds.ToList(), RepositorySubjectSource.Context, cancellationToken)).Skipped;
+        if (skipped.Count == 0)
+            return result;
+
+        logger.LogInformation(
+            "Push {RunId}: workspace {WorkspaceId}: {Count} repositories left out of the push: {Repositories}",
+            runId, workspaceId, skipped.Count, string.Join(", ", skipped.Select(skip => $"{skip.RepositoryName} ({skip.Reason})")));
+        return result with { Skipped = skipped };
     }
 
     public async Task<OperationResult> PushPendingAsync(

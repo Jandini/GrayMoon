@@ -144,6 +144,12 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<WorkspacePullRequestService>();
         services.AddScoped<RepositoryBranchWriter>();
         services.AddScoped<WorkspaceRepositoryStateWriter>();
+        services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ReferenceImportGuard>();
+        services.AddSingleton<GrayMoon.App.Services.Policy.ReferenceRevisionRecorder>();
+        services.AddScoped<GrayMoon.App.Services.Policy.IRepositoryArchiveProbe, GrayMoon.App.Services.Policy.GitHubRepositoryArchiveProbe>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddSingleton<SyncRecomputeCoalescer>();
         services.AddSingleton<FileVersionCheckCoalescer>();
@@ -191,6 +197,7 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
         services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
         services.AddScoped<IWorkspaceRepositoryOperations, GrayMoon.App.Services.Application.WorkspaceRepositoryOperations>();
+        services.AddScoped<IWorkspaceReferenceOperations, GrayMoon.App.Services.Application.WorkspaceReferenceOperations>();
         services.AddScoped<WorkspaceBranchHandler>();
         services.AddScoped<IPrepareWorkspacePhases, PrepareWorkspacePhases>();
         services.AddScoped<PrepareWorkspaceOrchestrator>();

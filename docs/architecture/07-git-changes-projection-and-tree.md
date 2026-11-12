@@ -162,6 +162,8 @@ Directory entries (`path` ending in `/`) become `IsDirectoryEntry` Folder rows: 
 
 `GitChangesTree.razor` renders with Blazor `Virtualize` over the flattened row list (fixed 28px row height, `@key="row.Key"`). Only the viewport (+ overscan) is synced to the browser; lazy child fetch is Summary-mode expand via `GetEntryPageAsync`. Diff content is separate (Monaco / markdown preview) and loads per selected file through `GetGitFileDiff` on the Worker **diff** pool.
 
+A read only repository (`GitChangesTreeRow.IsReference`) shows a padlock (`ReferenceLockIcon`) after its name. The label of a repository row is its own component, `GitChangesRepositoryLabel`, so it can be rendered in a test outside the virtualized list. The commit planner leaves it out (`WorkspaceCommitTargetPlanner`, `ReferenceReason`) and so does the planner of Undo across all repositories (`WorkspaceDiscardTargetPlanner.PlanAll`); Commit, Stage All, Unstage All and Discard All skip it, while staging, unstaging and discarding that one repository still work. The rules are in 05 ("Read only repositories and the operation policy").
+
 ## 5. What lives where (memory and serialization)
 
 | Layer | What it holds for a large change set |

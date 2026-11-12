@@ -22,6 +22,44 @@ public sealed class WorkspaceCommitTargetPlannerTests
         };
 
     [Fact]
+    public void Undo_across_all_repositories_leaves_a_read_only_repository_out_and_names_it()
+    {
+        var writable = Repo(1, changed: 2);
+        var readOnly = Repo(2, changed: 3) with { IsReference = true };
+        var clean = Repo(3);
+
+        var plan = WorkspaceDiscardTargetPlanner.PlanAll([writable, readOnly, clean]);
+
+        Assert.Equal([1], plan.Targets.Select(r => r.WorkspaceRepositoryId));
+        Assert.Equal([2], plan.LeftOut.Select(r => r.WorkspaceRepositoryId));
+    }
+
+    [Fact]
+    public void Undo_across_only_read_only_repositories_has_no_target()
+    {
+        var plan = WorkspaceDiscardTargetPlanner.PlanAll([Repo(2, changed: 3) with { IsReference = true }]);
+
+        Assert.Empty(plan.Targets);
+        Assert.Single(plan.LeftOut);
+    }
+
+    [Fact]
+    public void Undo_on_one_named_read_only_repository_is_allowed_by_the_policy_and_Undo_across_all_is_not()
+    {
+        var subject = new GrayMoon.Application.Repositories.Policy.RepositoryPolicySubject(
+            IsWorkspaceRepository: false, IsReference: true, BranchName: "main", CheckedOutTag: null, IsFeatureContext: false, IsReferenceSnapshot: false);
+
+        Assert.True(GrayMoon.Application.Repositories.Policy.RepositoryOperationPolicy.IsAllowed(
+            GrayMoon.Application.Repositories.Policy.RepositoryOperation.Discard,
+            subject,
+            GrayMoon.Application.Repositories.Policy.RepositoryOperationScope.Individual));
+        Assert.False(GrayMoon.Application.Repositories.Policy.RepositoryOperationPolicy.IsAllowed(
+            GrayMoon.Application.Repositories.Policy.RepositoryOperation.Discard,
+            subject,
+            GrayMoon.Application.Repositories.Policy.RepositoryOperationScope.Bulk));
+    }
+
+    [Fact]
     public void Commit_All_includes_a_repository_that_became_dirty_after_the_click_and_names_it()
     {
         var atClick = new[] { Repo(1, changed: 2) };

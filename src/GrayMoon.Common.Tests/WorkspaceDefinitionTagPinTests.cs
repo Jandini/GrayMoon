@@ -10,7 +10,7 @@ public sealed class WorkspaceDefinitionTagPinTests
     [Fact]
     public void Absent_definition_has_no_pin()
     {
-        var (commit, error) = new WorkspaceManifestFile().ReadTagPinCommit(null, "https://github.com/acme/Api.git");
+        var (commit, _, error) = new WorkspaceManifestFile().ReadPinnedRevision(null, "https://github.com/acme/Api.git");
 
         Assert.Null(commit);
         Assert.Null(error);
@@ -23,7 +23,7 @@ public sealed class WorkspaceDefinitionTagPinTests
             { "repositories": [ { "name": "Api", "repositoryUrl": "https://github.com/acme/Api.git" } ] }
             """;
 
-        var (commit, error) = new WorkspaceManifestFile().ReadTagPinCommit(json, "https://github.com/acme/Api.git");
+        var (commit, _, error) = new WorkspaceManifestFile().ReadPinnedRevision(json, "https://github.com/acme/Api.git");
 
         Assert.Null(commit);
         Assert.Null(error);
@@ -36,7 +36,7 @@ public sealed class WorkspaceDefinitionTagPinTests
             { "repositories": [ { "name": "Api", "repositoryUrl": "https://github.com/acme/Api.git", "tag": "v1.0.0", "commit": "{{Sha.ToUpperInvariant()}}" } ] }
             """;
 
-        var (commit, error) = new WorkspaceManifestFile().ReadTagPinCommit(json, "https://github.com/acme/Api");
+        var (commit, _, error) = new WorkspaceManifestFile().ReadPinnedRevision(json, "https://github.com/acme/Api");
 
         Assert.Null(error);
         Assert.Equal(Sha, commit);
@@ -45,7 +45,7 @@ public sealed class WorkspaceDefinitionTagPinTests
     [Fact]
     public void Invalid_json_is_an_error()
     {
-        var (commit, error) = new WorkspaceManifestFile().ReadTagPinCommit("{", "https://github.com/acme/Api.git");
+        var (commit, _, error) = new WorkspaceManifestFile().ReadPinnedRevision("{", "https://github.com/acme/Api.git");
 
         Assert.Null(commit);
         Assert.Contains("not valid JSON", error);
@@ -58,7 +58,7 @@ public sealed class WorkspaceDefinitionTagPinTests
             { "repositories": [ { "name": "Api", "repositoryUrl": "https://github.com/acme/Api.git", "tag": "v1.0.0" } ] }
             """;
 
-        var (commit, error) = new WorkspaceManifestFile().ReadTagPinCommit(json, "https://github.com/acme/Api.git");
+        var (commit, _, error) = new WorkspaceManifestFile().ReadPinnedRevision(json, "https://github.com/acme/Api.git");
 
         Assert.Null(commit);
         Assert.Equal("Repository 'Api' is on a tag but is missing the tag name or the full commit hash.", error);
@@ -71,7 +71,7 @@ public sealed class WorkspaceDefinitionTagPinTests
             { "repositories": [ { "name": "Api", "repositoryUrl": "https://github.com/acme/Api.git", "tag": "v1.0.0", "commit": "abc" } ] }
             """;
 
-        var (commit, error) = new WorkspaceManifestFile().ReadTagPinCommit(json, "https://github.com/acme/Api.git");
+        var (commit, _, error) = new WorkspaceManifestFile().ReadPinnedRevision(json, "https://github.com/acme/Api.git");
 
         Assert.Null(commit);
         Assert.Equal("Repository 'Api' commit must be the full commit hash.", error);

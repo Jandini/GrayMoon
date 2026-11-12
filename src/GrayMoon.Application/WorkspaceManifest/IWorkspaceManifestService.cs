@@ -17,6 +17,13 @@ public interface IWorkspaceManifestService
     /// Does not create a git commit. Does nothing when the Workspace has no Workspace repository.
     /// </summary>
     Task<OperationResult> SetRepositoryTagPinsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryTagPinChange> changes, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the branch and commit of read-only repositories on existing entries in <c>graymoon.json</c> and writes
+    /// the file when it changed. Does not create a git commit. Does nothing when the Workspace has no Workspace
+    /// repository. Returns a failed result instead of throwing; an entry that is not read-only in the file is a failure.
+    /// </summary>
+    Task<OperationResult> SetRepositoryReferenceRevisionsAsync(int workspaceId, IReadOnlyList<WorkspaceRepositoryReferenceRevisionChange> changes, CancellationToken cancellationToken = default);
     /// <summary>
     /// Replaces <c>versionFiles</c> in <c>graymoon.json</c> with the version configurations in the database and writes
     /// the file when it changed. Nothing else in the file changes. Does not create a git commit. Does nothing when the

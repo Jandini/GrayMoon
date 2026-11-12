@@ -183,6 +183,10 @@
                 </div>
                 <div class="modal-footer">
                     <div class="d-flex gap-2 align-items-center me-auto">
+                        @if (HasReferenceRepos)
+                        {
+                            <span class="text-muted small text-nowrap">Read only repositories are not affected</span>
+                        }
                         @if (HasTaggedRepos)
                         {
                             <div class="form-check mb-0">
@@ -232,6 +236,8 @@
     /// <summary>Local branch name when every repo in the workspace reports the same current branch; used for Current badge and disabling redundant checkout.</summary>
     [Parameter] public string? WorkspaceUnifiedCurrentBranch { get; set; }
     [Parameter] public bool HasTaggedRepos { get; set; }
+    /// <summary>True when the Workspace has a read-only repository; the dialog then says they are left out.</summary>
+    [Parameter] public bool HasReferenceRepos { get; set; }
     /// <summary>True while a page job (e.g. Fetch) is running. Drops the dialog below the page LoadingOverlay.</summary>
     [Parameter] public bool IsBusy { get; set; }
     [Parameter] public string? InitialTab { get; set; }

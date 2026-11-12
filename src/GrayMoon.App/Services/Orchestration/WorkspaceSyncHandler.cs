@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using GrayMoon.App.Models;
@@ -258,6 +260,7 @@ public sealed partial class WorkspaceSyncHandler(
         var workItems = new List<(int RepoId, string BranchName, bool DeleteRemote, bool ClosePr, int? PrNumber)>(ids.Count);
         var repoErrors = new ConcurrentDictionary<int, string>();
         var skippedAlreadyOnDefault = 0;
+        var skippedByPolicy = new List<RepositorySkip>();
 
         var snapshots = await query.GetSnapshotsAsync(workspaceId, ids, contextId, isSpecialWorkspace, cancellationToken);
         foreach (var repoId in ids)
@@ -270,9 +273,14 @@ public sealed partial class WorkspaceSyncHandler(
                 continue;
             }
 
-            // Tag-pinned / tag-checked-out repositories are never part of Return to Default - leave them untouched.
-            if (!string.IsNullOrWhiteSpace(dto.CheckedOutTag))
+            // Tag checkouts and read-only repositories are never part of a bulk Return to Default - leave them untouched.
+            var decision = RepositoryOperationPolicy.Evaluate(
+                RepositoryOperation.ReturnToDefault, RepositoryOperationScope.Bulk, dto.ToPolicySubject(isFeatureContext: false));
+            if (!decision.IsAllowed)
+            {
+                skippedByPolicy.Add(new RepositorySkip(repoId, dto.RepositoryName ?? string.Empty, decision.Reason, decision.Message ?? string.Empty));
                 continue;
+            }
 
             var needsSync = !string.IsNullOrWhiteSpace(dto.BranchName)
                 && !string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal);
@@ -339,9 +347,12 @@ public sealed partial class WorkspaceSyncHandler(
         // One workspace-wide recompute after the whole batch (avoids N concurrent recompute races).
         await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
-        return repoErrors.Count == 0
+        return (repoErrors.Count == 0
             ? OperationResult.Ok()
-            : OperationResult.Fail("Return to default failed for one or more repositories.", repoErrors);
+            : OperationResult.Fail("Return to default failed for one or more repositories.", repoErrors)) with
+        {
+            Skipped = skippedByPolicy,
+        };
     }
 
     /// <summary>
@@ -457,7 +468,10 @@ public sealed partial class WorkspaceSyncHandler(
 
     internal static ReturnToDefaultRepositoryPlan ClassifyRepository(WorkspaceRepositoryLinkListItemDto dto)
     {
-        var isOnTag = !string.IsNullOrWhiteSpace(dto.CheckedOutTag);
+        // The plan's IsOnTag is the policy's answer: the repository is left out of Return to Default.
+        var decision = RepositoryOperationPolicy.Evaluate(
+            RepositoryOperation.ReturnToDefault, RepositoryOperationScope.Bulk, dto.ToPolicySubject(isFeatureContext: false));
+        var isOnTag = !decision.IsAllowed;
         var isAlreadyOnDefault = !isOnTag
             && (string.IsNullOrWhiteSpace(dto.BranchName)
                 || string.Equals(dto.BranchName, dto.DefaultBranchName, StringComparison.Ordinal));
@@ -506,7 +520,8 @@ public sealed partial class WorkspaceSyncHandler(
                 CanDiscardLocalBranchSafely: false,
                 RemoteBranchCanBeDeleted: false,
                 RequiresExplicitDiscardConfirmation: false,
-                BlockingReason: null);
+                BlockingReason: null,
+                IsReference: decision.Reason == RepositoryOperationReason.Reference);
         }
 
         var requiresExplicitDiscard = ahead > 0 && !prMergedOrClosed;

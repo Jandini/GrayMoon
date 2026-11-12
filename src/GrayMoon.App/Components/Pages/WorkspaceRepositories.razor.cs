@@ -112,7 +112,10 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     {
         if (!_isFeatureContext || _selectedFeatureName is null || _switchBranchModal.RepositoryId <= 0)
             return null;
-        return FeatureBranchPolicy.ExpectedBranch(_selectedFeatureName, GetSwitchBranchModalPinnedTag());
+        return FeatureBranchPolicy.ExpectedBranch(
+            _selectedFeatureName,
+            GetSwitchBranchModalPinnedTag(),
+            TryGetLink(_switchBranchModal.RepositoryId)?.IsReferenceSnapshot ?? false);
     }
 
     /// <summary>The tag the Switch Branch dialog's repository is pinned to in the viewed Feature; null in the Workspace or when it is on its Feature branch (I3).</summary>
@@ -131,7 +134,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
                 _selectedFeatureName,
                 link.FeaturePinnedTag,
                 link.BranchName,
-                hasRecordedState: !string.IsNullOrEmpty(link.HeadCommit));
+                hasRecordedState: !string.IsNullOrEmpty(link.HeadCommit),
+                isReferenceSnapshot: link.IsReferenceSnapshot);
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
     {
@@ -477,6 +481,12 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         {
             await AttachVirtualScrollAsync();
         }
+
+        if (!_disposed)
+            await LoadManifestDriftDetailsOnceAsync();
+
+        if (!_disposed)
+            await VerifyArchivedOnceAsync();
     }
     public void Dispose()
     {

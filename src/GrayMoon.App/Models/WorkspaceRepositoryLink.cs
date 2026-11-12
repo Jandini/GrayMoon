@@ -24,6 +24,13 @@ public class WorkspaceRepositoryLink
     /// <summary>Source (default) or Workspace. At most one Workspace-role link per Workspace (filtered unique index).</summary>
     public WorkspaceRepositoryRole Role { get; set; } = WorkspaceRepositoryRole.Source;
 
+    /// <summary>
+    /// True when this Source is a reference (read-only) repository: GrayMoon keeps it up to date and never changes
+    /// it. Shared by every context of the Workspace. Never true for the Workspace-role link. Do not read it for an
+    /// eligibility decision; ask <c>RepositoryOperationPolicy</c>.
+    /// </summary>
+    public bool IsReference { get; set; }
+
     [MaxLength(100)]
     public string? GitVersion { get; set; }
 
@@ -137,6 +144,14 @@ public class WorkspaceRepositoryLink
     [NotMapped]
     public string? FeaturePinnedTag { get; set; }
 
+    /// <summary>True when the viewed Feature holds this repository as a detached reference snapshot. Not a link column.</summary>
+    [NotMapped]
+    public bool IsReferenceSnapshot { get; set; }
+
+    /// <summary>Branch the Source was on when the reference snapshot of the viewed Feature was taken. Not a link column.</summary>
+    [NotMapped]
+    public string? FeatureSourceBranchName { get; set; }
+
     /// <summary>Persisted Git Changes file rows for this workspace-repo link. Navigation only.</summary>
     public ICollection<WorkspaceGitChangeEntry> GitChangeEntries { get; set; } = new List<WorkspaceGitChangeEntry>();
 
@@ -154,6 +169,7 @@ public class WorkspaceRepositoryLink
         RepositoryId = RepositoryId,
         Repository = Repository,
         Role = Role,
+        IsReference = IsReference,
         GitVersion = GitVersion,
         BranchName = branchName,
         CheckedOutTag = CheckedOutTag,
@@ -183,6 +199,8 @@ public class WorkspaceRepositoryLink
         FeatureBaseCommitSha = FeatureBaseCommitSha,
         ParentBranchName = ParentBranchName,
         FeaturePinnedTag = FeaturePinnedTag,
+        IsReferenceSnapshot = IsReferenceSnapshot,
+        FeatureSourceBranchName = FeatureSourceBranchName,
         GitChangeEntries = GitChangeEntries,
     };
 }

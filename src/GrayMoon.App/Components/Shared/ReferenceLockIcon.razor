@@ -1,0 +1,31 @@
+@* The padlock of a read only repository. Drawn here: the Bootstrap Icons padlock is narrow (10 of 16 units wide);
+   this one has a body 12 units wide. Open = the shackle is open (the "Unlock" action). *@
+<span class="reference-lock-icon flex-shrink-0 @AdditionalClass"
+      style="display:inline-flex;align-items:center;align-self:center;line-height:1;"
+      title="@Title"
+      role="@(Title is null ? null : "img")"
+      aria-label="@(Title is null ? null : "Read only")"
+      aria-hidden="@(Title is null ? "true" : null)">
+    <svg viewBox="0 0 16 16" width="1em" height="1em" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        @if (Open)
+        {
+            <path d="M5 7.5V4.6a3 3 0 0 1 5.7-1.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        }
+        else
+        {
+            <path d="M5 7.5V4.6a3 3 0 0 1 6 0v2.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        }
+        @* Body with a keyhole cut out (even-odd), so it shows whatever is behind the icon. *@
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor"
+              d="M3.6 7h8.8A1.6 1.6 0 0 1 14 8.6v4.8a1.6 1.6 0 0 1-1.6 1.6H3.6A1.6 1.6 0 0 1 2 13.4V8.6A1.6 1.6 0 0 1 3.6 7ZM8 9.4a1.15 1.15 0 0 0-.55 2.16v1.04a.55.55 0 0 0 1.1 0v-1.04A1.15 1.15 0 0 0 8 9.4Z" />
+    </svg>
+</span>
+
+@code {
+    /// <summary>Tooltip. Without it the icon is decoration beside a text that says the same.</summary>
+    [Parameter] public string? Title { get; set; }
+
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public string? AdditionalClass { get; set; }
+}

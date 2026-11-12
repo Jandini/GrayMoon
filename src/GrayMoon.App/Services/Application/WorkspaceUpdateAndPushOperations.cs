@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application;
@@ -81,7 +83,7 @@ public sealed class WorkspaceUpdateAndPushOperations(
     }
 
     private static bool IsOnDefaultBranchInScope(WorkspaceRepositoryLinkListItemDto l, int? maxLevel)
-        => string.IsNullOrWhiteSpace(l.CheckedOutTag)
+        => l.Allows(RepositoryOperation.UpdateDependencies)
             && (maxLevel is null || (l.DependencyLevel ?? 0) <= maxLevel)
             && !string.IsNullOrWhiteSpace(l.DefaultBranchName)
             && string.Equals(l.BranchName, l.DefaultBranchName, StringComparison.Ordinal);

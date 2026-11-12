@@ -172,8 +172,16 @@ A repository checked out on a tag (Workspace tag pin in `graymoon.json`, or any
 Dependencies, Return to Default, Prepare Workspace branch work, bulk Merge PRs...
 return-to-default follow-ups, or any similar mutating multi-repo operation.
 
-1. **Filter at the call site** - build candidate id sets with `!wr.IsOnTag` (or
-   equivalent). UI tips such as "Repositories checked out on a tag will not be
+1. **Ask the policy, do not read the tag** - whether an operation may run on a
+   repository is decided by `RepositoryOperationPolicy`
+   (`GrayMoon.Application/Repositories/Policy`). Code that holds rows uses the
+   `Allows(operation)` extensions; a service that loads its own rows uses
+   `IWorkspaceRepositoryOperationPolicy` (`PartitionAsync` for a set,
+   `EvaluateAsync` for one repository); a database query uses
+   `RepositoryOperationPolicyExpressions`. Do not write `!wr.IsOnTag` or compare
+   `CheckedOutTag` for an eligibility decision: `RepositoryPolicyConventionTests`
+   fails. A new operation gets a value in `RepositoryOperation` and a row in the
+   rule table. UI tips such as "Repositories checked out on a tag will not be
    affected" match this rule.
 2. **Service paths leave tags untouched** - if a tag id still reaches an
    operation, skip it (do not mutate, do not fail the batch for that reason).
@@ -185,6 +193,44 @@ return-to-default follow-ups, or any similar mutating multi-repo operation.
 See `docs/architecture/06-developer-extension-guide.md` section 11 and
 `docs/architecture/05-user-capability-reference.md` (tagged repositories /
 Return to Default).
+
+## Read only repositories are never written by GrayMoon
+
+A Source repository can be read only in a Workspace (`WorkspaceRepositoryLink.IsReference`;
+in a Feature a snapshot, `WorkspaceFeatureRepository.IsReferenceSnapshot`). GrayMoon
+fetches, pulls (fast-forward only) and syncs it and reads its projects, and never
+commits, pushes or updates it. The Workspace repository is never read only. User-facing
+text says "read only" (no hyphen); identifiers say `Reference`, never `ReadOnly`.
+
+1. **Same policy as tags** - ask `RepositoryOperationPolicy`; do not read
+   `IsReference` or `IsReferenceSnapshot` for an eligibility decision. The rule
+   table has a column for each state; a new operation needs all of them, plus
+   `AllowedWhenArchived` when the provider would reject it for an archived
+   repository (today only Push).
+2. **Skip in bulk, refuse for one** - an action on several repositories leaves
+   a read only repository out and returns it in `Skipped` with the reason
+   (`RepositorySkipSummary` builds the one sentence the user sees). An action on
+   one named repository is refused with the policy message. A skip is never a
+   failure and never silent.
+3. **Enforce in the service** - a check in a page or dialog alone does not
+   protect REST and background callers.
+4. **Mode changes go through `IWorkspaceReferenceOperations`** - never set
+   `IsReference` or `Workspace.ReferenceDefault` directly. The facade takes the
+   structural Workspace lock, runs the activation check (unpushed commits in the
+   Workspace checkout or a Feature worktree refuse the change), writes the
+   database, then `graymoon.json`, then the recorded branch and commit.
+5. **Recording never fails the cause** - the branch and commit of a read only
+   repository are recorded in `graymoon.json` after a mode change, a pull or a
+   manual switch in the special context
+   (`SetRepositoryReferenceRevisionsAsync`). A failed write is reported and the
+   pull or switch still succeeds. Nothing is recorded from a Feature.
+6. **Features** - a snapshot has no Feature branch; every checkout in it is
+   refused by the Feature guard. Do not convert existing Feature rows when a
+   Source becomes read only later.
+
+See `docs/architecture/05-user-capability-reference.md` (the operation table)
+and `docs/architecture/06-developer-extension-guide.md` section 11 (checklist
+for a new operation).
 
 ## Rules from the 2026-11-10 code review
 

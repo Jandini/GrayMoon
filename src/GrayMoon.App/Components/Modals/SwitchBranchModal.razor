@@ -5,6 +5,8 @@
 @using GrayMoon.Application.Features
 @inject IWorkspaceBranchOperations BranchOperations
 @inject IWorkspaceBranchOccupancyService OccupancyService
+@inject GrayMoon.Application.Workspaces.IWorkspaceReferenceOperations ReferenceOperations
+@inject GrayMoon.App.Services.Jobs.IWorkspaceOperationRunner OperationRunner
 @inject GrayMoon.Application.Features.IWorkspaceExternalWorktreeOperations ExternalWorktreeOperations
 @inject IJSRuntime JSRuntime
 @inject ILogger<SwitchBranchModal> Logger
@@ -23,7 +25,11 @@
                         <span class="modal-title__primary">Branch</span>
                         @if (!string.IsNullOrEmpty(RepositoryName))
                         {
-                            <span class="modal-title__secondary text-muted fw-normal fs-6" title="@RepositoryName">@RepositoryName</span>
+                            <span class="modal-title__secondary text-muted fw-normal fs-6" style="flex: 0 1 auto;" title="@RepositoryName">@RepositoryName</span>
+                            @if (_reference)
+                            {
+                                <ReferenceLockIcon AdditionalClass="text-muted fs-6" Title="@(IsFeatureContext ? RepositoryBadgeTitles.ReferenceSnapshot : RepositoryBadgeTitles.Reference)" />
+                            }
                         }
                     </h5>
                     <button type="button" class="btn-close" @onclick="OnCancel" disabled="@isRefreshing"></button>
@@ -35,6 +41,12 @@
                     }
                     else
                     {
+                        @if (IsReference && UncommittedChangedFileCount > 0)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                This read only repository has uncommitted changes. A switch keeps them, and fails when they conflict with the target.
+                            </div>
+                        }
                         @if (IsFeatureContext && FeatureBranchPolicy.IsOffFeatureBranch(FeatureBranchName, CurrentBranch))
                         {
                             <div class="gm-callout gm-callout--warning d-flex align-items-center justify-content-between gap-2 mb-3" role="alert">
@@ -521,6 +533,38 @@
                         }
 
                     }
+                    @if (ShowReferenceToggle && GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.SuggestForArchived(IsArchived, _reference))
+                    {
+                        <div class="gm-callout gm-callout--warning mt-3" role="status">
+                            @GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.ArchivedSingle Use "@ReferenceButtonText(false)" below.
+                        </div>
+                    }
+                    @if (_referenceError is not null)
+                    {
+                        <div class="gm-callout gm-callout--error mt-3" role="alert">
+                            <div>@_referenceError</div>
+                            @if (_referenceBlocks.Count > 0)
+                            {
+                                <ul class="mb-0 mt-1 ps-3">
+                                    @foreach (var block in _referenceBlocks)
+                                    {
+                                        <li>@block.Message</li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                    @if (_referenceWarnings.Count > 0)
+                    {
+                        <div class="gm-callout gm-callout--warning mt-3" role="alert">
+                            <ul class="mb-0 ps-3">
+                                @foreach (var warning in _referenceWarnings)
+                                {
+                                    <li>@warning</li>
+                                }
+                            </ul>
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer d-flex justify-content-between flex-row">
                     <div class="d-flex gap-2 align-items-center">
@@ -554,6 +598,26 @@
                                     Return to @defaultBranch
                                 </button>
                             }
+                        }
+                        @if (ShowReferenceToggle)
+                        {
+                            @* Same look as Fetch. The text names the change the click makes, so it shows the stored state. *@
+                            <button type="button"
+                                    class="btn btn-outline-secondary text-nowrap flex-shrink-0"
+                                    id="switch-branch-reference"
+                                    disabled="@ReferenceToggleDisabled"
+                                    title="@(ReferenceToggleBusy ? "An operation is running for this Workspace." : "GrayMoon pulls a read only repository but never commits, pushes or updates it.")"
+                                    @onclick="ToggleReferenceAsync">
+                                @if (_referenceRunning)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                else
+                                {
+                                    <ReferenceLockIcon Open="@_reference" AdditionalClass="me-1" />
+                                }
+                                @ReferenceButtonText(_reference)
+                            </button>
                         }
                     </div>
                     <div class="d-flex gap-2 ms-auto">
@@ -623,6 +687,14 @@
     [Parameter] public string? FeatureBranchName { get; set; }
     /// <summary>The tag this repository is pinned to in the viewed Feature; null in the Workspace and for a repository on its Feature branch (I3).</summary>
     [Parameter] public string? PinnedTag { get; set; }
+    /// <summary>True for a read-only repository of the Workspace.</summary>
+    [Parameter] public bool IsReference { get; set; }
+    /// <summary>True when the provider reported the repository as archived at the last fetch of repositories.</summary>
+    [Parameter] public bool IsArchived { get; set; }
+    /// <summary>True for the Workspace repository itself: it is never read-only, so the control is hidden.</summary>
+    [Parameter] public bool IsWorkspaceRepository { get; set; }
+    /// <summary>Uncommitted files in the repository, as the grid row knows them.</summary>
+    [Parameter] public int UncommittedChangedFileCount { get; set; }
     [Parameter] public string? RepositoryName { get; set; }
     [Parameter] public string? CurrentBranch { get; set; }
     [Parameter] public string? RepositoryUrl { get; set; }
@@ -704,8 +776,80 @@
     private ElementReference worktreeCleanupConfirmElementRef;
     private bool _scrollToWorktreeCleanupConfirm;
 
+    // Per-repository read-only control. The flag belongs to the Workspace link, so it is not offered in a Feature.
+    private bool _reference;
+    private bool _referenceParameter;
+    private bool _referenceRunning;
+    private string? _referenceError;
+    private IReadOnlyList<GrayMoon.Application.Workspaces.WorkspaceReferenceFinding> _referenceBlocks = [];
+    private IReadOnlyList<string> _referenceWarnings = [];
+
+    private bool ShowReferenceToggle =>
+        ShouldShowReferenceToggle(IsFeatureContext, IsWorkspaceRepository, RepositoryId)
+        && !(activeTab == "newbranch" && showBranchExistsConfirmation);
+
+    /// <summary>Only a Source repository, and only in the Workspace view.</summary>
+    internal static bool ShouldShowReferenceToggle(bool isFeatureContext, bool isWorkspaceRepository, int repositoryId) =>
+        !isFeatureContext && !isWorkspaceRepository && repositoryId > 0;
+
+    private bool ReferenceToggleBusy => IsBusy || OperationRunner.IsBusy(WorkspaceId);
+
+    private bool ReferenceToggleDisabled => _referenceRunning || isRefreshing || isProcessing || isCreating || ReferenceToggleBusy;
+
+    /// <summary>The button text: the change a click makes.</summary>
+    internal static string ReferenceButtonText(bool isReference) => isReference ? "Unlock" : "Lock";
+
+    private async Task ToggleReferenceAsync()
+    {
+        if (_referenceRunning)
+            return;
+
+        var value = !_reference;
+        _referenceRunning = true;
+        _referenceError = null;
+        _referenceBlocks = [];
+        _referenceWarnings = [];
+        try
+        {
+            var result = await ReferenceOperations.SetRepositoryAsync(WorkspaceId, RepositoryId, value);
+            _referenceWarnings = result.Warnings;
+            if (result.Success)
+            {
+                _reference = value;
+            }
+            else
+            {
+                _referenceError = result.Error ?? "The change failed.";
+                _referenceBlocks = result.Blocks;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Changing the read only state failed for repository {RepositoryId} in workspace {WorkspaceId}", RepositoryId, WorkspaceId);
+            _referenceError = ex.Message;
+        }
+        finally
+        {
+            _referenceRunning = false;
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
+        if (IsVisible && !_prevVisible)
+        {
+            _referenceError = null;
+            _referenceBlocks = [];
+            _referenceWarnings = [];
+        }
+
+        // The stored value wins whenever the page hands over a new one (the change is broadcast and the row reloads).
+        if (!_prevVisible || _referenceParameter != IsReference)
+        {
+            _reference = IsReference;
+            _referenceParameter = IsReference;
+        }
+
         var busyJustEnded = _wasBusy && !IsBusy;
         _wasBusy = IsBusy;
 

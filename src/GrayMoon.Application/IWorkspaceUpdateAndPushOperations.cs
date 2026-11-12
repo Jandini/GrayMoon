@@ -127,4 +127,8 @@ public sealed record UpdateAndPushExecutionResult(
     public bool Success => Status is UpdateAndPushStatus.Completed or UpdateAndPushStatus.NothingToPush;
 
     public bool NeedsApproval => Status == UpdateAndPushStatus.ApprovalRequired;
+
+    /// <summary>Repositories the policy left out of the update or the push, each named once.</summary>
+    public IReadOnlyList<Repositories.Policy.RepositorySkip> Skipped =>
+        [.. (Update?.Skipped ?? []).Concat(Push?.Skipped ?? []).DistinctBy(skip => skip.RepositoryId)];
 }

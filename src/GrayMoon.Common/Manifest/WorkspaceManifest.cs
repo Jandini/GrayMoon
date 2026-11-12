@@ -53,8 +53,11 @@ public sealed record WorkspaceManifestAiProvider(
     string Provider,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Model = null);
 
-/// <summary>Reads a JSON boolean, or the strings <c>"true"</c> / <c>"false"</c>, so a hand-edited value still works.</summary>
-public sealed class LenientBooleanJsonConverter : JsonConverter<bool?>
+/// <summary>
+/// Reads a JSON boolean, or the strings <c>"true"</c> / <c>"false"</c>, so a hand-edited value still works. Anything
+/// else is an error that names the property; no other value is read as true or false.
+/// </summary>
+public abstract class LenientBooleanJsonConverterBase(string propertyName) : JsonConverter<bool?>
 {
     public override bool HandleNull => true;
 
@@ -65,7 +68,7 @@ public sealed class LenientBooleanJsonConverter : JsonConverter<bool?>
             JsonTokenType.False => false,
             JsonTokenType.Null => null,
             JsonTokenType.String when bool.TryParse(reader.GetString()?.Trim(), out var value) => value,
-            _ => throw new JsonException("codegraph must be true or false."),
+            _ => throw new JsonException($"{propertyName} must be true or false."),
         };
 
     public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
@@ -77,22 +80,50 @@ public sealed class LenientBooleanJsonConverter : JsonConverter<bool?>
     }
 }
 
+/// <summary>The lenient boolean of <c>codegraph</c>.</summary>
+public sealed class LenientBooleanJsonConverter() : LenientBooleanJsonConverterBase("codegraph");
+
+/// <summary>The lenient boolean of <c>reference</c>, on the workspace object and on a repository entry.</summary>
+public sealed class ReferenceBooleanJsonConverter() : LenientBooleanJsonConverterBase("reference");
+
 /// <summary>
 /// The <c>workspace</c> object. The Workspace name is the folder on this computer and is not stored here.
 /// A leftover <c>name</c> in an older file is ignored and left out the next time the file is written.
-/// </summary>
-public sealed record WorkspaceManifestWorkspace(WorkspaceManifestProfile Profile);
+/// <param name="Reference">
+/// <c>reference</c>: whether a Source repository added later starts read-only. It says nothing about the repositories
+/// already listed; each of those has its own <c>reference</c>. Null (absent) means false. Written only in a version-2
+/// file (see <see cref="WorkspaceManifestFile.Serialize"/>).
+/// </param>
+public sealed record WorkspaceManifestWorkspace(
+    WorkspaceManifestProfile Profile,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [property: JsonConverter(typeof(ReferenceBooleanJsonConverter))]
+    bool? Reference = null);
 
 public sealed record WorkspaceManifestProfile(string Type, string Versioning, string Ci);
 
 public sealed record WorkspaceManifestConnector(string Type, string Url);
 
+/// <summary>
+/// One repository entry. <c>reference</c> is the read-only state of this Source repository; <c>tag</c> + <c>commit</c>
+/// is a tag pin; <c>branch</c> + <c>commit</c> is the recorded revision of a read-only repository on a branch
+/// (<see cref="GrayMoon.Common.Git.WorkspaceDefinitionRevisionPin"/>). The file lists them in the order name,
+/// repositoryUrl, connectorUrl, reference, tag, branch, commit.
+/// </summary>
 public sealed record WorkspaceManifestRepository(
     string Name,
     string RepositoryUrl,
     string ConnectorUrl,
+    [property: JsonPropertyOrder(2)]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tag = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Commit = null);
+    [property: JsonPropertyOrder(4)]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Commit = null,
+    [property: JsonPropertyOrder(1)]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [property: JsonConverter(typeof(ReferenceBooleanJsonConverter))]
+    bool? Reference = null,
+    [property: JsonPropertyOrder(3)]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Branch = null);
 
 /// <summary>
 /// One configured version file. <c>repository</c> is the repository folder name (a Source repository or the Workspace

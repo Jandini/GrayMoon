@@ -1,3 +1,5 @@
+using GrayMoon.App.Services.Policy;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Services.Queries;
 
 namespace GrayMoon.App.Components.Shared;
@@ -122,39 +124,37 @@ internal static class NotificationPanelRepoSets
 {
     public sealed record DefaultBranchRepo(string RepositoryName, string DefaultBranchName);
 
-    private static bool IsOnTag(WorkspaceRepositoryLinkListItemDto link) => !string.IsNullOrWhiteSpace(link.CheckedOutTag);
-
     private static bool IsOnDefaultBranch(WorkspaceRepositoryLinkListItemDto link) =>
         !string.IsNullOrWhiteSpace(link.DefaultBranchName)
         && string.Equals(link.BranchName, link.DefaultBranchName, StringComparison.Ordinal);
 
     /// <summary>Repositories Update will commit to: not on a tag, with a dependency or version-file update pending.</summary>
     public static HashSet<int> NeedingUpdate(IEnumerable<WorkspaceRepositoryLinkListItemDto> links) =>
-        links.Where(l => !IsOnTag(l) && ((l.UnmatchedDeps ?? 0) > 0 || (l.OutOfDateFileRepos ?? 0) > 0))
+        links.Where(l => l.Allows(RepositoryOperation.UpdateDependencies) && ((l.UnmatchedDeps ?? 0) > 0 || (l.OutOfDateFileRepos ?? 0) > 0))
             .Select(l => l.RepositoryId)
             .ToHashSet();
 
     /// <summary>Repositories Pull will touch: not on a tag, with incoming commits.</summary>
     public static List<int> WithIncoming(IEnumerable<WorkspaceRepositoryLinkListItemDto> links) =>
-        links.Where(l => !IsOnTag(l) && (l.IncomingCommits ?? 0) > 0)
+        links.Where(l => l.Allows(RepositoryOperation.Pull) && (l.IncomingCommits ?? 0) > 0)
             .Select(l => l.RepositoryId)
             .ToList();
 
     /// <summary>Repositories whose Update commit would land on the default branch.</summary>
     public static List<DefaultBranchRepo> UpdateOnDefaultBranch(IEnumerable<WorkspaceRepositoryLinkListItemDto> links) =>
-        links.Where(l => !IsOnTag(l) && (l.UnmatchedDeps ?? 0) > 0 && IsOnDefaultBranch(l))
+        links.Where(l => l.Allows(RepositoryOperation.UpdateDependencies) && (l.UnmatchedDeps ?? 0) > 0 && IsOnDefaultBranch(l))
             .Select(l => new DefaultBranchRepo(l.RepositoryName, l.DefaultBranchName!))
             .ToList();
 
     /// <summary>Repositories whose Push would go to the default branch.</summary>
     public static List<DefaultBranchRepo> PushOnDefaultBranch(IEnumerable<WorkspaceRepositoryLinkListItemDto> links) =>
-        links.Where(l => !IsOnTag(l) && (l.OutgoingCommits ?? 0) > 0 && IsOnDefaultBranch(l))
+        links.Where(l => l.Allows(RepositoryOperation.Push) && (l.OutgoingCommits ?? 0) > 0 && IsOnDefaultBranch(l))
             .Select(l => new DefaultBranchRepo(l.RepositoryName, l.DefaultBranchName!))
             .ToList();
 
     /// <summary>Repositories Undo Push Commits would rewind, with the number of commits each loses.</summary>
     public static List<(string RepoName, int OutgoingCommits)> WithOutgoing(IEnumerable<WorkspaceRepositoryLinkListItemDto> links) =>
-        links.Where(l => !IsOnTag(l) && (l.OutgoingCommits ?? 0) > 0)
+        links.Where(l => l.Allows(RepositoryOperation.UndoPush) && (l.OutgoingCommits ?? 0) > 0)
             .Select(l => (l.RepositoryName, l.OutgoingCommits ?? 0))
             .ToList();
 }

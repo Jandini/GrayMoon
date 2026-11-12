@@ -56,6 +56,12 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     string? ParentBranchName = null,
     /// <summary>Tag the Feature repository is pinned to when viewing a Feature; null for Workspace or an unpinned repository.</summary>
     string? FeaturePinnedTag = null,
+    /// <summary>True when the Source is a reference (read-only) repository; the same in every context.</summary>
+    bool IsReference = false,
+    /// <summary>True when the viewed Feature holds the repository as a detached reference snapshot.</summary>
+    bool IsReferenceSnapshot = false,
+    /// <summary>Branch the Source was on when the reference snapshot was taken; null for the Workspace, a tag or a branch row.</summary>
+    string? FeatureSourceBranchName = null,
     /// <summary>Role of the repository in this Workspace (shared across contexts); the Workspace-role row sorts first and is never in a level group.</summary>
     WorkspaceRepositoryRole Role = WorkspaceRepositoryRole.Source,
     /// <summary>True while a Feature seed has not yet had its own GitVersion computed; the Version cell stays empty until it arrives.</summary>

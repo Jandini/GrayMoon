@@ -91,6 +91,11 @@
                         </div>
                     </div>
 
+                    @if (HasReferenceRepos)
+                    {
+                        <div class="form-text mt-0 mb-3">Read only repositories are not affected</div>
+                    }
+
                     @if (HasTaggedRepos)
                     {
                         <div class="form-check mb-3">
@@ -141,6 +146,8 @@
     [Parameter] public IReadOnlyList<string> CommonBranchNames { get; set; } = Array.Empty<string>();
     [Parameter] public string DefaultDisplayText { get; set; } = "multiple";
     [Parameter] public bool HasTaggedRepos { get; set; }
+    /// <summary>True when the Workspace has a read-only repository; the dialog then says they are left out.</summary>
+    [Parameter] public bool HasReferenceRepos { get; set; }
     [Parameter] public EventCallback<PrepareWorkspaceRequest> OnCreate { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 

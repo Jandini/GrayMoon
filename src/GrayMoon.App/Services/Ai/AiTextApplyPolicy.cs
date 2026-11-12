@@ -40,7 +40,7 @@ public static class AiTextApplyPolicy
         mode + "\n" + string.Join(
             "\n",
             repositories
-                .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount))
+                .Where(r => WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r))
                 .OrderBy(r => r.RepositoryId)
                 .Select(r => string.Join(
                     '\t',

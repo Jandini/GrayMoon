@@ -868,6 +868,12 @@ internal sealed class RecordingManifestService(IWorkspaceManifestService? inner 
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
+    public Task<GrayMoon.Application.OperationResult> SetRepositoryReferenceRevisionsAsync(
+        int workspaceId,
+        IReadOnlyList<GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryReferenceRevisionChange> changes,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     public Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 

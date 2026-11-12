@@ -20,7 +20,13 @@ public sealed record RestoreDefinitionPlan(
     int RepositoryCount,
     int ConnectorCount,
     IReadOnlyList<string> MissingConnectors,
-    IReadOnlyList<string> MissingRepositories);
+    IReadOnlyList<string> MissingRepositories,
+    bool ReferenceDefault,
+    IReadOnlyDictionary<int, bool> ReferenceBySourceRepositoryId)
+{
+    /// <summary>Listed Source repositories that are read-only in the definition, found locally or not.</summary>
+    public int ReferenceRepositoryCount { get; init; }
+}
 
 /// <summary>One imported repository, as the evaluator needs it.</summary>
 public sealed record RestoreCatalogEntry(int RepositoryId, string CloneUrl);
@@ -88,8 +94,11 @@ public static class RestoreDefinitionEvaluator
         var workspaceRepositoryKey = RepositoryUrlIdentity.NormalizeRepositoryUrl(workspaceRepositoryCloneUrl);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { workspaceRepositoryKey };
         var resolvedIds = new SortedSet<int>();
+        // Read-only state of each resolved Source: its own reference, else the file's workspace.reference, else false.
+        var referenceByRepositoryId = new Dictionary<int, bool>();
         var missingRepositories = new List<string>();
         var repositoryCount = 0;
+        var referenceRepositoryCount = 0;
         foreach (var repository in manifest.Repositories)
         {
             var key = RepositoryUrlIdentity.NormalizeRepositoryUrl(repository.RepositoryUrl);
@@ -97,8 +106,13 @@ public static class RestoreDefinitionEvaluator
                 continue;
 
             repositoryCount++;
+            if (WorkspaceRepositoryRevisionPins.IsReference(manifest, repository))
+                referenceRepositoryCount++;
             if (catalogByUrl.TryGetValue(key, out var resolvedId))
-                resolvedIds.Add(resolvedId);
+            {
+                if (resolvedIds.Add(resolvedId))
+                    referenceByRepositoryId[resolvedId] = WorkspaceRepositoryRevisionPins.IsReference(manifest, repository);
+            }
             else
                 missingRepositories.Add(RepositoryDisplayName(repository));
         }
@@ -112,7 +126,12 @@ public static class RestoreDefinitionEvaluator
             repositoryCount,
             connectorUrls.Count,
             missingConnectors,
-            missingRepositories.Order(StringComparer.OrdinalIgnoreCase).ToList()), null);
+            missingRepositories.Order(StringComparer.OrdinalIgnoreCase).ToList(),
+            manifest.Workspace.Reference ?? false,
+            referenceByRepositoryId)
+        {
+            ReferenceRepositoryCount = referenceRepositoryCount,
+        }, null);
     }
 
     /// <summary>"owner/name" from the repository URL when it has that shape; otherwise the name, then the URL.</summary>

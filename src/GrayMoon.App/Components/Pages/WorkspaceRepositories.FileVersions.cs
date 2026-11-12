@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 
 namespace GrayMoon.App.Components.Pages;
@@ -59,7 +60,7 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return Task.CompletedTask;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.UpdateVersionFiles))
         {
             ToastService.Show(TagBlockedActionMessage);
             return Task.CompletedTask;
@@ -123,7 +124,7 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.UpdateVersionFiles))
         {
             ToastService.Show(TagBlockedActionMessage);
             return;

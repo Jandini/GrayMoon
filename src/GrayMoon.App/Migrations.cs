@@ -50,6 +50,7 @@ public static partial class Migrations
         (16, "Repair special Workspace context backfill", dbContext => MigrateSpecialWorkspaceContextBackfillRepairAsync(dbContext)),
         (17, "Repository missing-from-provider column", dbContext => MigrateRepositoryMissingFromProviderColumnAsync(dbContext)),
         (18, "Connector removed-at column", dbContext => MigrateConnectorRemovedAtColumnAsync(dbContext)),
+        (19, "Reference repository columns", dbContext => MigrateReferenceRepositoriesAsync(dbContext)),
     };
 
     public static Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null) =>
@@ -79,6 +80,11 @@ public static partial class Migrations
             await SetUserVersionAsync(conn, LegacyBaselineVersion);
         }
 
+        // Older strict steps load Workspaces, links and Feature repositories through EF, and the EF model already has
+        // the reference columns. Add them first; strict step 19 repeats this idempotently and records the version.
+        if (strictPending.Count > 0)
+            await MigrateReferenceRepositoriesAsync(dbContext, logger);
+
         foreach (var step in strictPending)
             await RunStrictStepAsync(dbContext, step.Version, step.Name, step.Action, backupPath, logger);
     }
@@ -96,9 +102,11 @@ public static partial class Migrations
         // so here they get the same catch shape as every other baseline patch.
         await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateWorkspaceRepositoryRoleAsync), () => MigrateWorkspaceRepositoryRoleAsync(dbContext, logger), logger);
         await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateForkSupportAsync), () => MigrateForkSupportAsync(dbContext, logger), logger);
+        await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateReferenceRepositoriesAsync), () => MigrateReferenceRepositoriesAsync(dbContext, logger), logger);
         await MigrateWorkspaceFeatureContextSchemaAsync(dbContext, logger);
         // The Feature context tables exist now; add their fork columns before anything reads them through EF.
         await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateForkSupportAsync), () => MigrateForkSupportAsync(dbContext, logger), logger);
+        await RunTolerantLegacyStepAsync(dbContext, nameof(MigrateReferenceRepositoriesAsync), () => MigrateReferenceRepositoriesAsync(dbContext, logger), logger);
     }
 
     /// <summary>

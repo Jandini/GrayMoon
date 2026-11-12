@@ -96,6 +96,11 @@
                         }
                     </div>
 
+                    @if (WorkspaceId is { } referenceWorkspaceId)
+                    {
+                        <WorkspaceReferenceSection WorkspaceId="@referenceWorkspaceId" />
+                    }
+
                     @if (DirectoryAlreadyExists)
                     {
                         <div class="gm-callout gm-callout--warning" role="alert">@ExistingWorkspaceFolder.Callout(FolderIsWorkspaceRepository, WorkspaceRepositoryImported, ExistingRepositoryCount)</div>
@@ -125,6 +130,8 @@
     private ElementReference firstInputElement;
 
     [Parameter] public bool IsVisible { get; set; }
+    /// <summary>The Workspace being edited; null for a new one. The read-only section needs an existing Workspace.</summary>
+    [Parameter] public int? WorkspaceId { get; set; }
     [Parameter] public string Title { get; set; } = "Add Workspace";
     [Parameter] public string WorkspaceName { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> WorkspaceNameChanged { get; set; }

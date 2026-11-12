@@ -110,6 +110,10 @@ public sealed class WorkspaceBranchOccupancyService(
         // Exception: the Feature currently being viewed can always check out its own branch (I2, 09 SB-1).
         foreach (var row in featureRows)
         {
+            // A reference snapshot has no Feature branch in this repository, so the Feature's name blocks nothing here.
+            if (row.IsReferenceSnapshot)
+                continue;
+
             var name = row.WorkspaceFeatureContext?.WorkspaceFeature?.Name;
             if (string.IsNullOrWhiteSpace(name) || result.ContainsKey(name))
                 continue;

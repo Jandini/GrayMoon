@@ -34,6 +34,7 @@ public partial class AppDbContext
 
     private async Task<(int Saved, int Dropped)> SaveDroppingStoredBranchRowsAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
+        KeepWorkspaceRepositoryWritable();
         var dropped = 0;
         for (var attempt = 1; ; attempt++)
         {

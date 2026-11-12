@@ -120,6 +120,12 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspacePullRequestService>();
         services.AddScoped<RepositoryBranchWriter>();
         services.AddScoped<WorkspaceRepositoryStateWriter>();
+        services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
+        services.AddSingleton<GrayMoon.App.Services.Policy.ReferenceRevisionRecorder>();
+        services.AddScoped<GrayMoon.App.Services.Policy.IRepositoryArchiveProbe, GrayMoon.App.Services.Policy.GitHubRepositoryArchiveProbe>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier>();
+        services.AddScoped<GrayMoon.Application.Workspaces.IWorkspaceReferenceOperations, GrayMoon.App.Services.Application.WorkspaceReferenceOperations>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddScoped<WorkspaceDependencyService>();
         // Per-host singleton: parallel tests seed workspace id 1 in separate DBs and must not share the process

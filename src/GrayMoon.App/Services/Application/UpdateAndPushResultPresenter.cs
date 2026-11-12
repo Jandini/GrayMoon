@@ -1,5 +1,6 @@
 using GrayMoon.App.Services.Orchestration;
 using GrayMoon.Application;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Services.Application;
 
@@ -42,7 +43,12 @@ public static class UpdateAndPushResultPresenter
             // grid shows which repository, not that the run as a whole finished.
             UpdateAndPushStatus.Completed when PushOperationResult.DescribeWarnings(result.Push) is { } warning
                 => new(UpdateAndPushNoticeKind.Warning, warning),
+            // The repositories the run left out (read-only, on a tag) are information: said when nothing went wrong.
+            UpdateAndPushStatus.Completed when RepositorySkipSummary.Describe(result.Skipped) is { } skipped
+                => new(UpdateAndPushNoticeKind.Info, skipped),
             UpdateAndPushStatus.Completed => new(UpdateAndPushNoticeKind.None, ""),
+            UpdateAndPushStatus.NothingToPush when RepositorySkipSummary.Describe(result.Skipped) is { } skipped
+                => new(UpdateAndPushNoticeKind.Info, $"{result.Summary} {skipped}"),
             UpdateAndPushStatus.NothingToPush => new(UpdateAndPushNoticeKind.Info, result.Summary),
             UpdateAndPushStatus.ApprovalRequired when result.PendingApprovalId is { Length: > 0 } id
                 => new(UpdateAndPushNoticeKind.Approval, result.Summary, new ApproveNormalPushContinuation(result.WorkspaceId, result.ContextId, id)),

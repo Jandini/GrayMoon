@@ -14,6 +14,12 @@ public sealed record WorkspaceGitChangesRepositoryView
     public required int RepositoryId { get; init; }
     public required string RepositoryName { get; init; }
 
+    /// <summary>
+    /// True for a read-only repository (never the Workspace repository). It is not committed, and the actions that
+    /// span several repositories leave it out; an action on the repository itself still works.
+    /// </summary>
+    public bool IsReference { get; init; }
+
     public string? BranchName { get; init; }
     public string? DefaultBranchName { get; init; }
     public string? HeadCommit { get; init; }

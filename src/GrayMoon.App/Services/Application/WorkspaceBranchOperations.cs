@@ -7,8 +7,10 @@ using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Application.WorkspaceManifest;
 using GrayMoon.Application.Workspaces;
 using GrayMoon.Common.Git;
@@ -34,8 +36,23 @@ public sealed class WorkspaceBranchOperations(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IWorkspaceManifestService manifestService,
     IServiceScopeFactory scopeFactory,
+    IWorkspaceRepositoryOperationPolicy operationPolicy,
+    ReferenceRevisionRecorder revisionRecorder,
     ILogger<WorkspaceBranchOperations> logger) : IWorkspaceBranchOperations
 {
+    /// <summary>A bad-request outcome with the policy message when the operation may not run on this repository, else null.</summary>
+    private async Task<BranchHttpOutcome?> RefuseByPolicyAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        RepositoryOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var decision = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, operation, repositoryId, cancellationToken: cancellationToken);
+        return decision.IsAllowed ? null : BranchHttpOutcome.BadRequest(decision.Message ?? "The operation is not possible for this repository.");
+    }
+
     public Task<BranchHttpOutcome> GetBranchesAsync(int workspaceId, int repositoryId, CancellationToken cancellationToken = default)
         => GetBranchesAsync(workspaceId, contextId: null, repositoryId, cancellationToken);
 
@@ -197,7 +214,7 @@ public sealed class WorkspaceBranchOperations(
                 && featureRepository.State is WorkspaceFeatureRepositoryState.Ready or WorkspaceFeatureRepositoryState.NeedsRepair
                 && featureView.FeatureName is { } featureName)
             {
-                AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag));
+                AddLocalBranch(localBranches, FeatureBranchPolicy.ExpectedBranch(featureName, featureRepository.PinnedTag, featureRepository.IsReferenceSnapshot));
             }
         }
 
@@ -321,6 +338,10 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.ManualCheckout, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -328,6 +349,8 @@ public sealed class WorkspaceBranchOperations(
         var workspace = resolved.Workspace!;
         var repo = resolved.Repo!;
         var wr = resolved.Link!;
+        // Read before any state write: the state writer clears the tag on this same tracked link.
+        var leavingTag = !string.IsNullOrWhiteSpace(wr.CheckedOutTag);
 
         try
         {
@@ -409,7 +432,7 @@ public sealed class WorkspaceBranchOperations(
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
             }
 
-            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            if (leavingTag)
             {
                 var pinError = await ClearRepositoryTagPinAsync(
                     workspaceId, contextId, wr, repo, workspaceRepositoryName, cancellationToken);
@@ -417,11 +440,20 @@ public sealed class WorkspaceBranchOperations(
                     return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(false, pinError));
             }
 
+            // A read-only repository that was switched through GrayMoon: the Workspace definition records the
+            // new branch and commit. A failed write is a warning; the switch itself succeeded.
+            string? recordWarning = null;
+            if (wr is { IsReference: true, Role: WorkspaceRepositoryRole.Source })
+            {
+                recordWarning = await revisionRecorder.RecordAsync(
+                    workspaceId, contextId, repositoryId, localBranchName, checkoutResponse?.Commit, cancellationToken);
+            }
+
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             await TriggerManifestDriftCheckAsync(wr, workspaceId, contextId, cancellationToken);
 
-            return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch });
+            return BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null) { CurrentBranch = checkoutResponse?.CurrentBranch, Warning = recordWarning });
         }
         catch (Exception ex)
         {
@@ -470,6 +502,17 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.ReturnToDefault, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
+        // Where the clean-up is not allowed (a reference repository), Return to Default is a plain switch to the
+        // default branch: no branch is deleted, locally or on the remote, and nothing is discarded.
+        var cleanup = await operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.ReturnToDefaultCleanup, repositoryId, cancellationToken: cancellationToken);
+        if (!cleanup.IsAllowed)
+            return await SwitchToDefaultBranchAsync(workspaceId, contextId, repositoryId, cancellationToken);
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -503,6 +546,31 @@ public sealed class WorkspaceBranchOperations(
         }
     }
 
+    private async Task<BranchHttpOutcome> SwitchToDefaultBranchAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        int repositoryId,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
+        if (resolved.Error != null)
+            return resolved.Error;
+
+        var defaultBranchName = resolved.Link!.DefaultBranchName;
+        if (string.IsNullOrWhiteSpace(defaultBranchName))
+            return BranchHttpOutcome.BadRequest("The default branch of this repository is not known yet. Sync the repository first.");
+
+        var checkout = await CheckoutAsync(workspaceId, contextId, repositoryId, defaultBranchName, isTag: false, cancellationToken);
+        if (checkout.Body is not CheckoutBranchApiResult result)
+            return checkout;
+
+        if (!result.Success)
+            return BranchHttpOutcome.Problem(result.ErrorMessage ?? "Failed to return to default branch", 500);
+
+        await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
+        return BranchHttpOutcome.Ok(new { success = true });
+    }
+
     public async Task<BranchHttpOutcome> GetCommonBranchesAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         if (workspaceId <= 0)
@@ -520,8 +588,9 @@ public sealed class WorkspaceBranchOperations(
             .Where(wr => wr.WorkspaceId == workspaceId)
             .ToListAsync(cancellationToken);
 
-        // Repos checked out on a tag do not participate in the common-branch intersection.
-        links = links.Where(wr => !wr.IsOnTag).ToList();
+        // Repos checked out on a tag do not participate in the common-branch intersection, and neither do those a
+        // Workspace-wide checkout leaves alone (reference repositories).
+        links = links.Where(wr => !wr.IsOnTag && wr.Allows(RepositoryOperation.WorkspaceCheckout)).ToList();
 
         if (links.Count == 0)
         {
@@ -637,6 +706,10 @@ public sealed class WorkspaceBranchOperations(
         if (refusal != null)
             return BranchHttpOutcome.BadRequest(refusal);
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.CreateBranch, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -718,6 +791,10 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.SetUpstream, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: true, cancellationToken);
         if (resolved.Error != null)
             return resolved.Error;
@@ -775,6 +852,14 @@ public sealed class WorkspaceBranchOperations(
         branchName = branchName?.Trim();
         if (workspaceId <= 0 || repositoryId <= 0 || string.IsNullOrWhiteSpace(branchName))
             return BranchHttpOutcome.BadRequest("workspaceId, repositoryId, and branchName are required.");
+
+        // Deleting a remote branch, or a local one git would only delete by force, can lose commits.
+        var deleteOperation = isRemote || force
+            ? RepositoryOperation.DeleteBranchRemoteOrForced
+            : RepositoryOperation.DeleteLocalBranch;
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, deleteOperation, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
 
         var resolved = await TryResolveLinkedRepoAsync(workspaceId, repositoryId, requireWorker: false, cancellationToken);
         if (resolved.Error != null)
@@ -849,6 +934,10 @@ public sealed class WorkspaceBranchOperations(
         if (workspaceId <= 0 || repositoryId <= 0)
             return BranchHttpOutcome.BadRequest("workspaceId and repositoryId are required.");
 
+        var policyRefusal = await RefuseByPolicyAsync(workspaceId, contextId, repositoryId, RepositoryOperation.UpdateBranchFromDefault, cancellationToken);
+        if (policyRefusal != null)
+            return policyRefusal;
+
         var result = await updateHandler.UpdateBranchFromDefaultAsync(workspaceId, contextId, repositoryId, cancellationToken);
 
         if (result.Success || result.HasConflicts)
@@ -873,7 +962,10 @@ public sealed class WorkspaceBranchOperations(
         return BranchHttpOutcome.Problem(err, 500);
     }
 
-    /// <summary>A pinned-tag repository that moves to another tag in a Feature keeps its pin on the new tag. A repository without a pin is never given one.</summary>
+    /// <summary>
+    /// A pinned-tag repository that moves to another tag in a Feature keeps its pin on the new tag. A repository
+    /// without a pin is never given one, and a reference snapshot keeps the tag it was taken at.
+    /// </summary>
     private async Task UpdateFeaturePinnedTagAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceRepositoryId,
@@ -884,7 +976,8 @@ public sealed class WorkspaceBranchOperations(
         await db.WorkspaceFeatureRepositories
             .Where(r => r.WorkspaceFeatureContextId == contextId.Value
                         && r.WorkspaceRepositoryId == workspaceRepositoryId
-                        && r.PinnedTag != null)
+                        && r.PinnedTag != null
+                        && !r.IsReferenceSnapshot)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.PinnedTag, tagName), cancellationToken);
     }
 

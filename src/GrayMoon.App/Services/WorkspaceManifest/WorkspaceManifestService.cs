@@ -15,6 +15,7 @@ namespace GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Common.Manifest;
 using IWorkspaceManifestService = GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService;
 using WorkspaceManifestDrift = GrayMoon.Application.WorkspaceManifest.WorkspaceManifestDrift;
+using WorkspaceRepositoryReferenceRevisionChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryReferenceRevisionChange;
 using WorkspaceRepositoryTagPinChange = GrayMoon.Application.WorkspaceManifest.WorkspaceRepositoryTagPinChange;
 
 /// <summary>
@@ -31,6 +32,13 @@ public sealed class WorkspaceManifestService(
     ILogger<WorkspaceManifestService> logger) : IWorkspaceManifestService
 {
     internal const string NoWorkspaceRepositoryMessage = "No Workspace repository";
+
+    /// <summary>
+    /// One gate per Workspace for the read-change-write of recorded revisions (tag pins and the revisions of
+    /// read-only repositories). Repositories of one Workspace are checked out in parallel, each in its own scope,
+    /// so without it two changes read the same file and the later write drops the earlier one.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> TagPinGates = new();
 
     public async Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
@@ -52,6 +60,12 @@ public sealed class WorkspaceManifestService(
             .Select(l => l.Repository!)
             .ToList();
 
+        // Read-only state is written only when there is some: the default for new repositories is on, or at least
+        // one Source is read-only. Then every entry says true or false, so the file never relies on a default.
+        // Otherwise nothing is written and the file stays readable by every GrayMoon.
+        var writeReference = workspace.ReferenceDefault || sourceLinks.Any(l => l.IsReference);
+        var referenceByRepositoryId = sourceLinks.ToDictionary(l => l.RepositoryId, l => l.IsReference);
+
         var connectors = sourceRepositories
             .Select(r => r.Connector)
             .Where(c => c is { ConnectorType: ConnectorType.GitHub })
@@ -63,7 +77,11 @@ public sealed class WorkspaceManifestService(
             .ToList();
 
         var repositories = sourceRepositories
-            .Select(r => new WorkspaceManifestRepository(r.RepositoryName, r.CloneUrl, ConnectorUrl(r.Connector)))
+            .Select(r => new WorkspaceManifestRepository(
+                r.RepositoryName,
+                r.CloneUrl,
+                ConnectorUrl(r.Connector),
+                Reference: writeReference ? referenceByRepositoryId[r.RepositoryId] : null))
             .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -75,7 +93,8 @@ public sealed class WorkspaceManifestService(
                 new WorkspaceManifestProfile(
                     WorkspaceManifestProfileNames.ToManifest(workspace.Type),
                     WorkspaceManifestProfileNames.ToManifest(workspace.VersioningMode),
-                    WorkspaceManifestProfileNames.ToManifest(workspace.CiProvider))),
+                    WorkspaceManifestProfileNames.ToManifest(workspace.CiProvider)),
+                writeReference ? workspace.ReferenceDefault : null),
             connectors,
             repositories,
             VersionFiles: versionFiles.Count > 0 ? versionFiles : null);
@@ -313,7 +332,7 @@ public sealed class WorkspaceManifestService(
                 && manifestFile.TryParse(read.Content, out var existing, out _)
                 && existing is not null)
             {
-                manifest = WorkspaceRepositoryTagPins.CopyOnto(manifest, existing);
+                manifest = WorkspaceRepositoryRevisionPins.CopyOnto(manifest, existing);
                 // File-owned sections: the database has no copy of them, so the file's value is kept.
                 manifest = manifest with { CodeGraph = existing.CodeGraph, Ai = existing.Ai };
 
@@ -335,14 +354,46 @@ public sealed class WorkspaceManifestService(
         }
     }
 
-    public async Task<OperationResult> SetRepositoryTagPinsAsync(
+    public Task<OperationResult> SetRepositoryTagPinsAsync(
         int workspaceId,
         IReadOnlyList<WorkspaceRepositoryTagPinChange> changes,
-        CancellationToken cancellationToken = default)
-    {
-        if (changes.Count == 0)
-            return OperationResult.Ok();
+        CancellationToken cancellationToken = default) =>
+        changes.Count == 0
+            ? Task.FromResult(OperationResult.Ok())
+            : UpdateRecordedRevisionsAsync(
+                workspaceId,
+                manifest => WorkspaceRepositoryRevisionPins.TryApply(manifest, changes, out var updated, out var error)
+                    ? (updated, null)
+                    : (null, error ?? "The repository tag could not be recorded."),
+                "Recording repository tag pins failed.",
+                cancellationToken);
 
+    public Task<OperationResult> SetRepositoryReferenceRevisionsAsync(
+        int workspaceId,
+        IReadOnlyList<WorkspaceRepositoryReferenceRevisionChange> changes,
+        CancellationToken cancellationToken = default) =>
+        changes.Count == 0
+            ? Task.FromResult(OperationResult.Ok())
+            : UpdateRecordedRevisionsAsync(
+                workspaceId,
+                manifest => WorkspaceRepositoryRevisionPins.TryApply(manifest, changes, out var updated, out var error)
+                    ? (updated, null)
+                    : (null, error ?? "The repository revision could not be recorded."),
+                "Recording read only repository revisions failed.",
+                cancellationToken);
+
+    /// <summary>
+    /// Reads the definition, applies <paramref name="apply"/> and writes the file when its content changed, under
+    /// the Workspace's gate. Never throws except for cancellation.
+    /// </summary>
+    private async Task<OperationResult> UpdateRecordedRevisionsAsync(
+        int workspaceId,
+        Func<WorkspaceManifest, (WorkspaceManifest? Updated, string? Error)> apply,
+        string failureLogMessage,
+        CancellationToken cancellationToken)
+    {
+        var gate = TagPinGates.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
         try
         {
             var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
@@ -357,8 +408,10 @@ public sealed class WorkspaceManifestService(
                 return OperationResult.Fail("The Workspace definition was not found.");
             if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
                 return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
-            if (!WorkspaceRepositoryTagPins.TryApply(manifest, changes, out var updated, out var applyError))
-                return OperationResult.Fail(applyError ?? "The repository tag could not be recorded.");
+
+            var (updated, applyError) = apply(manifest);
+            if (updated is null)
+                return OperationResult.Fail(applyError ?? "The Workspace definition could not be updated.");
 
             var content = manifestFile.Serialize(updated);
             if (string.Equals(content, read.Content.Replace("\r\n", "\n"), StringComparison.Ordinal))
@@ -370,8 +423,12 @@ public sealed class WorkspaceManifestService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Recording repository tag pins failed. WorkspaceId={WorkspaceId}", workspaceId);
+            logger.LogWarning(ex, "{Failure} WorkspaceId={WorkspaceId}", failureLogMessage, workspaceId);
             return OperationResult.Fail(ex.Message);
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
@@ -554,9 +611,25 @@ public sealed class WorkspaceManifestService(
         if (!string.Equals(fileProfile.Ci, databaseProfile.Ci, StringComparison.OrdinalIgnoreCase))
             changedProfile.Add("ci");
 
+        // Read-only state: absent means false, so a file with no reference data equals a Workspace with none. The
+        // recorded branch and commit are not compared - like tag pins they move without the Workspace changing.
+        var changedReference = fileByUrl
+            .Where(p => databaseByUrl.TryGetValue(p.Key, out var databaseRepository)
+                && WorkspaceRepositoryRevisionPins.IsReference(file, p.Value)
+                    != WorkspaceRepositoryRevisionPins.IsReference(database, databaseRepository))
+            .Select(p => p.Value.Name)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var referenceDefaultChanged = (file.Workspace.Reference ?? false) != (database.Workspace.Reference ?? false);
+
         var hasDrift = added.Count > 0 || removed.Count > 0 || changedProfile.Count > 0
-            || addedConnectors.Count > 0 || removedConnectors.Count > 0;
-        return new WorkspaceManifestDrift(hasDrift, null, added, removed, changedProfile, addedConnectors, removedConnectors);
+            || addedConnectors.Count > 0 || removedConnectors.Count > 0
+            || changedReference.Count > 0 || referenceDefaultChanged;
+        return new WorkspaceManifestDrift(hasDrift, null, added, removed, changedProfile, addedConnectors, removedConnectors)
+        {
+            ChangedReference = changedReference,
+            ReferenceDefaultChanged = referenceDefaultChanged,
+        };
     }
 
     private static Dictionary<string, WorkspaceManifestRepository> ByRepositoryUrl(IReadOnlyList<WorkspaceManifestRepository> repositories)

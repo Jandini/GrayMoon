@@ -73,7 +73,9 @@ public sealed class AiAndGitChangesSweepTests
             var key = new AiTextGenerationRuns<string>.Key(1, i);
             // No RunContinuationsAsynchronously: the run finishes (and disposes its source) inline on the completing thread.
             var completion = new TaskCompletionSource<AiTextGenerationRuns<string>.Outcome>();
-            Assert.True(runs.TryStart(key, _ => completion.Task, consult: null));
+            // Started from a pool thread: started from the test itself, the run would resume through the test
+            // runner's synchronization context, later and not inline.
+            Assert.True(await Task.Run(() => runs.TryStart(key, _ => completion.Task, consult: null)));
 
             using var barrier = new Barrier(2);
             var finish = Task.Run(() =>

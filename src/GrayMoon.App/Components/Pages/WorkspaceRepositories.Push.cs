@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Abstractions.Exceptions;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
@@ -30,7 +31,7 @@ public sealed partial class WorkspaceRepositories
 
             var repoIdsWithUnpushed = plan.RepositoryIds;
             var repoIdsThatNeedPush = allLinks
-                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+                .Where(wr => Allows(wr, RepositoryOperation.Push) && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             if (PushClickRouter.ForCapabilities(_capabilities) == PushClickRoute.StartDirect)
@@ -86,9 +87,11 @@ public sealed partial class WorkspaceRepositories
     {
         if (workspace == null || IsJobRunning)
             return;
-        if (IsRepoOnTag(repositoryId))
+        if (!IsRepoAllowed(repositoryId, RepositoryOperation.Push))
         {
-            ToastService.Show(TagBlockedActionMessage);
+            ToastService.Show(TryGetLink(repositoryId) is { IsOnTag: false, Repository.Archived: true }
+                ? RepositoryOperationPolicy.ArchivedMessage
+                : TagBlockedActionMessage);
             return;
         }
 
@@ -116,7 +119,7 @@ public sealed partial class WorkspaceRepositories
             var contextId = RequireSelectedContextId();
             var allLinks = await GetAllLinksForOperationAsync();
             var repoIdsThatNeedPush = allLinks
-                .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+                .Where(wr => Allows(wr, RepositoryOperation.Push) && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
             if (_capabilities is null || !_capabilities.UsesDependencyAwarePush)
@@ -221,6 +224,13 @@ public sealed partial class WorkspaceRepositories
         return (plan.RepositoryIds, plan.RequiredPackageIds);
     }
 
+    /// <summary>Tells the user which repositories a bulk action left out (read-only, on a tag). Information only.</summary>
+    private void ShowSkippedRepositories(IReadOnlyList<RepositorySkip> skipped)
+    {
+        if (RepositorySkipSummary.Describe(skipped) is { } message)
+            SafeInvoke(() => ToastService.Show(message));
+    }
+
     private async Task ExecutePushCoreAsync(
         GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId,
         BackgroundJobHandle job,
@@ -246,6 +256,8 @@ public sealed partial class WorkspaceRepositories
                     runId: runId,
                     restorePackages: restorePackages));
             ApplyPushResult(repoIds, result);
+            if (result.Success && !result.HasWarnings)
+                ShowSkippedRepositories(result.Skipped);
         }
         catch (OperationCanceledException)
         {

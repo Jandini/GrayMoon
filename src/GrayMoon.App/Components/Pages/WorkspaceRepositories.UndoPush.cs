@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 
@@ -15,7 +16,7 @@ public sealed partial class WorkspaceRepositories
 
         var allLinks = await GetAllLinksForOperationAsync();
         var reposWithOutgoing = allLinks
-            .Where(wr => !wr.IsOnTag && (wr.OutgoingCommits ?? 0) > 0)
+            .Where(wr => Allows(wr, RepositoryOperation.UndoPush) && (wr.OutgoingCommits ?? 0) > 0)
             .ToList();
 
         if (reposWithOutgoing.Count == 0)

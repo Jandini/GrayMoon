@@ -478,6 +478,87 @@ Worker side: App-initiated commands carry `RepositoryOperationCapabilities` on `
 
 ---
 
+## 7B. Repository operation policy
+
+Whether an operation may run on a repository is decided in one place. Four facts about a repository can say no: it is on a tag, it is read only in the Workspace, it is a read only snapshot in a Feature, or it is archived on the provider. The rule table and what the user sees are in 05 ("Read only repositories and the operation policy"); the rules for new code are in 06 (section 11). This section is how the parts fit together.
+
+```text
+GrayMoon.Application/Repositories/Policy        pure, no database, no Worker
+  RepositoryOperation            the operations (Sync, Pull, Push, Commit, Stage, ...)
+  RepositoryOperationPolicy      Rules (one row per operation) and Evaluate
+  RepositoryPolicySubject        the facts about one repository in one context
+  RepositoryOperationDecision    Allowed / Refused / Skipped, a reason, a message
+  IWorkspaceRepositoryOperationPolicy   loads subjects and applies the rules
+  RepositorySkip, RepositoryEligibility, RepositorySkipSummary
+
+GrayMoon.App/Services/Policy                    reads the database and the Worker
+  WorkspaceRepositoryOperationPolicyService   the one loader of subjects
+  RepositoryPolicySubjectExtensions           link.Allows(operation) for code that holds rows
+  RepositoryOperationPolicyExpressions        the same rules inside a database query
+  ReferenceActivationRule / ReferenceActivationChecker   may a repository become read only
+  ReferenceRevisionRecorder                   branch and commit of read only repositories -> graymoon.json
+  ReferenceImportGuard                        a repository added from an existing folder
+  ArchivedRepositoryVerifier, IRepositoryArchiveProbe   asks the provider again about "archived"
+```
+
+### The rule table and the decision
+
+`RepositoryOperationPolicy.Rules` has one `Rule` per `RepositoryOperation`: `AllowedOnTag`, `Reference`, `ReferenceSnapshot` (each `Allowed`, `IndividualOnly` or `Forbidden`), the message for a tag, and `AllowedWhenArchived` (false only for `Push`). An operation without a row throws, and `RepositoryOperationPolicyMatrixTests` fails until a new operation has an expected answer.
+
+`Evaluate(operation, scope, subject)` checks in this order and stops at the first no:
+
+1. On a tag and the rule does not allow a tag.
+2. Archived and the rule does not allow archived.
+3. The Workspace repository: allowed. It is never read only, because GrayMoon writes the Workspace definition there. Steps 1 and 2 still apply to it.
+4. A read only snapshot and the snapshot rule does not permit the scope.
+5. Read only and the reference rule does not permit the scope.
+
+The scope says how a no is reported, and for `IndividualOnly` whether it is a no at all. `Bulk` is an action on several repositories: a repository that is not allowed is `Skipped` and the action goes on. `Individual` is an action on one repository the user named: it is `Refused` with the message. `Individual` never answers `Skipped` and `Bulk` never answers `Refused`. `IndividualOnly` (Return to Default as a plain switch, stage, unstage, discard) is allowed for `Individual` and not for `Bulk`.
+
+### The subject and where it is read from
+
+`RepositoryPolicySubject` holds `IsWorkspaceRepository`, `IsReference`, `BranchName`, `CheckedOutTag`, `IsFeatureContext`, `IsReferenceSnapshot` and `IsArchived`. The tag and the snapshot flag belong to a context, so the row they come from matters:
+
+- `RepositorySubjectSource.Context`: the special Workspace reads the shared link (`WorkspaceRepositoryLink`); a Feature reads its own state row (`WorkspaceRepositoryContextState`, `WorkspaceFeatureRepository`). A Feature never borrows the tag of the Workspace checkout.
+- `RepositorySubjectSource.ContextStateFirst`: the state row of the context when one exists, in the Workspace too. Only the push plan uses it (`RepositorySubjectSources.PushPlan`), because it has always read the state this way.
+
+`IsReference` is the flag of the link and is the same in every context. `IsReferenceSnapshot` is the flag of the Feature's own row. `IsArchived` is `Repository.Archived`, the value of the last fetch or check.
+
+`WorkspaceRepositoryOperationPolicyService` is the only code that decides which row holds the state of a context. It uses contexts from `IDbContextFactory`, so it is safe beside the circuit's context and in parallel work.
+
+### Three ways to ask
+
+- **A service that loads its own rows** uses `IWorkspaceRepositoryOperationPolicy`: `PartitionAsync` for a set (answers `RepositoryEligibility`: the eligible ids and the `RepositorySkip` list), `EvaluateAsync` for one named repository, `GetSubjectsAsync` when it needs the facts. Callers today: the push services and operations, branch operations and handler, commit sync, Git Changes operations, pull request operations, version files, project refresh, AI generation.
+- **Code that already holds rows** (pages, row components, planners) uses the extensions: `link.Allows(operation)`, with the context flag and the scope where they matter. A page disables a button with it; that is presentation, and the service still decides.
+- **A database query** (the header counters in `WorkspaceRepositoryLinkListQueryService`) writes `RepositoryOperationPolicyExpressions.Allows(...)` or `IsOnTag(...)` and calls `.ExpandRepositoryPolicy()` before it runs. The calls are replaced by column comparisons built from the same `Rules`, always with the `Bulk` scope. `RepositoryOperationPolicyExpressionsTests` compares the query form with `Evaluate` for every operation.
+
+Enforcement is in the service, so the dialog, the REST endpoint and the bulk path get the same answer. A check only in a page is not a check.
+
+### Skips
+
+A bulk operation carries what it left out in `Skipped` (`RepositorySkip`: id, name, reason, message). `RepositorySkipSummary.Describe` turns the list into one sentence, with read only, tag and archived repositories counted apart. The UI shows it as information beside the result, never in place of an error. REST results carry the list in `Skipped`, with the reason by name (`RepositoryOperationReason` is serialized as text). Not every bulk path fills the list yet: see `docs/todo/read-only-repositories-open-items.md`.
+
+### Becoming and staying read only
+
+The policy only reads the flags. These parts set and keep them:
+
+- `WorkspaceReferenceOperations` (`IWorkspaceReferenceOperations`) changes the flag of one repository, of all, and the Workspace default. It runs as the structural operation `reference-mode` (04), so no other operation runs in any context meanwhile.
+- `ReferenceActivationChecker` asks the Worker (`InspectWorktree`) about every checkout of the repository on this machine, the Workspace checkout and each Feature worktree. `ReferenceActivationRule` judges one answer: unpushed commits or an unreadable upstream state block, uncommitted changes warn. One blocked repository refuses the whole change.
+- `ReferenceImportGuard` runs the same check for a repository that is added from a folder that already exists and would start read only; a blocked one is made writable and reported.
+- `ReferenceRevisionRecorder` writes the branch and commit of read only repositories into `graymoon.json` when read only is turned on and after a pull or a manual switch through GrayMoon. Never from a Sync or a hook, and never for a Feature (03).
+- A Feature takes a read only repository as a detached snapshot of its commit (`IsReferenceSnapshot`, `SourceBranchName`); the snapshot is never pulled or switched.
+- On the Worker, a pull of a read only repository is `git pull --ff-only` and nothing is pushed (`pullOnly`).
+- `ArchivedRepositoryVerifier` asks the provider again for the repositories of a Workspace that are marked archived and clears the mark of one that is not archived any more. It never sets the mark; no answer keeps it.
+
+### What keeps it in one place
+
+- `RepositoryOperationPolicyMatrixTests`: every operation has a row and an expected answer for a tag, read only, a snapshot and archived.
+- `RepositoryPolicyConventionTests`: the tag of a checkout is read only by the policy and a list of types, each with a reason. It scans compiled calls, so a read inside a query expression is not seen, and it does not cover the read only flags.
+- `RepositoryPolicySubjectSourceTests` and `WorkspaceRepositoryOperationPolicyServiceTests`: which row a context reads.
+- `ReferenceRepositoryEnforcementTests`, `RepositorySkipReportingTests`, `ReferenceActivationTests`, `WorkspaceReferenceOperationsTests`, `ArchivedRepositoryPolicyTests`: the services refuse or skip, and the mode change.
+
+---
+
 ## 8. Orchestration layer
 
 GrayMoon has workflows that span many repositories and therefore cannot be expressed as one Worker command.

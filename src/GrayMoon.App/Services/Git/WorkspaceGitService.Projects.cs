@@ -1,3 +1,4 @@
+using GrayMoon.Application.Repositories.Policy;
 using System.Collections.Concurrent;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.Abstractions.Exceptions;
@@ -43,12 +44,10 @@ public sealed partial class WorkspaceGitService
         if (repositoryIds != null && repositoryIds.Count > 0)
             repos = repos.Where(r => repositoryIds.Contains(r.RepositoryId)).ToList();
 
-        var tagPinnedIds = workspace.Repositories
-            .Where(l => !string.IsNullOrWhiteSpace(l.CheckedOutTag))
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
-        if (tagPinnedIds.Count > 0)
-            repos = repos.Where(r => !tagPinnedIds.Contains(r.RepositoryId)).ToList();
+        var skippedIds = await GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.RefreshProjects, RepositorySubjectSource.Context, cancellationToken);
+        if (skippedIds.Count > 0)
+            repos = repos.Where(r => !skippedIds.Contains(r.RepositoryId)).ToList();
 
         if (repos.Count == 0)
         {
@@ -137,8 +136,9 @@ public sealed partial class WorkspaceGitService
         if (repo == null)
             throw new InvalidOperationException($"Repository {repositoryId} not found in workspace.");
 
-        var linkForWorkspace = workspace.Repositories.FirstOrDefault(l => l.RepositoryId == repositoryId);
-        if (!string.IsNullOrWhiteSpace(linkForWorkspace?.CheckedOutTag))
+        var refreshDecision = await _operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.RefreshProjects, repositoryId, RepositorySubjectSource.Context, cancellationToken);
+        if (!refreshDecision.IsAllowed)
             return false;
 
         var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
@@ -188,8 +188,9 @@ public sealed partial class WorkspaceGitService
         if (workspace == null)
             throw new InvalidOperationException($"Workspace {workspaceId} not found.");
 
-        var pinnedLink = workspace.Repositories.FirstOrDefault(l => l.RepositoryId == repositoryId && !string.IsNullOrWhiteSpace(l.CheckedOutTag));
-        if (pinnedLink != null)
+        var updateDecision = await _operationPolicy.EvaluateAsync(
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, repositoryId, RepositorySubjectSource.Context, cancellationToken);
+        if (!updateDecision.IsAllowed)
             return;
 
         onProgressMessage?.Invoke("Refreshing repository projects...");
@@ -210,14 +211,11 @@ public sealed partial class WorkspaceGitService
             return (Array.Empty<SyncDependenciesRepoPayload>(), false);
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToListAsync(cancellationToken)).ToHashSet();
+        var skippedIds = await GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.Context, cancellationToken);
 
         var withUpdates = payloads
-            .Where(p => p.ProjectUpdates.Count > 0 && !tagPinnedIds.Contains(p.RepoId))
+            .Where(p => p.ProjectUpdates.Count > 0 && !skippedIds.Contains(p.RepoId))
             .ToList();
         if (repositoryIds != null && repositoryIds.Count > 0)
             withUpdates = withUpdates.Where(p => repositoryIds.Contains(p.RepoId)).ToList();
@@ -249,15 +247,12 @@ public sealed partial class WorkspaceGitService
             return new HashSet<int>();
 
         var payloads = await _workspaceProjectRepository.GetSyncDependenciesPayloadAsync(workspaceId, contextId.Value, cancellationToken);
-        var tagPinnedIds = (await _dbContext.WorkspaceRepositories
-            .AsNoTracking()
-            .Where(wr => wr.WorkspaceId == workspaceId && !string.IsNullOrWhiteSpace(wr.CheckedOutTag))
-            .Select(wr => wr.RepositoryId)
-            .ToListAsync(cancellationToken)).ToHashSet();
+        var skippedIds = await GetSkippedRepositoryIdsAsync(
+            workspaceId, contextId, RepositoryOperation.UpdateDependencies, RepositorySubjectSource.Context, cancellationToken);
 
         var toSync = payloads
             .Where(p => p.ProjectUpdates.Count > 0 && (repoIdsToSync == null || repoIdsToSync.Contains(p.RepoId)))
-            .Where(p => !tagPinnedIds.Contains(p.RepoId))
+            .Where(p => !skippedIds.Contains(p.RepoId))
             .ToList();
 
         if (toSync.Count == 0)

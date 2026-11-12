@@ -66,6 +66,8 @@
 .repositories-table td a.repo-link:hover,
 .repositories-table td .repo-link:hover strong {
     text-decoration: underline !important;
+    /* Also the color: app.css `.table tbody td a:not(.badge):hover` would turn the link and its underline blue. */
+    color: inherit !important;
 }
 
 .col-owner {

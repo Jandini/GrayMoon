@@ -426,6 +426,37 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, false, null);
     }
 
+    public async Task<(bool Success, bool LocalChangesBlock, string? ErrorMessage)> PullFastForwardOnlyAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName) || branchName.StartsWith('-'))
+            return (false, false, "Invalid repository path or branch name");
+
+        var args = $"{GetHooksConfigPrefix(skipHooks)}pull --ff-only origin {branchName}";
+
+        var sw = Stopwatch.StartNew();
+        var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Pull, args, repoPath, bearerToken, ct);
+        sw.Stop();
+
+        if (exitCode != 0)
+        {
+            var combinedOutput = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
+            var localChangesBlock = IsBlockedByLocalChanges(stdout, stderr);
+            logger.LogWarning("Git fast-forward pull refused in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, LocalChangesBlock={LocalChangesBlock}, Stdout={Stdout}, Stderr={Stderr}", sw.ElapsedMilliseconds, repoPath, args, exitCode, localChangesBlock, stdout, stderr);
+            return (false, localChangesBlock, combinedOutput);
+        }
+
+        logger.LogInformation("Git fast-forward pull completed in {ElapsedMs}ms for {RepoPath}. Args={Args}, Branch={Branch}", sw.ElapsedMilliseconds, repoPath, args, branchName);
+        return (true, false, null);
+    }
+
+    /// <summary>Git's refusal to update the working tree because tracked or untracked local files are in the way.</summary>
+    internal static bool IsBlockedByLocalChanges(string? stdout, string? stderr)
+    {
+        var combined = string.Concat(stdout ?? string.Empty, stderr ?? string.Empty);
+        return combined.Contains("would be overwritten", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("commit your changes or stash them", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<(bool Success, string? ErrorMessage)> PushAsync(string repoPath, string branchName, string? bearerToken, bool setTracking = false, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
@@ -865,6 +896,45 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             return (false, $"Checkout of commit '{sha}' left HEAD at '{head ?? "(none)"}'.");
 
         logger.LogInformation("Git checkout commit completed for {RepoPath}. Commit={Commit}", repoPath, sha);
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAtCommitAsync(string repoPath, string branchName, string commit, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || !WorkspaceDefinitionTagPin.IsFullCommitHash(commit))
+            return (false, "Invalid repository path or commit hash");
+
+        var branch = branchName?.Trim();
+        if (!WorkspaceDefinitionRevisionPin.IsPlainBranchName(branch))
+            return (false, $"'{branchName}' is not a valid branch name.");
+
+        var sha = commit.Trim().ToLowerInvariant();
+        if (!await reader.RefExistsAsync(repoPath, $"{sha}^{{commit}}", ct))
+            return (false, $"Commit '{sha}' does not exist in the repository.");
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"checkout -B {branch} {sha}", repoPath, ct);
+        if (exitCode != 0)
+        {
+            logger.LogError("Git checkout of a branch at a commit failed for {RepoPath}. Branch={Branch}, Commit={Commit}, ExitCode={ExitCode}", repoPath, branch, sha, exitCode);
+            return (false, CombineOutput(stdout, stderr));
+        }
+
+        var head = await reader.GetHeadCommitAsync(repoPath, ct);
+        if (!string.Equals(head, sha, StringComparison.OrdinalIgnoreCase))
+            return (false, $"Checkout of branch '{branch}' at commit '{sha}' left HEAD at '{head ?? "(none)"}'.");
+
+        // Without an upstream the branch could not pull. A branch the remote no longer has stays without one.
+        if (await reader.RefExistsAsync(repoPath, $"refs/remotes/origin/{branch}", ct))
+        {
+            var (upstreamExit, upstreamOut, upstreamErr) = await runner.RunAsync("git", $"branch --set-upstream-to=origin/{branch} {branch}", repoPath, ct);
+            if (upstreamExit != 0)
+            {
+                logger.LogError("Git set upstream failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, branch, upstreamExit);
+                return (false, CombineOutput(upstreamOut, upstreamErr));
+            }
+        }
+
+        logger.LogInformation("Git checkout of a branch at a commit completed for {RepoPath}. Branch={Branch}, Commit={Commit}", repoPath, branch, sha);
         return (true, null);
     }
 
