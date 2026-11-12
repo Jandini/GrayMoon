@@ -529,6 +529,12 @@
                         }
 
                     }
+                    @if (ShowReferenceToggle && GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.SuggestForArchived(IsArchived, _reference))
+                    {
+                        <div class="gm-callout gm-callout--warning mt-3" role="status">
+                            @GrayMoon.Application.Workspaces.WorkspaceReferenceSuggestions.ArchivedSingle Use the Read-only checkbox below.
+                        </div>
+                    }
                     @if (_referenceError is not null)
                     {
                         <div class="gm-callout gm-callout--error mt-3" role="alert">
@@ -675,6 +681,8 @@
     [Parameter] public string? PinnedTag { get; set; }
     /// <summary>True for a read-only repository of the Workspace.</summary>
     [Parameter] public bool IsReference { get; set; }
+    /// <summary>True when the provider reported the repository as archived at the last fetch of repositories.</summary>
+    [Parameter] public bool IsArchived { get; set; }
     /// <summary>True for the Workspace repository itself: it is never read-only, so the control is hidden.</summary>
     [Parameter] public bool IsWorkspaceRepository { get; set; }
     /// <summary>Uncommitted files in the repository, as the grid row knows them.</summary>

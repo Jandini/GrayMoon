@@ -148,6 +148,8 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceImportGuard>();
         services.AddSingleton<GrayMoon.App.Services.Policy.ReferenceRevisionRecorder>();
+        services.AddScoped<GrayMoon.App.Services.Policy.IRepositoryArchiveProbe, GrayMoon.App.Services.Policy.GitHubRepositoryArchiveProbe>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddSingleton<SyncRecomputeCoalescer>();
         services.AddSingleton<FileVersionCheckCoalescer>();

@@ -103,6 +103,7 @@ public sealed class WorkspaceRepositoryOperationPolicyService(
                 link.IsReference,
                 link.BranchName,
                 link.CheckedOutTag,
+                Archived = link.Repository != null && link.Repository.Archived,
             })
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
@@ -164,7 +165,8 @@ public sealed class WorkspaceRepositoryOperationPolicyService(
                     isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
                     isFeatureContext: !isSpecialWorkspace,
                     isReference: link.IsReference,
-                    isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId)));
+                    isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId),
+                    isArchived: link.Archived));
         }).ToList();
     }
 }

@@ -18,6 +18,7 @@ public sealed class WorkspacePushOperations(
     WorkspacePushStrategySelector strategySelector,
     WorkspaceOperationOutcomeStore outcomes,
     IWorkspaceRepositoryOperationPolicy operationPolicy,
+    GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier archivedVerifier,
     ILogger<WorkspacePushOperations> logger) : IWorkspacePushOperations
 {
     public async Task<WorkspacePushPlan> GetPlanAsync(
@@ -26,6 +27,9 @@ public sealed class WorkspacePushOperations(
         int? maxLevel = null,
         CancellationToken cancellationToken = default)
     {
+        // A repository marked archived is left out of the plan, so ask the provider first whether it still is.
+        await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
+
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
@@ -73,6 +77,8 @@ public sealed class WorkspacePushOperations(
         string? runId = null,
         bool restorePackages = true)
     {
+        await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
+
         var (capabilities, strategy) = await SelectStrategyAsync(workspaceId, cancellationToken);
         var run = new WorkspacePushRun(
             workspaceId,

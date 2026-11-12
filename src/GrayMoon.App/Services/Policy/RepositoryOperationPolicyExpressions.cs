@@ -23,17 +23,22 @@ public static class RepositoryOperationPolicyExpressions
     /// True when <paramref name="operation"/> may run, as one of many in a bulk action, on a repository with this
     /// stored tag, role and reference state. In a query this becomes column comparisons; a stored tag is never blank
     /// text, so the comparison is with null and the empty string only. The Workspace passes false for
-    /// <paramref name="isReferenceSnapshot"/>; a Feature passes its own row's flag.
+    /// <paramref name="isReferenceSnapshot"/>; a Feature passes its own row's flag. <paramref name="isArchived"/> is
+    /// the repository's own column.
     /// </summary>
     public static bool Allows(
         RepositoryOperation operation,
         string? checkedOutTag,
         WorkspaceRepositoryRole role,
         bool isReference,
-        bool isReferenceSnapshot)
+        bool isReferenceSnapshot,
+        bool isArchived)
     {
         var rule = RepositoryOperationPolicy.Rules[operation];
         if (!rule.AllowedOnTag && IsOnTag(checkedOutTag))
+            return false;
+
+        if (!rule.AllowedWhenArchived && isArchived)
             return false;
 
         if (role == WorkspaceRepositoryRole.Workspace)
@@ -63,11 +68,11 @@ public static class RepositoryOperationPolicyExpressions
                 if (!RepositoryOperationPolicy.Rules.TryGetValue(operation, out var rule))
                     throw new ArgumentOutOfRangeException(nameof(node), operation, "No policy rule for this operation.");
 
-                var allowed = rule.AllowedOnTag
-                    ? (Expression)Expression.Constant(true)
-                    : Expression.Not(OnTag(Visit(node.Arguments[1])));
-
                 // Terms the rule table allows are left out, so a query pays only for the columns that can say no.
+                Expression? allowed = rule.AllowedOnTag ? null : Expression.Not(OnTag(Visit(node.Arguments[1])));
+                if (!rule.AllowedWhenArchived)
+                    allowed = And(allowed, Expression.Not(Visit(node.Arguments[5])));
+
                 Expression? reference = null;
                 if (!RepositoryOperationPolicy.Permits(rule.ReferenceSnapshot, RepositoryOperationScope.Bulk))
                     reference = Expression.Not(Visit(node.Arguments[4]));
@@ -77,14 +82,15 @@ public static class RepositoryOperationPolicyExpressions
                     reference = reference is null ? notReference : Expression.AndAlso(reference, notReference);
                 }
 
-                if (reference is null)
-                    return allowed;
+                if (reference is not null)
+                {
+                    var isWorkspaceRepository = Expression.Equal(
+                        Visit(node.Arguments[2]),
+                        Expression.Constant(WorkspaceRepositoryRole.Workspace));
+                    allowed = And(allowed, Expression.OrElse(isWorkspaceRepository, reference));
+                }
 
-                var isWorkspaceRepository = Expression.Equal(
-                    Visit(node.Arguments[2]),
-                    Expression.Constant(WorkspaceRepositoryRole.Workspace));
-                var referenceAllows = Expression.OrElse(isWorkspaceRepository, reference);
-                return rule.AllowedOnTag ? referenceAllows : Expression.AndAlso(allowed, referenceAllows);
+                return allowed ?? Expression.Constant(true);
             }
 
             if (node.Method == IsOnTagMethod)
@@ -92,6 +98,9 @@ public static class RepositoryOperationPolicyExpressions
 
             return base.VisitMethodCall(node);
         }
+
+        private static Expression And(Expression? left, Expression right) =>
+            left is null ? right : Expression.AndAlso(left, right);
 
         private static Expression OnTag(Expression tag) =>
             Expression.AndAlso(

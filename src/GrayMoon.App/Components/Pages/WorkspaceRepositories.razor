@@ -376,6 +376,7 @@
                    PinnedTag="@GetSwitchBranchModalPinnedTag()"
                    IsReference="@(TryGetLink(_switchBranchModal.RepositoryId)?.IsReference ?? false)"
                    IsWorkspaceRepository="@(TryGetLink(_switchBranchModal.RepositoryId)?.Role == WorkspaceRepositoryRole.Workspace)"
+                   IsArchived="@(TryGetLink(_switchBranchModal.RepositoryId)?.Repository?.Archived ?? false)"
                    UncommittedChangedFileCount="@(TryGetLink(_switchBranchModal.RepositoryId)?.UncommittedChangedFileCount ?? 0)"
                    RepositoryName="@_switchBranchModal.RepositoryName"
                    CurrentBranch="@_switchBranchModal.CurrentBranch"

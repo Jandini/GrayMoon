@@ -406,3 +406,67 @@ Base: commit `fb8df758` plus the uncommitted Phase 2 changes. Change: tooltip te
 
 - Common tests, Worker tests and both `Category=Long` runs were **not run again** after this change. Their last run is the Phase 2 run above. The change touches only the App project (Razor markup and one class of constants), but the full command list must run on the final tree for the reference-mode gate.
 - No test reads the tooltips. Not looked at in a browser.
+
+## Hint for archived repositories (Appendix B, P3) - 2026-11-12
+
+Base: commit `8e3b30f1` (Phase 2 and the badge tooltips) plus this change. Not committed. This is a full run, so it also covers the tooltip change above.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| Worker tests | 1034 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4415 passed, 0 failed, 0 skipped (4413 before) |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once after the last code change.
+
+Failure on the way, fixed before the run above:
+
+- Build error RZ1010 in `WorkspaceReferenceSection.razor`: `@{ ... }` inside a code block. Changed to a plain statement.
+
+New tests:
+
+- App `WorkspaceReferenceOperationsTests` (+2): the state marks an archived repository and suggests read-only for it, not for the other one; after it is made read-only (the usual check ran once) it is no longer suggested. An archived repository with unpushed commits is refused, stays writable and stays suggested.
+
+### Not run
+
+- The manual smoke list M1-M13. Nothing was looked at in a browser.
+- No test for the two callouts as markup, or for the button in Edit Workspace.
+
+## Archived push rule, un-archive check, `readonly` badge (Appendix B.9) - 2026-11-12
+
+Base: commit `8e3b30f1` plus the uncommitted hint change (B.8) and this change. Not committed.
+
+| Step | Result |
+|---|---|
+| Build | succeeded, 0 warnings, 0 errors |
+| Common tests | 446 passed, 0 failed |
+| Worker tests | 1034 passed, 0 failed, 1 skipped (the same baseline test) |
+| App tests | 4641 passed, 0 failed, 0 skipped (4415 before) |
+| Worker `Category=Long` | 2 passed |
+| App `Category=Long` | 2 passed |
+
+Each suite was run once after the last code change.
+
+Failure on the way, fixed before the run above:
+
+- Build errors CS0103 in the new test file (missing usings for `WorkspaceCapabilities` and `WorkspaceType`).
+
+New tests, App `ArchivedRepositoryPolicyTests` (226 cases):
+
+- Policy: push of an archived repository is skipped in a bulk action and refused for one repository, with the archived reason and message. Only push reads the archived state. The rule holds for the Workspace repository; a tag is reported before archived.
+- Query form: for every operation, tag, role and read-only combination of an archived repository, the expanded expression and the method agree with the policy.
+- Header: with and without the dependency graph, push is recommended before the mark and not after; incoming commits stay.
+- Service: a bulk push partition leaves the archived repository out and the summary names it ("1 archived repository skipped: ..."); pull skips nothing; the single evaluation is refused.
+- Link and list item carry the archived state into the policy.
+- Check: a repository the provider reports as not archived is unmarked and is eligible for push again, the other one stays marked. No answer or a failed request keeps the mark. With no marked repository the provider is not asked, and the check never sets the mark.
+
+Changed tests: `RepositoryOperationPolicyExpressionsTests` passes the new sixth argument (4 call sites).
+
+### Not run
+
+- The manual smoke list M1-M13. Nothing was looked at in a browser.
+- No request to GitHub: the real probe is not tested.
+- No test for the page trigger of the check, the tooltip, the toast or the badge markup.

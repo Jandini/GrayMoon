@@ -21,7 +21,9 @@ public static class RepositoryPolicySubjectExtensions
             isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
             isFeatureContext: isFeatureContext,
             isReference: link.IsReference,
-            isReferenceSnapshot: link.IsReferenceSnapshot);
+            isReferenceSnapshot: link.IsReferenceSnapshot,
+            // A link loaded without its repository says nothing about it; the service decides when the operation runs.
+            isArchived: link.Repository?.Archived ?? false);
 
     /// <summary>The subject of a list row, which already carries the selected context's branch and tag.</summary>
     public static RepositoryPolicySubject ToPolicySubject(this WorkspaceRepositoryLinkListItemDto row, bool isFeatureContext) =>
@@ -31,7 +33,8 @@ public static class RepositoryPolicySubjectExtensions
             isWorkspaceRepository: row.Role == WorkspaceRepositoryRole.Workspace,
             isFeatureContext: isFeatureContext,
             isReference: row.IsReference,
-            isReferenceSnapshot: row.IsReferenceSnapshot);
+            isReferenceSnapshot: row.IsReferenceSnapshot,
+            isArchived: row.Archived);
 
     /// <summary>True when <paramref name="operation"/> may run on the repository this link describes.</summary>
     public static bool Allows(

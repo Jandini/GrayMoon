@@ -47,7 +47,7 @@ public sealed class RepositoryOperationPolicyExpressionsTests
     {
         var role = isWorkspaceRepository ? WorkspaceRepositoryRole.Workspace : WorkspaceRepositoryRole.Source;
         Expression<Func<string?, WorkspaceRepositoryRole, bool, bool, bool>> query = (tag, r, reference, snapshot) =>
-            RepositoryOperationPolicyExpressions.Allows(operation, tag, r, reference, snapshot);
+            RepositoryOperationPolicyExpressions.Allows(operation, tag, r, reference, snapshot, false);
         var expanded = (Expression<Func<string?, WorkspaceRepositoryRole, bool, bool, bool>>)RepositoryOperationPolicyExpressions.Expand(query);
 
         var expected = RepositoryOperationPolicy.IsAllowed(
@@ -56,7 +56,7 @@ public sealed class RepositoryOperationPolicyExpressionsTests
 
         Assert.DoesNotContain(nameof(RepositoryOperationPolicyExpressions), expanded.ToString());
         Assert.Equal(expected, expanded.Compile()(storedTag, role, isReference, isReferenceSnapshot));
-        Assert.Equal(expected, RepositoryOperationPolicyExpressions.Allows(operation, storedTag, role, isReference, isReferenceSnapshot));
+        Assert.Equal(expected, RepositoryOperationPolicyExpressions.Allows(operation, storedTag, role, isReference, isReferenceSnapshot, false));
     }
 
     [Theory]
@@ -74,7 +74,7 @@ public sealed class RepositoryOperationPolicyExpressionsTests
 
         var allowed = await db.WorkspaceRepositories
             .Where(wr => wr.RepositoryId == graph.ProducerId)
-            .Where(wr => RepositoryOperationPolicyExpressions.Allows(operation, wr.CheckedOutTag, wr.Role, wr.IsReference, false))
+            .Where(wr => RepositoryOperationPolicyExpressions.Allows(operation, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived))
             .ExpandRepositoryPolicy()
             .AnyAsync();
         var onTag = await db.WorkspaceRepositories
@@ -94,7 +94,7 @@ public sealed class RepositoryOperationPolicyExpressionsTests
     {
         var unknown = (RepositoryOperation)int.MaxValue;
         Expression<Func<string?, bool>> query = tag =>
-            RepositoryOperationPolicyExpressions.Allows(unknown, tag, WorkspaceRepositoryRole.Source, false, false);
+            RepositoryOperationPolicyExpressions.Allows(unknown, tag, WorkspaceRepositoryRole.Source, false, false, false);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => RepositoryOperationPolicyExpressions.Expand(query));
     }

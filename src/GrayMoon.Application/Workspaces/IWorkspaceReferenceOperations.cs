@@ -43,7 +43,27 @@ public enum WorkspaceReferenceAggregate
     All,
 }
 
-public sealed record WorkspaceReferenceRepositoryState(int RepositoryId, string RepositoryName, bool IsReference);
+public sealed record WorkspaceReferenceRepositoryState(int RepositoryId, string RepositoryName, bool IsReference)
+{
+    /// <summary>
+    /// True when the provider reported the repository as archived at the last fetch of repositories. It can be out of
+    /// date, so it only drives a suggestion and never a rule.
+    /// </summary>
+    public bool Archived { get; init; }
+
+    /// <summary>Archived on the provider but still writable here: GrayMoon suggests to make it read-only.</summary>
+    public bool SuggestReference => WorkspaceReferenceSuggestions.SuggestForArchived(Archived, IsReference);
+}
+
+/// <summary>When GrayMoon suggests read-only. A suggestion is never applied without the user.</summary>
+public static class WorkspaceReferenceSuggestions
+{
+    public const string ArchivedSingle = "This repository is archived on the provider, so pushes are rejected. Make it read-only?";
+
+    public const string ArchivedList = "Archived on the provider, so pushes are rejected. Make them read-only?";
+
+    public static bool SuggestForArchived(bool archived, bool isReference) => archived && !isReference;
+}
 
 /// <param name="ReferenceDefault">Whether a repository added later starts read-only.</param>
 /// <param name="HasWorkspaceRepository">False when there is no Workspace definition to record the state in.</param>

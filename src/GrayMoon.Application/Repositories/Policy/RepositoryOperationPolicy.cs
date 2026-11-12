@@ -20,6 +20,9 @@ public static class RepositoryOperationPolicy
     /// <summary>The message for an operation on a repository a Feature holds as a detached read-only snapshot.</summary>
     public const string ReferenceSnapshotMessage = "Repository is a read-only snapshot in this Feature.";
 
+    /// <summary>The message for a push of a repository that is archived on the provider.</summary>
+    public const string ArchivedMessage = "Repository is archived on the provider. Pushes are rejected.";
+
     /// <summary>One row per operation.</summary>
     /// <param name="AllowedOnTag">What GrayMoon does for a tag checkout.</param>
     /// <param name="Reference">What a reference repository on a branch allows.</param>
@@ -28,7 +31,14 @@ public static class RepositoryOperationPolicy
         bool AllowedOnTag,
         ReferenceRule Reference,
         ReferenceRule ReferenceSnapshot,
-        string OnTagMessage = RepositoryOperationPolicy.OnTagMessage);
+        string OnTagMessage = RepositoryOperationPolicy.OnTagMessage)
+    {
+        /// <summary>
+        /// False for an operation GrayMoon does not start on a repository that is archived on the provider. Unlike
+        /// the read-only rules this also holds for the Workspace repository and for a single named repository.
+        /// </summary>
+        public bool AllowedWhenArchived { get; init; } = true;
+    }
 
     /// <summary>
     /// The rule table. It is data so that a test can enumerate it; adding a <see cref="RepositoryOperation"/>
@@ -60,7 +70,9 @@ public static class RepositoryOperationPolicy
         // A commit the user makes in Git Changes. A tag checkout has always allowed it; the commit GrayMoon makes after
         // a dependency or version file update is the row above.
         [RepositoryOperation.CommitGitChanges] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
-        [RepositoryOperation.Push] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden, OnTagPushMessage),
+        // The provider rejects a push to an archived repository, so GrayMoon does not start one. Local commits stay
+        // where they are; the user reverts them or un-archives the repository.
+        [RepositoryOperation.Push] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden, OnTagPushMessage) { AllowedWhenArchived = false },
         [RepositoryOperation.SetUpstream] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
         [RepositoryOperation.UndoPush] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
         [RepositoryOperation.CreatePullRequest] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
@@ -91,6 +103,9 @@ public static class RepositoryOperationPolicy
 
         if (subject.IsOnTag && !rule.AllowedOnTag)
             return Forbidden(scope, RepositoryOperationReason.OnTag, rule.OnTagMessage);
+
+        if (subject.IsArchived && !rule.AllowedWhenArchived)
+            return Forbidden(scope, RepositoryOperationReason.Archived, ArchivedMessage);
 
         // The Workspace repository is where GrayMoon writes the Workspace definition: it is never a reference repository.
         if (subject.IsWorkspaceRepository)

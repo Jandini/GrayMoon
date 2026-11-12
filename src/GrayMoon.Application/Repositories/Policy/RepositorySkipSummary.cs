@@ -18,9 +18,12 @@ public static class RepositorySkipSummary
         var parts = new List<string>();
         Add(parts, distinct.Where(skip => IsReference(skip.Reason)).ToList(), "read-only repository", "read-only repositories");
         Add(parts, distinct.Where(skip => skip.Reason == RepositoryOperationReason.OnTag).ToList(), "repository on a tag", "repositories on a tag");
+        Add(parts, distinct.Where(skip => skip.Reason == RepositoryOperationReason.Archived).ToList(), "archived repository", "archived repositories");
         Add(
             parts,
-            distinct.Where(skip => !IsReference(skip.Reason) && skip.Reason != RepositoryOperationReason.OnTag).ToList(),
+            distinct.Where(skip => !IsReference(skip.Reason)
+                && skip.Reason != RepositoryOperationReason.OnTag
+                && skip.Reason != RepositoryOperationReason.Archived).ToList(),
             "repository",
             "repositories");
         return string.Join(" ", parts);

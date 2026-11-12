@@ -57,6 +57,25 @@
             <label class="form-check-label text-nowrap" for="workspaceReferenceDefault">New repositories are read-only</label>
         </div>
 
+        var suggested = _state.Repositories.Where(repository => repository.SuggestReference).ToList();
+        @if (suggested.Count > 0)
+        {
+            <div class="gm-callout gm-callout--warning mt-2" role="status">
+                <div>@WorkspaceReferenceSuggestions.ArchivedList</div>
+                <ul class="list-unstyled mb-0 mt-1">
+                    @foreach (var repository in suggested)
+                    {
+                        <li class="d-flex flex-nowrap align-items-center gap-2 mb-1" @key="repository.RepositoryId">
+                            <span class="text-truncate" title="@repository.RepositoryName">@repository.RepositoryName</span>
+                            <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0 ms-auto"
+                                    disabled="@Disabled"
+                                    @onclick="() => MakeReferenceAsync(repository)">Make read-only</button>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
         @if (IsBusy && !_running)
         {
             <div class="form-text">An operation is running for this Workspace.</div>
@@ -161,6 +180,12 @@
             () => ReferenceOperations.SetAllAsync(WorkspaceId, reference, alsoSetDefault),
             reference ? "Repositories are read-only." : "Repositories are writable.");
     }
+
+    /// <summary>The suggestion for an archived repository. The same check runs as for any other repository.</summary>
+    private Task MakeReferenceAsync(WorkspaceReferenceRepositoryState repository) =>
+        RunAsync(
+            () => ReferenceOperations.SetRepositoryAsync(WorkspaceId, repository.RepositoryId, true),
+            $"{repository.RepositoryName} is read-only.");
 
     private Task OnDefaultChangedAsync(ChangeEventArgs e)
     {

@@ -45,13 +45,13 @@ public sealed class WorkspaceReferenceOperations(
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(link => link.WorkspaceId == workspaceId)
-            .Select(link => new { link.RepositoryId, link.Repository!.RepositoryName, link.IsReference, link.Role })
+            .Select(link => new { link.RepositoryId, link.Repository!.RepositoryName, link.IsReference, link.Role, link.Repository!.Archived })
             .ToListAsync(cancellationToken);
 
         var sources = links
             .Where(link => link.Role == WorkspaceRepositoryRole.Source)
             .OrderBy(link => link.RepositoryName, StringComparer.OrdinalIgnoreCase)
-            .Select(link => new WorkspaceReferenceRepositoryState(link.RepositoryId, link.RepositoryName, link.IsReference))
+            .Select(link => new WorkspaceReferenceRepositoryState(link.RepositoryId, link.RepositoryName, link.IsReference) { Archived = link.Archived })
             .ToList();
         var referenceCount = sources.Count(source => source.IsReference);
         var aggregate = WorkspaceReferenceAggregates.Of(sources.Count, referenceCount);

@@ -308,7 +308,7 @@ public sealed class WorkspaceRepository(
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.Role, wr.IsReference })
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.Role, wr.IsReference, wr.Repository!.Archived })
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
             return new HashSet<int>();
@@ -352,7 +352,8 @@ public sealed class WorkspaceRepository(
                 isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
                 isFeatureContext: !isSpecialWorkspace,
                 isReference: link.IsReference,
-                isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId));
+                isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId),
+                isArchived: link.Archived);
             if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, subject))
                 continue;
             if ((outgoingCommits ?? 0) > 0 || branchHasUpstream == false)
@@ -447,7 +448,7 @@ public sealed class WorkspaceRepository(
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.DependencyLevel, wr.Role, wr.IsReference })
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.DependencyLevel, wr.Role, wr.IsReference, wr.Repository!.Archived })
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
             return new HashSet<int>();
@@ -494,7 +495,8 @@ public sealed class WorkspaceRepository(
                 isWorkspaceRepository: link.Role == WorkspaceRepositoryRole.Workspace,
                 isFeatureContext: !isSpecialWorkspace,
                 isReference: link.IsReference,
-                isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId));
+                isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId),
+                isArchived: link.Archived);
             if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, subject))
                 continue;
             if (maxLevel.HasValue && (dependencyLevel ?? 0) > maxLevel.Value)

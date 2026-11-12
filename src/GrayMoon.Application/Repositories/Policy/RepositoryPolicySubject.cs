@@ -18,6 +18,12 @@ public sealed record RepositoryPolicySubject(
     bool IsFeatureContext,
     bool IsReferenceSnapshot)
 {
+    /// <summary>
+    /// True when the provider reported the repository as archived. A fact about the repository, the same in every
+    /// Workspace and context. It is the value of the last fetch or check, so it can be out of date.
+    /// </summary>
+    public bool IsArchived { get; init; }
+
     /// <summary>The one tag test: null, empty and whitespace-only all mean "not on a tag".</summary>
     public bool IsOnTag => !string.IsNullOrWhiteSpace(CheckedOutTag);
 
@@ -28,8 +34,9 @@ public sealed record RepositoryPolicySubject(
         bool isWorkspaceRepository = false,
         bool isFeatureContext = false,
         bool isReference = false,
-        bool isReferenceSnapshot = false) =>
-        new(isWorkspaceRepository, isReference, branchName, checkedOutTag, isFeatureContext, isReferenceSnapshot);
+        bool isReferenceSnapshot = false,
+        bool isArchived = false) =>
+        new(isWorkspaceRepository, isReference, branchName, checkedOutTag, isFeatureContext, isReferenceSnapshot) { IsArchived = isArchived };
 }
 
 /// <summary>The answer for one operation on one repository.</summary>

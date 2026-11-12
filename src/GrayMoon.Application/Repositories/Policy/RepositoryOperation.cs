@@ -88,4 +88,7 @@ public enum RepositoryOperationReason
     ReferenceSnapshot,
     WorkspaceRepository,
     NotOnBranch,
+
+    /// <summary>The repository is archived on the provider, which rejects every push.</summary>
+    Archived,
 }

@@ -123,6 +123,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
         services.AddSingleton<GrayMoon.App.Services.Policy.ReferenceRevisionRecorder>();
+        services.AddScoped<GrayMoon.App.Services.Policy.IRepositoryArchiveProbe, GrayMoon.App.Services.Policy.GitHubRepositoryArchiveProbe>();
+        services.AddScoped<GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier>();
         services.AddScoped<GrayMoon.Application.Workspaces.IWorkspaceReferenceOperations, GrayMoon.App.Services.Application.WorkspaceReferenceOperations>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddScoped<WorkspaceDependencyService>();

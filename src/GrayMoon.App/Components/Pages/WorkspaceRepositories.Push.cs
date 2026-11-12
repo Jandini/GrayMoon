@@ -89,7 +89,9 @@ public sealed partial class WorkspaceRepositories
             return;
         if (!IsRepoAllowed(repositoryId, RepositoryOperation.Push))
         {
-            ToastService.Show(TagBlockedActionMessage);
+            ToastService.Show(TryGetLink(repositoryId) is { IsOnTag: false, Repository.Archived: true }
+                ? RepositoryOperationPolicy.ArchivedMessage
+                : TagBlockedActionMessage);
             return;
         }
 

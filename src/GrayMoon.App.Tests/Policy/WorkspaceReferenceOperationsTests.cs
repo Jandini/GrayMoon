@@ -546,6 +546,61 @@ public sealed class WorkspaceReferenceOperationsTests
     }
 
     [Fact]
+    public async Task The_state_suggests_read_only_for_an_archived_repository_until_it_is_read_only()
+    {
+        var manifest = new FakeManifest();
+        await using var ctx = await CreateAsync(manifest);
+        var graph = await SeedGraphAsync(ctx);
+        RespondInspect(ctx, _ => Clean());
+        await using (var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            await db.Repositories.Where(r => r.RepositoryId == graph.ProducerId)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.Archived, true));
+        }
+
+        var before = await StateAsync(ctx);
+        var change = await RunAsync(ctx, operations => operations.SetRepositoryAsync(ctx.WorkspaceId, graph.ProducerId, true));
+        var after = await StateAsync(ctx);
+
+        var archived = before.Repositories.Single(repository => repository.RepositoryId == graph.ProducerId);
+        var other = before.Repositories.Single(repository => repository.RepositoryId == graph.ConsumerId);
+        Assert.True(archived.Archived);
+        Assert.True(archived.SuggestReference);
+        Assert.False(other.Archived);
+        Assert.False(other.SuggestReference);
+        // Archived alone changes nothing: the repository was still writable, and the usual check ran when it was changed.
+        Assert.False(archived.IsReference);
+        Assert.True(change.Success, change.Error);
+        Assert.Single(InspectedPaths(ctx));
+        var archivedAfter = after.Repositories.Single(repository => repository.RepositoryId == graph.ProducerId);
+        Assert.True(archivedAfter.Archived);
+        Assert.False(archivedAfter.SuggestReference);
+    }
+
+    [Fact]
+    public async Task An_archived_repository_with_unpushed_commits_is_refused_like_any_other()
+    {
+        var manifest = new FakeManifest();
+        await using var ctx = await CreateAsync(manifest);
+        var graph = await SeedGraphAsync(ctx);
+        var unpushed = Clean();
+        unpushed.AheadOfUpstream = 2;
+        RespondInspect(ctx, _ => unpushed);
+        await using (var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            await db.Repositories.Where(r => r.RepositoryId == graph.ProducerId)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.Archived, true));
+        }
+
+        var change = await RunAsync(ctx, operations => operations.SetRepositoryAsync(ctx.WorkspaceId, graph.ProducerId, true));
+
+        Assert.False(change.Success);
+        Assert.NotEmpty(change.Blocks);
+        Assert.False((await ReadLinkAsync(ctx, graph.ProducerId)).IsReference);
+        Assert.True((await StateAsync(ctx)).Repositories.Single(repository => repository.RepositoryId == graph.ProducerId).SuggestReference);
+    }
+
+    [Fact]
     public async Task Setting_a_repository_to_the_state_it_already_has_changes_nothing()
     {
         var manifest = new FakeManifest();

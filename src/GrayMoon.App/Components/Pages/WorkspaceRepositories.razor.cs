@@ -484,6 +484,9 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
 
         if (!_disposed)
             await LoadManifestDriftDetailsOnceAsync();
+
+        if (!_disposed)
+            await VerifyArchivedOnceAsync();
     }
     public void Dispose()
     {

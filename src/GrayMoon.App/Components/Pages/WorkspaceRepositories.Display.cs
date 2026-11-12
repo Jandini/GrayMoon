@@ -18,6 +18,24 @@ public sealed partial class WorkspaceRepositories
 
     private bool ShowManifestDriftBanner => !_isFeatureContext && workspace?.ManifestDriftDetectedAt != null;
 
+    [Inject] private GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier ArchivedVerifier { get; set; } = default!;
+
+    private bool _archivedCheckRequested;
+
+    /// <summary>
+    /// Once per page: asks the provider whether the repositories marked archived still are. A repository that is not
+    /// archived any more is unmarked and the page reloads through the Workspace broadcast. Costs one query when no
+    /// repository is marked.
+    /// </summary>
+    private async Task VerifyArchivedOnceAsync()
+    {
+        if (_archivedCheckRequested || !hasLoadedOnce)
+            return;
+
+        _archivedCheckRequested = true;
+        await ArchivedVerifier.VerifyAsync(WorkspaceId);
+    }
+
     private const string ManifestDriftBannerBaseText = "Workspace definition on disk differs from this Workspace.";
 
     /// <summary>The read-only differences of the last comparison made by this page; null until it ran or when there are none.</summary>

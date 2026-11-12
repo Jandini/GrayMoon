@@ -44,6 +44,8 @@ else
     [Parameter] public bool IsOnTag { get; set; }
     /// <summary>True for a read-only repository: incoming commits can be pulled, outgoing commits are shown but never pushed.</summary>
     [Parameter] public bool PullOnly { get; set; }
+    /// <summary>Why outgoing commits are not pushed, when the reason is not a read-only repository (an archived one).</summary>
+    [Parameter] public string? PullOnlyTitle { get; set; }
 
     private int X => Outgoing ?? 0;
     private int Y => BranchHasUpstream == false ? 0 : (Incoming ?? 0);
@@ -69,7 +71,7 @@ else
     private string CssClass => NotUpstreamed ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
     private string DisplayText => $"↑{X} ↓{Y}";
     private string Title => PullOnly && Y == 0
-        ? "Read-only repository. GrayMoon does not push it."
+        ? PullOnlyTitle ?? "Read-only repository. GrayMoon does not push it."
         : NotUpstreamed ? "Push to set upstream" : (Y > 0 ? "Click to pull" : "Click to push");
     private bool ShowPlaceholder => IsOnTag || (!Outgoing.HasValue && !Incoming.HasValue && BranchHasUpstream != false);
 

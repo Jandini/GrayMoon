@@ -80,15 +80,15 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     .Select(g => new
                     {
                         Total = g.Count(),
-                        OutOfDateFiles = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateVersionFiles, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                        OutOfDateFiles = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateVersionFiles, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                             && (wr.OutOfDateFileRepos ?? 0) > 0),
-                        Push = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                        Push = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                             && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)),
-                        Incoming = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                        Incoming = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                             && (wr.IncomingCommits ?? 0) > 0),
                         Tagged = g.Count(wr => RepositoryOperationPolicyExpressions.IsOnTag(wr.CheckedOutTag)),
                         OutOfSync = g.Count(wr => wr.SyncStatus != RepoSyncStatus.InSync),
-                        CreatablePr = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                        CreatablePr = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                             && (wr.DefaultBranchAheadCommits ?? 0) > 0
                             && (wr.PullRequest == null
                                 || (wr.PullRequest.MergedAt == null
@@ -120,19 +120,19 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 .Select(g => new
                 {
                     Total = g.Count(),
-                    Unmatched = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                    Unmatched = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)),
-                    Push = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                    Push = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)),
-                    Incoming = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                    Incoming = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && (wr.IncomingCommits ?? 0) > 0),
                     Tagged = g.Count(wr => RepositoryOperationPolicyExpressions.IsOnTag(wr.CheckedOutTag)),
                     OutOfSync = g.Count(wr => wr.SyncStatus != RepoSyncStatus.InSync),
-                    Lowest = g.Min(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                    Lowest = g.Min(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)
                         ? wr.DependencyLevel
                         : null),
-                    CreatablePr = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, wr.CheckedOutTag, wr.Role, wr.IsReference, false)
+                    CreatablePr = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && (wr.DefaultBranchAheadCommits ?? 0) > 0
                         && (wr.PullRequest == null
                             || (wr.PullRequest.MergedAt == null
@@ -170,7 +170,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             join fr in db.WorkspaceFeatureRepositories.AsNoTracking().Where(fr => fr.WorkspaceFeatureContextId == cid)
                 on wr.WorkspaceRepositoryId equals fr.WorkspaceRepositoryId into featureRepos
             from featureRepo in featureRepos.DefaultIfEmpty()
-            select new { wr, state, pr, isReferenceSnapshot = featureRepo != null && featureRepo.IsReferenceSnapshot };
+            select new { wr, state, pr, isReferenceSnapshot = featureRepo != null && featureRepo.IsReferenceSnapshot, archived = wr.Repository!.Archived };
 
         if (!usesDependencyGraph)
         {
@@ -180,18 +180,18 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                 {
                     Total = g.Count(),
                     OutOfDateFiles = g.Count(x => x.state != null
-                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateVersionFiles, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateVersionFiles, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                         && (x.state.OutOfDateFileRepos ?? 0) > 0),
                     Push = g.Count(x => x.state != null
-                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                         && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false)),
                     Incoming = g.Count(x => x.state != null
-                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                         && (x.state.IncomingCommits ?? 0) > 0),
                     Tagged = g.Count(x => x.state != null && RepositoryOperationPolicyExpressions.IsOnTag(x.state.CheckedOutTag)),
                     OutOfSync = g.Count(x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync),
                     CreatablePr = g.Count(x => x.state != null
-                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                        && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                         && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed" && x.pr.ParentPullRequestNumber == null))
                         && (
                             (x.state.DefaultBranchAheadCommits ?? 0) > 0
@@ -229,24 +229,24 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             .Select(g => new
             {
                 Total = g.Count(),
-                Unmatched = g.Count(x => (x.state == null || RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot))
+                Unmatched = g.Count(x => (x.state == null || RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived))
                     && x.state != null
                     && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)),
                 Push = g.Count(x => x.state != null
-                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                     && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false)),
                 Incoming = g.Count(x => x.state != null
-                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                     && (x.state.IncomingCommits ?? 0) > 0),
                 Tagged = g.Count(x => x.state != null && RepositoryOperationPolicyExpressions.IsOnTag(x.state.CheckedOutTag)),
                 OutOfSync = g.Count(x => x.state == null || x.state.SyncStatus != RepoSyncStatus.InSync),
                 Lowest = g.Min(x => x.state != null
-                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                     && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)
                     ? x.state.DependencyLevel
                     : null),
                 CreatablePr = g.Count(x => x.state != null
-                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot)
+                    && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.CreatePullRequest, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                     && (x.pr == null || (x.pr.MergedAt == null && x.pr.State != "open" && x.pr.State != "closed" && x.pr.ParentPullRequestNumber == null))
                     && (
                         (x.state.DefaultBranchAheadCommits ?? 0) > 0

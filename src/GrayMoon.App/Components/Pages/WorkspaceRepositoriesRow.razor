@@ -142,7 +142,7 @@
                             @snapshotSource<span class="text-muted"> (source)</span>
                         }
                     </span>
-                    <span class="badge bg-secondary ms-1" title="@RepositoryBadgeTitles.ReferenceSnapshot">ro</span>
+                    <span class="badge bg-secondary ms-1 text-nowrap flex-shrink-0" title="@RepositoryBadgeTitles.ReferenceSnapshot">readonly</span>
                     @if (snapshotCommit is not null)
                     {
                         <span class="text-muted small font-monospace ms-1" title="@Link.HeadCommit">@snapshotCommit</span>
@@ -159,7 +159,7 @@
                     </span>
                     @if (Link.IsReference)
                     {
-                        <span class="badge bg-secondary ms-1" title="@RepositoryBadgeTitles.Reference">ro</span>
+                        <span class="badge bg-secondary ms-1 text-nowrap flex-shrink-0" title="@RepositoryBadgeTitles.Reference">readonly</span>
                     }
                 </div>
             }
@@ -171,7 +171,7 @@
                           title="Click to switch branch">@Link.BranchName</span>
                     @if (Link.IsReference)
                     {
-                        <span class="badge bg-secondary ms-1" title="@RepositoryBadgeTitles.Reference">ro</span>
+                        <span class="badge bg-secondary ms-1 text-nowrap flex-shrink-0" title="@RepositoryBadgeTitles.Reference">readonly</span>
                     }
                 </div>
             }
@@ -496,6 +496,7 @@
                                   Disabled="@(ActionsDisabled || Link.IsOnTag)"
                                   IsOnTag="@Link.IsOnTag"
                                   PullOnly="@(!Link.Allows(RepositoryOperation.Push) && Link.Allows(RepositoryOperation.Pull))"
+                                  PullOnlyTitle="@(repo.Archived && !Link.IsReference ? RepositoryOperationPolicy.ArchivedMessage : null)"
                                   OnPushClick="OnPushBadgeClick"
                                   OnPullClick="OnPullBadgeClick" />
                 </span>

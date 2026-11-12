@@ -1664,13 +1664,17 @@ public sealed partial class WorkspacePushService(
         bool IsFeatureContext = false,
         bool IsReferenceSnapshot = false)
     {
+        /// <summary>True when the repository is marked archived on the provider.</summary>
+        public bool IsArchived { get; init; }
+
         public RepositoryPolicySubject ToPolicySubject() => RepositoryPolicySubject.ForCheckout(
             BranchName,
             CheckedOutTag,
             IsWorkspaceRepository,
             IsFeatureContext,
             IsReference,
-            IsReferenceSnapshot);
+            IsReferenceSnapshot,
+            IsArchived);
 
         public bool AllowsPush => RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, ToPolicySubject());
     }
@@ -1690,7 +1694,7 @@ public sealed partial class WorkspacePushService(
         if (repositoryIds != null)
             linkQuery = linkQuery.Where(wr => repositoryIds.Contains(wr.RepositoryId));
         var links = await linkQuery
-            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.BranchName, wr.CheckedOutTag, wr.BranchHasUpstream, wr.Role, wr.IsReference })
+            .Select(wr => new { wr.RepositoryId, wr.WorkspaceRepositoryId, wr.BranchName, wr.CheckedOutTag, wr.BranchHasUpstream, wr.Role, wr.IsReference, wr.Repository!.Archived })
             .ToListAsync(cancellationToken);
 
         var kind = await _dbContext.WorkspaceFeatureContexts
@@ -1708,7 +1712,7 @@ public sealed partial class WorkspacePushService(
                     l.CheckedOutTag,
                     l.BranchHasUpstream,
                     l.Role == WorkspaceRepositoryRole.Workspace,
-                    l.IsReference));
+                    l.IsReference) { IsArchived = l.Archived });
         }
 
         var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
@@ -1738,7 +1742,7 @@ public sealed partial class WorkspacePushService(
                     l.Role == WorkspaceRepositoryRole.Workspace,
                     l.IsReference,
                     IsFeatureContext: true,
-                    IsReferenceSnapshot: snapshotLinkIds.Contains(l.WorkspaceRepositoryId));
+                    IsReferenceSnapshot: snapshotLinkIds.Contains(l.WorkspaceRepositoryId)) { IsArchived = l.Archived };
             });
     }
 
