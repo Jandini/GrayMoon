@@ -50,7 +50,28 @@ public sealed partial class WorkspaceRepositories
         _headerState = await LinkListQueryService.GetHeaderStateAsync(
             WorkspaceId, _selectedContextId, !_isFeatureContext, _capabilities, cancellationToken);
     }
-    private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true)
+    /// <summary>True when a reload may leave the current rows on screen until its result is ready (a search edit on a loaded grid).</summary>
+    internal static bool ShouldKeepRowsWhileLoading(bool requested, bool hasLoadedOnce, bool isLoading) =>
+        requested && hasLoadedOnce && !isLoading;
+
+    /// <summary>
+    /// True when the result of a reload that kept the rows on screen may replace them: it is still the newest
+    /// query, the page is alive, the context is the one it was read for, and no clearing reload began meanwhile.
+    /// </summary>
+    internal static bool ShouldApplyKeptReload(
+        bool disposed, int capturedQueryGeneration, int currentQueryGeneration,
+        int capturedContextGeneration, int currentContextGeneration, bool isLoading) =>
+        !isLoading
+        && capturedQueryGeneration == currentQueryGeneration
+        && PageStateApplyGuard.ShouldApply(disposed, capturedContextGeneration, currentContextGeneration);
+
+    /// <summary>
+    /// Rebuilds the grid from the top. With <paramref name="keepRowsWhileLoading"/> (search edits) the rows,
+    /// the count and the table already on screen stay until the new result is read, and are then replaced in
+    /// one render, so the grid never blanks between searches. Without it the grid is cleared first (first
+    /// load, context switch).
+    /// </summary>
+    private async Task ResetAndLoadFromTopAsync(bool restoreScroll = true, bool keepRowsWhileLoading = false)
     {
         if (workspace == null)
         {
@@ -70,6 +91,7 @@ public sealed partial class WorkspaceRepositories
         }
         await _reloadGate.WaitAsync();
         var generation = 0;
+        var keepRows = false;
         try
         {
             if (_disposed)
@@ -77,32 +99,81 @@ public sealed partial class WorkspaceRepositories
                 return;
             }
             var token = _queryLoader.BeginQueryCycle(out generation);
-            ClearGridState(clearHeaderState: false);
-            isInitialLoading = true;
-            _virtualScrollAttached = false;
-            _attachInitialScrollTop = 0;
+            keepRows = ShouldKeepRowsWhileLoading(keepRowsWhileLoading, hasLoadedOnce, isInitialLoading);
+            var contextGeneration = _contextGeneration;
+            var contextId = _selectedContextId;
+            var isWorkspaceContext = !_isFeatureContext;
+            var search = _effectiveSearch;
+            if (!keepRows)
+            {
+                ClearGridState(clearHeaderState: false);
+                isInitialLoading = true;
+                _virtualScrollAttached = false;
+                _attachInitialScrollTop = 0;
+            }
             try
             {
-                var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch);
-                await LoadHeaderStateAsync(token);
-                totalCount = await LinkListQueryService.CountAsync(filter, token);
-                var index = await LinkListQueryService.GetIndexAsync(
-                    filter, _selectedContextId, !_isFeatureContext, token);
-                if (generation != _queryLoader.Generation || _disposed)
+                var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, search);
+                if (!keepRows)
+                {
+                    await LoadHeaderStateAsync(token);
+                    totalCount = await LinkListQueryService.CountAsync(filter, token);
+                    var index = await LinkListQueryService.GetIndexAsync(
+                        filter, contextId, isWorkspaceContext, token);
+                    if (generation != _queryLoader.Generation || _disposed)
+                    {
+                        return;
+                    }
+                    _appliedSearch = search;
+                    BuildSlots(index);
+                    hasLoadedOnce = true;
+                    _loadedWorkspaceId = WorkspaceId;
+                    var (initialStart, initialEnd) = ComputeInitialRange(restoreScrollTop);
+                    UpdateVisibleRange(initialStart, Math.Max(-1, initialEnd));
+                    await EnsureSlotsHydratedAsync(initialStart, initialEnd, token);
+                    if (generation != _queryLoader.Generation || _disposed)
+                    {
+                        return;
+                    }
+                    _attachInitialScrollTop = restoreScrollTop is > 0 ? restoreScrollTop.Value : 0;
+                    ApplySyncStateFromLoadedItems();
+                    return;
+                }
+
+                // Search edit: read everything into locals first. The page fields the markup reads change only
+                // in the swap below, so a render that happens while the queries run still shows the old rows.
+                var newHeaderState = await LinkListQueryService.GetHeaderStateAsync(
+                    WorkspaceId, contextId, isWorkspaceContext, _capabilities, token);
+                var newCount = await LinkListQueryService.CountAsync(filter, token);
+                var newIndex = await LinkListQueryService.GetIndexAsync(filter, contextId, isWorkspaceContext, token);
+                var topRowIds = ComputeSlots(newIndex, _presentation.GroupByDependencyLevel)
+                    .Take(VirtualInitialViewportSlots)
+                    .Where(slot => slot.Kind == VirtualSlotKind.Row)
+                    .Select(slot => slot.WorkspaceRepositoryId)
+                    .ToList();
+                IReadOnlyList<WorkspaceRepositoryLinkListItemDto> topRows = topRowIds.Count == 0
+                    ? []
+                    : await LinkListQueryService.GetByIdsAsync(
+                        WorkspaceId, topRowIds, contextId, isWorkspaceContext, token);
+                if (!ShouldApplyKeptReload(
+                        _disposed, generation, _queryLoader.Generation,
+                        contextGeneration, _contextGeneration, isInitialLoading))
                 {
                     return;
                 }
-                BuildSlots(index);
-                hasLoadedOnce = true;
+
+                ClearGridState(clearHeaderState: false);
+                _headerState = newHeaderState;
+                totalCount = newCount;
+                _appliedSearch = search;
+                BuildSlots(newIndex);
                 _loadedWorkspaceId = WorkspaceId;
-                var (initialStart, initialEnd) = ComputeInitialRange(restoreScrollTop);
-                UpdateVisibleRange(initialStart, Math.Max(-1, initialEnd));
-                await EnsureSlotsHydratedAsync(initialStart, initialEnd, token);
-                if (generation != _queryLoader.Generation || _disposed)
-                {
-                    return;
-                }
-                _attachInitialScrollTop = restoreScrollTop is > 0 ? restoreScrollTop.Value : 0;
+                var (topStart, topEnd) = ComputeInitialRange(null);
+                UpdateVisibleRange(topStart, Math.Max(-1, topEnd));
+                ApplyItemsFromDtos(topRows, replace: false);
+                // Same tbody element: attach again so the script scrolls it back to the top for the new result.
+                _virtualScrollAttached = false;
+                _attachInitialScrollTop = 0;
                 ApplySyncStateFromLoadedItems();
             }
             catch (OperationCanceledException)
@@ -119,7 +190,8 @@ public sealed partial class WorkspaceRepositories
             }
             finally
             {
-                if (generation == _queryLoader.Generation && !_disposed)
+                // A reload that kept the rows never raised the flag, so it must not lower one a clearing reload raised.
+                if (!keepRows && generation == _queryLoader.Generation && !_disposed)
                 {
                     isInitialLoading = false;
                 }
@@ -155,9 +227,11 @@ public sealed partial class WorkspaceRepositories
         {
             return false;
         }
+        var slotsVersion = _slotsVersion;
         var dtos = await LinkListQueryService.GetByIdsAsync(
             WorkspaceId, missingIds, _selectedContextId, !_isFeatureContext, cancellationToken);
-        if (cancellationToken.IsCancellationRequested || _disposed)
+        // Rows read for a slot list that was replaced meanwhile (a search result swapped in) are not in the new grid.
+        if (cancellationToken.IsCancellationRequested || _disposed || slotsVersion != _slotsVersion)
         {
             return false;
         }
@@ -326,7 +400,7 @@ public sealed partial class WorkspaceRepositories
     {
         await LoadHeaderStateAsync(cancellationToken);
         totalCount = await LinkListQueryService.CountAsync(
-            new WorkspaceRepositoryLinkListFilter(WorkspaceId, _effectiveSearch),
+            new WorkspaceRepositoryLinkListFilter(WorkspaceId, _appliedSearch),
             cancellationToken);
         if (_visibleEnd >= _visibleStart && _slots.Count > 0)
         {
@@ -393,6 +467,7 @@ public sealed partial class WorkspaceRepositories
         Workspace? Workspace,
         IReadOnlyList<WorkspaceRepositoryLinkIndexEntry> Index,
         WorkspaceRepositoryHeaderStateDto? HeaderState,
+        string Search,
         int ContextGeneration,
         CancellationToken QueryToken);
 
@@ -409,14 +484,14 @@ public sealed partial class WorkspaceRepositories
             repo => repo.GetHeaderAsync(WorkspaceId));
         if (w == null)
         {
-            return new WorkspaceReloadSnapshot(null, [], null, contextGeneration, token);
+            return new WorkspaceReloadSnapshot(null, [], null, search, contextGeneration, token);
         }
         // Rebuild index when levels/order may have changed.
         var filter = new WorkspaceRepositoryLinkListFilter(WorkspaceId, search);
         var index = await LinkListQueryService.GetIndexAsync(filter, contextId, isWorkspaceContext, token);
         var headerState = await LinkListQueryService.GetHeaderStateAsync(
             WorkspaceId, contextId, isWorkspaceContext, capabilities, token);
-        return new WorkspaceReloadSnapshot(w, index, headerState, contextGeneration, token);
+        return new WorkspaceReloadSnapshot(w, index, headerState, search, contextGeneration, token);
     }
 
     /// <summary>Apply step: swaps the page collections. Must run on the dispatcher (the markup reads these fields).
@@ -439,6 +514,7 @@ public sealed partial class WorkspaceRepositories
         // old slot indices, since a level split/merge shifts slot positions in the rebuilt list.
         BuildSlots(snapshot.Index);
         totalCount = snapshot.Index.Count;
+        _appliedSearch = snapshot.Search;
         _headerState = snapshot.HeaderState;
         _linkByRepoId.Clear();
         _linkByWrlId.Clear();

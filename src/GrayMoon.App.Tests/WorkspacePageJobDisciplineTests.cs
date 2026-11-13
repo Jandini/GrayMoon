@@ -124,6 +124,59 @@ public sealed class WorkspacePageJobDisciplineTests
         Assert.StartsWith("if (!PageStateApplyGuard.ShouldApply(_disposed, snapshot.ContextGeneration, _contextGeneration))", apply.TrimStart('{', '\r', '\n', ' '));
     }
 
+    [Theory]
+    [InlineData(true, true, false, true)]
+    // First load and context switch never ask to keep the rows.
+    [InlineData(false, true, false, false)]
+    // Nothing on screen yet, or a clearing reload already blanked the grid.
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, true, false)]
+    public void Search_reload_keeps_the_rows_only_on_a_loaded_grid(
+        bool requested, bool hasLoadedOnce, bool isLoading, bool expected)
+    {
+        Assert.Equal(expected, WorkspaceRepositories.ShouldKeepRowsWhileLoading(requested, hasLoadedOnce, isLoading));
+    }
+
+    [Theory]
+    [InlineData(false, 5, 5, 2, 2, false, true)]
+    // Superseded by a newer search, page gone, context switched, or a clearing reload began meanwhile.
+    [InlineData(false, 5, 6, 2, 2, false, false)]
+    [InlineData(true, 5, 5, 2, 2, false, false)]
+    [InlineData(false, 5, 5, 2, 3, false, false)]
+    [InlineData(false, 5, 5, 2, 2, true, false)]
+    public void Search_result_replaces_the_rows_only_when_it_is_still_current(
+        bool disposed, int queryGeneration, int currentQueryGeneration,
+        int contextGeneration, int currentContextGeneration, bool isLoading, bool expected)
+    {
+        Assert.Equal(expected, WorkspaceRepositories.ShouldApplyKeptReload(
+            disposed, queryGeneration, currentQueryGeneration, contextGeneration, currentContextGeneration, isLoading));
+    }
+
+    /// <summary>
+    /// A search edit used to clear the grid and raise the loading flag before its queries ran, so any render in
+    /// between dropped the whole table and the "N repositories" count, then drew them again (flicker).
+    /// </summary>
+    [Fact]
+    public void Search_reload_does_not_blank_the_grid_while_its_queries_run()
+    {
+        var search = ReadPage("WorkspaceRepositories.Search.cs");
+        Assert.Contains("ResetAndLoadFromTopAsync(restoreScroll: false, keepRowsWhileLoading: true)", search);
+
+        var reset = MethodBody(ReadPage("WorkspaceRepositories.Loading.cs"), "private async Task ResetAndLoadFromTopAsync(");
+        var keptStart = reset.IndexOf("var newHeaderState =", StringComparison.Ordinal);
+        var guard = reset.IndexOf("if (!ShouldApplyKeptReload(", StringComparison.Ordinal);
+        Assert.True(keptStart >= 0 && guard > keptStart, "The kept-rows branch or its apply guard was not found.");
+
+        // Between the first query and the guard nothing the markup reads may change.
+        var whileLoading = reset[keptStart..guard];
+        foreach (var write in new[] { "ClearGridState(", "isInitialLoading =", "totalCount =", "_headerState =", "BuildSlots(", "_appliedSearch =", "ApplyItemsFromDtos(" })
+            Assert.DoesNotContain(write, whileLoading);
+
+        // The count text and the empty-state rows follow the search that was applied, not the one being typed.
+        var state = ReadPage("WorkspaceRepositories.State.cs");
+        Assert.Contains("private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_appliedSearch);", state);
+    }
+
     /// <summary>The text from the method's opening brace to its matching closing brace.</summary>
     private static string MethodBody(string source, string signature)
     {
