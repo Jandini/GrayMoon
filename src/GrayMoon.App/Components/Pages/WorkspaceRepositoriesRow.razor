@@ -365,7 +365,7 @@
                                   @onkeydown="OnDependencyBadgeKeydown"
                                   @onmouseenter="OnDependencyBadgeMouseEnter"
                                   @onmouseleave="OnDependencyBadgeMouseLeave">
-                                <span class="badge build-dep-badge @(depBadgeOnTag ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
+                                <span class="badge build-dep-badge @(depBadgeOnTag || Link.IsReference || !Link.Allows(RepositoryOperation.UpdateDependencies) ? "build-dep-badge-none" : "build-dep-badge-mismatch")">@unmatchedWithFiles of @totalWithFiles</span>
                                 @if (MismatchedDependencyLines.Count > 0 || MismatchedFileVersionLines.Count > 0 || CustomDependencyLines.Count > 0)
                                 {
                                     <div class="dependency-badge-tooltip">
