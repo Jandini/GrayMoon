@@ -107,6 +107,45 @@ public sealed class BranchRowSaveRaceTests
         Assert.Equal(0, link.OutgoingCommits);
     }
 
+    /// <summary>
+    /// Prepare Workspace on a slow machine: GetCommitCounts took 9 to 18 seconds and the hook sync stored the remote
+    /// row in that time. The push had read "no row" before the wait, so its insert failed the unique index and the
+    /// log showed a database error for a push that succeeded. The row is now looked up after the Worker answers.
+    /// </summary>
+    [Fact]
+    public async Task Push_completion_does_not_insert_a_remote_branch_the_hook_sync_stored_during_the_worker_call()
+    {
+        var failures = new CountFailedCommands();
+        await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: o => o.AddInterceptors(failures));
+        var factory = ctx.Resolve<IDbContextFactory<AppDbContext>>();
+        var contextId = await ctx.GetSpecialContextIdAsync();
+        await SetLinkBranchAsync(ctx, Branch, hasUpstream: false);
+
+        ctx.WorkerBridge.IsWorkerConnected = false;
+        ctx.WorkerBridge.RespondAsync("GetCommitCounts", async (_, ct) =>
+        {
+            await using var other = await factory.CreateDbContextAsync(ct);
+            other.RepositoryBranches.Add(NewRemote(ctx.WorkspaceRepositoryId, RemoteBranch));
+            await other.SaveChangesAsync(ct);
+            return new GrayMoon.Abstractions.Worker.WorkerCommandResponse(true, new { outgoingCommits = 0, incomingCommits = 0, hasUpstream = true }, null);
+        });
+        await using (var scope = ctx.CreateScope())
+        {
+            var push = CreatePushService(ctx, scope.ServiceProvider);
+            await push.UpdateCommitCountsAndUpstreamAfterPushAsync(
+                ctx.WorkspaceId,
+                contextId,
+                [new PushRepoPayload(ctx.RepositoryId, "graymoon-api", null, [])],
+                CancellationToken.None);
+        }
+
+        Assert.Equal(0, failures.Count);
+        Assert.Equal(1, await CountAsync(ctx, RemoteBranch, isRemote: true));
+        var link = await ctx.ReadLinkAsync();
+        Assert.True(link.BranchHasUpstream);
+        Assert.Equal(0, link.OutgoingCommits);
+    }
+
     [Fact]
     public async Task Single_repository_state_write_survives_a_racing_branch_refresh()
     {
@@ -228,6 +267,20 @@ public sealed class BranchRowSaveRaceTests
     {
         var rows = await ctx.ReadBranchesAsync();
         return rows.Count(b => b.BranchName == name && b.IsRemote == isRemote && !b.IsTag);
+    }
+
+    /// <summary>Counts database commands that failed, which is what EF logs as an error even when the save recovers.</summary>
+    private sealed class CountFailedCommands : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public override Task CommandFailedAsync(System.Data.Common.DbCommand command, CommandErrorEventData eventData, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _count);
+            return base.CommandFailedAsync(command, eventData, cancellationToken);
+        }
     }
 
     /// <summary>

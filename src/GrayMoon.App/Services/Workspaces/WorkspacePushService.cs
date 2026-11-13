@@ -1536,7 +1536,6 @@ public sealed partial class WorkspacePushService(
         var checkouts = await LoadContextCheckoutsAsync(workspaceId, contextId, repoIds, cancellationToken);
 
         // Persist the remote branch for each pushed repo so it appears in Remotes without calling refresh branches.
-        var now = DateTime.UtcNow;
         var remoteCandidates = checkouts
             .Where(c => c.Value.AllowsPush && !string.IsNullOrWhiteSpace(c.Value.BranchName))
             .Select(c => (
@@ -1547,35 +1546,6 @@ public sealed partial class WorkspacePushService(
                     : "origin/" + c.Value.BranchName))
             .ToList();
         var pushedUpstreamRepoIds = remoteCandidates.Select(c => c.RepositoryId).ToHashSet();
-        if (remoteCandidates.Count > 0)
-        {
-            var wrlIds = remoteCandidates.Select(c => c.WorkspaceRepositoryId).ToList();
-            var existingRemotes = await _dbContext.RepositoryBranches
-                .Where(rb => wrlIds.Contains(rb.WorkspaceRepositoryId) && rb.IsRemote)
-                .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
-                .ToListAsync(cancellationToken);
-            var existingRemoteSet = existingRemotes
-                .Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName))
-                .ToHashSet();
-            var toAdd = new List<RepositoryBranch>();
-            foreach (var (_, workspaceRepositoryId, remoteBranchName) in remoteCandidates)
-            {
-                if (!existingRemoteSet.Contains((workspaceRepositoryId, remoteBranchName)))
-                {
-                    toAdd.Add(new RepositoryBranch
-                    {
-                        WorkspaceRepositoryId = workspaceRepositoryId,
-                        BranchName = remoteBranchName,
-                        IsRemote = true,
-                        LastSeenAt = now,
-                        IsDefault = false
-                    });
-                }
-            }
-
-            if (toAdd.Count > 0)
-                _dbContext.RepositoryBranches.AddRange(toAdd);
-        }
 
         var workerArgs = await ResolveWorkerPathArgsAsync(workspace.WorkspaceId, contextId, cancellationToken);
         var workspaceRoot = workerArgs.WorkspaceRoot;
@@ -1609,6 +1579,40 @@ public sealed partial class WorkspacePushService(
                 return (RepoId: repo.RepoId, Data: (WorkerCommitCountsResponse?)null);
             }
         }));
+
+        // Which remote rows are missing is decided here, after the Worker round trip and right before the save.
+        // GetCommitCounts can take many seconds, and the push's own hook sync stores origin/<branch> in that time:
+        // deciding before the wait queued an insert for a row stored meanwhile, and the save hit the unique index.
+        if (remoteCandidates.Count > 0)
+        {
+            var wrlIds = remoteCandidates.Select(c => c.WorkspaceRepositoryId).ToList();
+            var existingRemotes = await _dbContext.RepositoryBranches
+                .Where(rb => wrlIds.Contains(rb.WorkspaceRepositoryId) && rb.IsRemote)
+                .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
+                .ToListAsync(cancellationToken);
+            var existingRemoteSet = existingRemotes
+                .Select(rb => (rb.WorkspaceRepositoryId, rb.BranchName))
+                .ToHashSet();
+            var now = DateTime.UtcNow;
+            var toAdd = new List<RepositoryBranch>();
+            foreach (var (_, workspaceRepositoryId, remoteBranchName) in remoteCandidates)
+            {
+                if (!existingRemoteSet.Contains((workspaceRepositoryId, remoteBranchName)))
+                {
+                    toAdd.Add(new RepositoryBranch
+                    {
+                        WorkspaceRepositoryId = workspaceRepositoryId,
+                        BranchName = remoteBranchName,
+                        IsRemote = true,
+                        LastSeenAt = now,
+                        IsDefault = false
+                    });
+                }
+            }
+
+            if (toAdd.Count > 0)
+                _dbContext.RepositoryBranches.AddRange(toAdd);
+        }
 
         // A failed or missing response leaves the persisted counts alone: nothing is marked probed, so the
         // writer has nothing to replace. Overwriting them with nulls would blank the badges after a
