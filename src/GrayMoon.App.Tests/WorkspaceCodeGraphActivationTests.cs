@@ -69,6 +69,56 @@ public sealed class WorkspaceCodeGraphActivationTests
         Assert.Empty(operations.Kinds);
     }
 
+    [Fact]
+    public async Task The_watched_workspace_is_named_while_its_index_builds_and_not_afterwards()
+    {
+        // The Workspaces list overlay finds the operation through this. It used to look at the Workspace the
+        // settings dialog last opened, so an index started by Add Workspace had no overlay at all.
+        var bridge = Bridge(command => command == WorkerHubMethods.WatchCodeGraphInit ? "NotRunning" : "Started");
+        var operations = new RecordingLock();
+        var activation = Create(bridge, operations);
+        int? duringWatch = null;
+        operations.BeforeWork = () => duringWatch = activation.ActiveWorkspaceId;
+
+        Assert.Null(activation.ActiveWorkspaceId);
+        Assert.Null(await activation.StartIndexAsync(7, "/workspaces"));
+
+        Assert.Equal(7, duringWatch);
+        Assert.Null(activation.ActiveWorkspaceId);
+    }
+
+    [Fact]
+    public async Task An_index_that_is_already_there_names_no_workspace()
+    {
+        var activation = Create(Bridge("AlreadyInitialized"), new RecordingLock());
+
+        Assert.Null(await activation.StartIndexAsync(7, "/workspaces"));
+
+        Assert.Null(activation.ActiveWorkspaceId);
+    }
+
+    [Fact]
+    public async Task A_build_that_started_and_failed_is_not_reported_as_not_started()
+    {
+        var bridge = Bridge(command => command == WorkerHubMethods.WatchCodeGraphInit ? "Failed" : "Started");
+        var activation = Create(bridge, new RecordingLock());
+
+        Assert.Equal("The CodeGraph index build failed.", await activation.StartIndexAsync(7, "/workspaces/7"));
+    }
+
+    [Theory]
+    [InlineData(true, true, null, true)]
+    [InlineData(true, true, 3, false)]
+    [InlineData(true, false, null, false)]
+    [InlineData(false, true, null, false)]
+    public void Add_workspace_refuses_a_ticked_box_with_no_workspace_repository_before_it_creates_anything(
+        bool offered, bool selected, int? workspaceRepositoryId, bool refused)
+    {
+        var message = WorkspaceCodeGraphActivation.MissingWorkspaceRepositoryMessage(offered, selected, workspaceRepositoryId);
+
+        Assert.Equal(refused ? WorkspaceManifestService.CodeGraphNeedsWorkspaceRepositoryMessage : null, message);
+    }
+
     private static WorkspaceCodeGraphActivation Create(ScriptedWorkerBridge bridge, RecordingLock operations)
     {
         var manifest = new RecordingManifestService { CodeGraphEnabled = true };
@@ -106,6 +156,8 @@ public sealed class WorkspaceCodeGraphActivationTests
 
         public List<string> OverlayKeys { get; } = [];
 
+        public Action? BeforeWork { get; set; }
+
         public bool IsWorkspaceStructurallyBusy(int workspaceId) => false;
 
         public bool IsContextBusy(WorkspaceFeatureContextId contextId) => false;
@@ -133,6 +185,7 @@ public sealed class WorkspaceCodeGraphActivationTests
         {
             Kinds.Add(operationKind);
             OverlayKeys.Add(overlayKey);
+            BeforeWork?.Invoke();
             operation = new ImmediateOperation();
             work(operation, CancellationToken.None).GetAwaiter().GetResult();
             return true;

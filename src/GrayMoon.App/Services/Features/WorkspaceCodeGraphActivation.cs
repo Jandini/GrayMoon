@@ -19,6 +19,24 @@ public sealed class WorkspaceCodeGraphActivation(
 {
     public const string OperationKind = "codegraph-init";
 
+    private int _activeWorkspaceId;
+
+    /// <summary>
+    /// The Workspace whose index this circuit is starting or watching, or null. The Workspaces list has no
+    /// Workspace id in its path, so its overlay finds the running operation through this, for a Workspace that
+    /// was just added as well as for one that is edited.
+    /// </summary>
+    public int? ActiveWorkspaceId => Volatile.Read(ref _activeWorkspaceId) is > 0 and var id ? id : null;
+
+    /// <summary>
+    /// Use CodeGraph is stored in the Workspace definition. Add Workspace asks this before it creates anything,
+    /// so a ticked box with no Workspace repository is refused while nothing has been created yet.
+    /// </summary>
+    public static string? MissingWorkspaceRepositoryMessage(bool offered, bool selected, int? workspaceRepositoryId) =>
+        offered && selected && workspaceRepositoryId is null
+            ? WorkspaceManifestService.CodeGraphNeedsWorkspaceRepositoryMessage
+            : null;
+
     /// <summary>
     /// An absent switch left unchecked is not a request to write <c>false</c>. Checking it, or saving a switch the
     /// definition already sets, writes the checkbox.
@@ -90,6 +108,19 @@ public sealed class WorkspaceCodeGraphActivation(
         if (!FeatureCodeGraphService.ShouldWatch(outcome))
             return outcome == FeatureCodeGraphService.AlreadyInitialized ? null : Describe(outcome);
 
+        Volatile.Write(ref _activeWorkspaceId, workspaceId);
+        try
+        {
+            return await WatchIndexAsync(workspaceId, overlayKey, cancellationToken);
+        }
+        finally
+        {
+            Volatile.Write(ref _activeWorkspaceId, 0);
+        }
+    }
+
+    private async Task<string?> WatchIndexAsync(int workspaceId, string overlayKey, CancellationToken cancellationToken)
+    {
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = operations.TryStartStructural(
             workspaceId,
@@ -115,7 +146,7 @@ public sealed class WorkspaceCodeGraphActivation(
                         }
                     });
 
-                    tcs.TrySetResult(backgrounded || IsQuietEnd(watched) ? null : Describe(watched));
+                    tcs.TrySetResult(backgrounded || IsQuietEnd(watched) ? null : DescribeWatch(watched));
                 }
                 catch (OperationCanceledException)
                 {
@@ -133,11 +164,23 @@ public sealed class WorkspaceCodeGraphActivation(
         if (!started)
             return $"A workspace operation is already running ({operation.DisplayMessage}).";
 
-        return await tcs.Task.WaitAsync(cancellationToken);
+        var result = await tcs.Task.WaitAsync(cancellationToken);
+        // The lock is free and the operation has its final state before the caller goes on, so what the caller
+        // does next (close the dialog, ask whether a job is still running) does not see this one as running.
+        await operation.WhenCompleted.WaitAsync(cancellationToken);
+        return result;
     }
 
     private static bool IsQuietEnd(string? outcome) =>
         outcome is "Completed" or "Stopped" or "NotRunning";
+
+    /// <summary>The build was started; an outcome here is how the build ended, not a failure to start it.</summary>
+    private static string DescribeWatch(string? outcome) => outcome switch
+    {
+        FeatureCodeGraphService.Disabled => Describe(outcome),
+        null or "" or FeatureCodeGraphService.Failed => "The CodeGraph index build failed.",
+        _ => $"The CodeGraph index build did not finish ({outcome}).",
+    };
 
     private static string Describe(string? outcome) => outcome switch
     {

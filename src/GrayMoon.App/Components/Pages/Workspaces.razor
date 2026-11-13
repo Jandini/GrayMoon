@@ -647,6 +647,15 @@
             return;
         }
 
+        // Before anything is created: a ticked Use CodeGraph with no Workspace repository cannot be stored.
+        if (editingWorkspaceId == null
+            && WorkspaceCodeGraphActivation.MissingWorkspaceRepositoryMessage(
+                editorShowCodeGraph, editorUseCodeGraph, editorWorkspaceRepositoryId) is { } codeGraphNeedsRepository)
+        {
+            editorErrorMessage = codeGraphNeedsRepository;
+            return;
+        }
+
         if (editingWorkspaceId == null)
         {
             var rootPath = await WorkspaceService.GetRootPathAsync();
@@ -740,6 +749,8 @@
                     editorErrorMessage = codeGraphError;
                     editorStoredCodeGraph = await ManifestService.GetCodeGraphSwitchAsync(codeGraphWorkspaceId);
                     editorUseCodeGraph = editorStoredCodeGraph == true;
+                    // The Workspace itself is stored; the list shows it while the dialog stays open on the error.
+                    await LoadWorkspacesAsync();
                     return;
                 }
             }

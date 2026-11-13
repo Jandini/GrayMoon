@@ -22,6 +22,8 @@
 @inject IWorkerBridge WorkerBridge
 @inject IDbContextFactory<AppDbContext> DbContextFactory
 @inject IWorkspaceOperationRunner OperationRunner
+@inject IBackgroundJobService JobService
+@inject IToastService ToastService
 @inject NavigationManager Navigation
 @inject WorkspaceService WorkspaceService
 @inject ILogger<WorkspaceSettingsHost> Logger
@@ -69,6 +71,9 @@
 @code {
     private const string FeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
 
+    public const string ReloadDeferredMessage =
+        "Workspace settings saved. A job is running in this tab, so the page was not reloaded. Reload it when the job has finished.";
+
     [Parameter] public EventCallback OnSaved { get; set; }
 
     /// <summary>Workspace pages reload after a save so navigation follows a profile change. The Workspaces list reloads its rows instead.</summary>
@@ -86,6 +91,7 @@
     private bool _localOverlay;
     private bool _overlayCanBackground;
     private bool _disposed;
+    private int _openGeneration;
     private string _name = string.Empty;
     private string? _rootPath;
     private string? _error;
@@ -112,38 +118,57 @@
         if (_saving)
             return;
 
-        var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null || _disposed)
-            return;
+        // Everything is loaded into locals and applied in one step, and only for the newest open: two quick
+        // clicks on different rows must not leave one Workspace's id with the other's settings.
+        var generation = ++_openGeneration;
+        try
+        {
+            var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
+            if (workspace == null)
+                return;
 
-        _workspaceId = workspaceId;
-        _rootPath = workspace.RootPath;
-        _name = workspace.Name;
-        _error = null;
-        _repositoryIds = workspace.Repositories.Select(link => link.RepositoryId).ToHashSet();
-        var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
-        _hasFeatures = features.Count > 0;
-        _type = workspace.Type;
-        _useGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
-        _useGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
-        var workspaceRepository = workspace.Repositories.FirstOrDefault(link => link.Role == WorkspaceRepositoryRole.Workspace);
-        _originalRepositoryId = workspaceRepository?.RepositoryId;
-        _repositoryId = workspaceRepository?.RepositoryId;
-        _sourceRepositoryIds = workspace.Repositories
-            .Where(link => link.Role != WorkspaceRepositoryRole.Workspace)
-            .Select(link => link.RepositoryId)
-            .ToHashSet();
-        _choices = await LoadChoicesAsync(_sourceRepositoryIds);
-        _hasConnectors = await HasConnectorsAsync();
+            var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
+            var workspaceRepository = workspace.Repositories.FirstOrDefault(link => link.Role == WorkspaceRepositoryRole.Workspace);
+            var sourceRepositoryIds = workspace.Repositories
+                .Where(link => link.Role != WorkspaceRepositoryRole.Workspace)
+                .Select(link => link.RepositoryId)
+                .ToHashSet();
+            var choices = await LoadChoicesAsync(sourceRepositoryIds);
+            var hasConnectors = await HasConnectorsAsync();
 
-        var storedTask = ManifestService.GetCodeGraphSwitchAsync(workspaceId);
-        var hostTask = HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
-        _storedCodeGraph = await storedTask;
-        var host = await hostTask;
-        _showCodeGraph = host.Read?.IsCodeGraphInstalled == true;
-        _useCodeGraph = _storedCodeGraph == true;
-        _visible = true;
-        await InvokeAsync(StateHasChanged);
+            var storedTask = ManifestService.GetCodeGraphSwitchAsync(workspaceId);
+            var hostTask = HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
+            var storedCodeGraph = await storedTask;
+            var host = await hostTask;
+
+            if (generation != _openGeneration || _disposed || _saving)
+                return;
+
+            _workspaceId = workspaceId;
+            _rootPath = workspace.RootPath;
+            _name = workspace.Name;
+            _error = null;
+            _repositoryIds = workspace.Repositories.Select(link => link.RepositoryId).ToHashSet();
+            _hasFeatures = features.Count > 0;
+            _type = workspace.Type;
+            _useGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
+            _useGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
+            _originalRepositoryId = workspaceRepository?.RepositoryId;
+            _repositoryId = workspaceRepository?.RepositoryId;
+            _sourceRepositoryIds = sourceRepositoryIds;
+            _choices = choices;
+            _hasConnectors = hasConnectors;
+            _storedCodeGraph = storedCodeGraph;
+            _showCodeGraph = host.Read?.IsCodeGraphInstalled == true;
+            _useCodeGraph = storedCodeGraph == true;
+            _visible = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Could not open the settings of workspace {WorkspaceId}", workspaceId);
+            ToastService.ShowError("Could not open the Workspace settings. " + ex.Message);
+        }
     }
 
     private Task OnNameChanged(string value)
@@ -202,6 +227,8 @@
             return;
         }
 
+        var stored = false;
+        var closed = false;
         try
         {
             _saving = true;
@@ -215,6 +242,7 @@
                 _type,
                 _useGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
                 _useGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
+            stored = true;
 
             var repositoryError = await ApplyRepositoryChangeAsync(workspaceId);
             if (repositoryError is not null)
@@ -249,9 +277,16 @@
             }
 
             _visible = false;
+            closed = true;
             await OnSaved.InvokeAsync();
             if (ReloadAfterSave && !_disposed)
-                Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+            {
+                // A full reload ends this tab's circuit and every job running in it, on whatever page it started.
+                if (JobService.HasRunningJobs)
+                    ToastService.ShowWarning(ReloadDeferredMessage);
+                else
+                    Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -261,6 +296,9 @@
         finally
         {
             _saving = false;
+            // A later step failed after the name and profile were stored: the list shows what is stored now.
+            if (stored && !closed && !_disposed)
+                await OnSaved.InvokeAsync();
         }
     }
 
@@ -394,7 +432,9 @@
 
     private void UpdateLocalOverlay()
     {
-        if (_disposed || _workspaceId is not int workspaceId)
+        // The Workspace comes from the activation, not from the dialog: Add Workspace starts an index for a
+        // Workspace this host never opened.
+        if (_disposed || CodeGraphActivation.ActiveWorkspaceId is not int workspaceId)
         {
             _localOverlay = false;
             return;

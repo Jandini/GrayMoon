@@ -6,7 +6,7 @@
 {
     <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
          @onkeydown="HandleKeyDown">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-lg modal-dialog-centered workspace-settings-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@Title</h5>
@@ -23,7 +23,9 @@
                         <div class="gm-callout gm-callout--error mb-3" role="alert">@ErrorMessage</div>
                     }
 
-                    <ul class="nav nav-tabs workspace-settings-tabs mb-3" role="tablist">
+                    @* Enter on a tab presses that tab. The key must not also reach the dialog, where Enter saves. *@
+                    <ul class="nav nav-tabs workspace-settings-tabs mb-3" role="tablist"
+                        @onkeydown="HandleButtonAreaKeyDown" @onkeydown:stopPropagation="true">
                         <li class="nav-item" role="presentation">
                             <button class="nav-link @(_tab == DetailsTab ? "active" : "")" type="button" role="tab"
                                     aria-selected="@(_tab == DetailsTab)" @onclick="() => SetTab(DetailsTab)">Details</button>
@@ -149,7 +151,9 @@
                             </div>
                         </div>
 
-                        <div class="workspace-settings-panel @PanelClass(LockTab)" @attributes="PanelAttributes(LockTab)">
+                        @* Every control on this tab applies at once, so Enter here never saves the dialog. *@
+                        <div class="workspace-settings-panel @PanelClass(LockTab)" @attributes="PanelAttributes(LockTab)"
+                             @onkeydown="HandleButtonAreaKeyDown" @onkeydown:stopPropagation="true">
                             @if (WorkspaceId is { } referenceWorkspaceId)
                             {
                                 <WorkspaceReferenceSection WorkspaceId="@referenceWorkspaceId"
@@ -158,7 +162,8 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer">
+                @* Enter on Cancel cancels, and Enter on Save saves once, through the button's own click. *@
+                <div class="modal-footer" @onkeydown="HandleButtonAreaKeyDown" @onkeydown:stopPropagation="true">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
                     <button type="button" class="btn btn-primary" data-default-action @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory || SaveDisabled)">
                         @if (IsSaving)
@@ -286,6 +291,16 @@
     {
         _repositoryLockConfirming = open;
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Keys pressed on the tabs, the Lock tab and the footer buttons stop here. Escape still closes the dialog;
+    /// Enter is left to the focused button, so it does not also save.
+    /// </summary>
+    private async Task HandleButtonAreaKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await OnCancel.InvokeAsync();
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
