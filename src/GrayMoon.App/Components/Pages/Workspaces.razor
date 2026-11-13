@@ -211,6 +211,7 @@
                UseGitHubActions="@editorUseGitHubActions"
                UseGitHubActionsChanged="value => editorUseGitHubActions = value"
                ShowCodeGraph="@editorShowCodeGraph"
+               IsCodeGraphChecking="@editorCodeGraphChecking"
                UseCodeGraph="@editorUseCodeGraph"
                UseCodeGraphChanged="value => editorUseCodeGraph = value"
                IsTypeDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
@@ -379,6 +380,8 @@
     private bool editorUseGitHubActions = true;
     private bool editorUseCodeGraph;
     private bool editorShowCodeGraph;
+    private bool editorCodeGraphChecking;
+    private CancellationTokenSource? _codeGraphOfferCts;
     private bool? editorStoredCodeGraph;
     private WorkspaceSettingsHost? _settingsHost;
     private int? editorWorkspaceRepositoryId;
@@ -446,6 +449,7 @@
     public void Dispose()
     {
         _disposed = true;
+        StopCodeGraphOfferCheck();
         WorkerConnectionTracker.RemoveStateChanged(OnWorkerConnectionStateChanged);
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
@@ -553,21 +557,51 @@
         _ = LoadCodeGraphOfferAsync();
     }
 
+    /// <summary>
+    /// Asks the Worker whether CodeGraph is installed until it answers or the dialog closes. Without an answer the
+    /// switch stays visible and disabled; it is never hidden because the Worker was not ready yet.
+    /// </summary>
     private async Task LoadCodeGraphOfferAsync()
     {
+        StopCodeGraphOfferCheck();
+        var check = new CancellationTokenSource();
+        _codeGraphOfferCts = check;
+        editorCodeGraphChecking = true;
         try
         {
-            var read = await HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
-            if (!showEditorModal)
-                return;
+            var offer = await CodeGraphOfferCheck.WaitForAnswerAsync(
+                token => HostInfo.GetAsync(WorkerBridge, refresh: false, token),
+                token => Task.Delay(CodeGraphOfferCheck.RetryInterval, token),
+                check.Token);
+            await InvokeAsync(() =>
+            {
+                if (_disposed || !showEditorModal || !ReferenceEquals(_codeGraphOfferCts, check))
+                    return;
 
-            editorShowCodeGraph = read.Read?.IsCodeGraphInstalled == true;
-            await InvokeAsync(StateHasChanged);
+                editorCodeGraphChecking = false;
+                editorShowCodeGraph = offer == CodeGraphOffer.Offered;
+                StateHasChanged();
+            });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            Logger.LogDebug(ex, "Could not tell whether CodeGraph is installed.");
         }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not tell whether CodeGraph is installed.");
+        }
+    }
+
+    private void StopCodeGraphOfferCheck()
+    {
+        var check = _codeGraphOfferCts;
+        _codeGraphOfferCts = null;
+        editorCodeGraphChecking = false;
+        if (check is null)
+            return;
+
+        check.Cancel();
+        check.Dispose();
     }
 
     private Task OpenWorkspaceSettingsAsync(int workspaceId) =>
@@ -622,6 +656,7 @@
     {
         _directoryInfoDebounceCts?.Cancel();
         _directoryInfoCts?.Cancel();
+        StopCodeGraphOfferCheck();
         showEditorModal = false;
         editorErrorMessage = null;
     }

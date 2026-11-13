@@ -43,6 +43,7 @@
                UseGitHubActions="@_useGitHubActions"
                UseGitHubActionsChanged="OnGitHubActionsChanged"
                ShowCodeGraph="@_showCodeGraph"
+               IsCodeGraphChecking="@_codeGraphChecking"
                UseCodeGraph="@_useCodeGraph"
                UseCodeGraphChanged="OnCodeGraphChanged"
                IsTypeDisabled="@_hasFeatures"
@@ -86,6 +87,8 @@
     private bool _hasConnectors;
     private bool _fetching;
     private bool _showCodeGraph;
+    private bool _codeGraphChecking;
+    private CancellationTokenSource? _codeGraphCheck;
     private bool _useCodeGraph;
     private bool? _storedCodeGraph;
     private bool _localOverlay;
@@ -149,10 +152,7 @@
             var choices = await LoadChoicesAsync(sourceRepositoryIds);
             var hasConnectors = await HasConnectorsAsync();
 
-            var storedTask = ManifestFor(contextId).GetCodeGraphSwitchAsync(workspaceId);
-            var hostTask = HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
-            var storedCodeGraph = await storedTask;
-            var host = await hostTask;
+            var storedCodeGraph = await ManifestFor(contextId).GetCodeGraphSwitchAsync(workspaceId);
 
             if (generation != _openGeneration || _disposed || _saving)
                 return;
@@ -173,9 +173,13 @@
             _choices = choices;
             _hasConnectors = hasConnectors;
             _storedCodeGraph = storedCodeGraph;
-            _showCodeGraph = host.Read?.IsCodeGraphInstalled == true;
             _useCodeGraph = storedCodeGraph == true;
+            // The dialog does not wait for the Worker: Use CodeGraph shows its stored value at once and can be
+            // changed when the host check has answered. An answer already known is applied before the first render.
+            _showCodeGraph = false;
+            _codeGraphChecking = true;
             _visible = true;
+            _ = ConfirmCodeGraphAsync(generation);
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -183,6 +187,51 @@
             Logger.LogError(ex, "Could not open the settings of workspace {WorkspaceId}", workspaceId);
             ToastService.ShowError("Could not open the Workspace settings. " + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Asks the Worker whether CodeGraph is installed until it answers or the dialog closes. Without an answer the
+    /// switch stays visible and disabled; it is never hidden because the Worker was not ready yet.
+    /// </summary>
+    private async Task ConfirmCodeGraphAsync(int generation)
+    {
+        StopCodeGraphCheck();
+        var check = new CancellationTokenSource();
+        _codeGraphCheck = check;
+        try
+        {
+            var offer = await CodeGraphOfferCheck.WaitForAnswerAsync(
+                token => HostInfo.GetAsync(WorkerBridge, refresh: false, token),
+                token => Task.Delay(CodeGraphOfferCheck.RetryInterval, token),
+                check.Token);
+            await InvokeAsync(() =>
+            {
+                if (generation != _openGeneration || _disposed || !_visible)
+                    return;
+
+                _codeGraphChecking = false;
+                _showCodeGraph = offer == CodeGraphOffer.Offered;
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not tell whether CodeGraph is installed.");
+        }
+    }
+
+    private void StopCodeGraphCheck()
+    {
+        var check = _codeGraphCheck;
+        _codeGraphCheck = null;
+        if (check is null)
+            return;
+
+        check.Cancel();
+        check.Dispose();
     }
 
     private Task OnNameChanged(string value)
@@ -228,6 +277,7 @@
 
         _visible = false;
         _error = null;
+        StopCodeGraphCheck();
     }
 
     private async Task SaveAsync()
@@ -293,6 +343,7 @@
 
             _visible = false;
             closed = true;
+            StopCodeGraphCheck();
             await OnSaved.InvokeAsync();
             if (ReloadAfterSave && !_disposed)
             {
@@ -477,6 +528,7 @@
     public void Dispose()
     {
         _disposed = true;
+        StopCodeGraphCheck();
         OperationRunner.Changed -= OnOperationsChanged;
     }
 }

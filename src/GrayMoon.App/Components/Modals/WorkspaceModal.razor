@@ -119,11 +119,12 @@
                                            @onchange="OnGitHubActionsChanged" />
                                     <label class="form-check-label text-nowrap" for="workspaceUseGitHubActions">Show GitHub Actions</label>
                                 </div>
-                                @if (ShowCodeGraph)
+                                @if (ShowCodeGraph || IsCodeGraphChecking)
                                 {
-                                    <div class="form-check">
+                                    <div class="form-check" title="@(IsCodeGraphChecking ? CodeGraphCheckingHint : null)">
                                         <input class="form-check-input form-check-input-gray" type="checkbox" id="workspaceUseCodeGraph"
                                                checked="@UseCodeGraph"
+                                               disabled="@IsCodeGraphChecking"
                                                @onchange="OnCodeGraphChanged" />
                                         <label class="form-check-label text-nowrap" for="workspaceUseCodeGraph">Use CodeGraph</label>
                                     </div>
@@ -165,13 +166,7 @@
                 @* Enter on Cancel cancels, and Enter on Save saves once, through the button's own click. *@
                 <div class="modal-footer" @onkeydown="HandleButtonAreaKeyDown" @onkeydown:stopPropagation="true">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                    <button type="button" class="btn btn-primary" data-default-action @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory || SaveDisabled)">
-                        @if (IsSaving)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        Save
-                    </button>
+                    <button type="button" class="btn btn-primary text-nowrap" data-default-action @onclick="OnSave" disabled="@(IsSaving || IsCheckingDirectory || SaveDisabled)">Save</button>
                 </div>
             </div>
         </div>
@@ -219,6 +214,8 @@
     [Parameter] public EventCallback<bool> UseGitHubActionsChanged { get; set; }
     /// <summary>Use CodeGraph is offered only when the CodeGraph CLI is installed. Choosing a type does not change it.</summary>
     [Parameter] public bool ShowCodeGraph { get; set; }
+    /// <summary>The Worker has not answered the host check yet: Use CodeGraph is shown with its stored value and cannot be changed until it has.</summary>
+    [Parameter] public bool IsCodeGraphChecking { get; set; }
     [Parameter] public bool UseCodeGraph { get; set; }
     [Parameter] public EventCallback<bool> UseCodeGraphChanged { get; set; }
     [Parameter] public bool IsTypeDisabled { get; set; }
@@ -232,6 +229,8 @@
     [Parameter] public bool FetchDisabled { get; set; }
 
     public const string RepositoryFieldLabel = "Workspace Repository";
+
+    public const string CodeGraphCheckingHint = "Waiting for the Worker to report whether CodeGraph is installed.";
 
     /// <summary>
     /// Imported repositories that can become the Workspace repository: every repository that is not already a
