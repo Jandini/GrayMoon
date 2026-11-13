@@ -219,8 +219,20 @@ public sealed record PackageRestoreOutcome(string RepositoryName, bool Success, 
         if (string.IsNullOrWhiteSpace(text))
             return null;
         var trimmed = text.Trim();
-        return trimmed.Length <= MaxReasonLength ? trimmed : "..." + trimmed[^MaxReasonLength..];
+        if (trimmed.Length <= MaxReasonLength)
+            return trimmed;
+
+        // The text opens with project paths and closes with a list of feeds. The error itself ("error NU1101:
+        // Unable to find package X") sits between them, so a plain tail cut the package name off.
+        var errorAt = trimmed.IndexOf(ErrorMarker, StringComparison.Ordinal);
+        if (errorAt < 0)
+            return "..." + trimmed[^MaxReasonLength..];
+
+        var fromError = trimmed[(errorAt + ErrorMarker.Length - "error ".Length)..];
+        return fromError.Length <= MaxReasonLength ? fromError : fromError[..MaxReasonLength] + "...";
     }
+
+    private const string ErrorMarker = ": error ";
 
     private sealed class RestoreResult
     {
