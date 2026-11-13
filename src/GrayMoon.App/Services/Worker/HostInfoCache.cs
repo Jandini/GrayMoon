@@ -9,7 +9,11 @@ public sealed record HostInfoRead(
     HostPrerequisiteVersions Versions,
     string? CodeGraphVersion,
     string? UserProfilePath,
-    IReadOnlyList<AiProviderAvailability> AiProviders);
+    IReadOnlyList<AiProviderAvailability> AiProviders)
+{
+    /// <summary>True when the Worker reported a CodeGraph CLI. CodeGraph is not a host prerequisite.</summary>
+    public bool IsCodeGraphInstalled => !HostPrerequisiteState.IsMissing(CodeGraphVersion);
+}
 
 /// <summary>A host-info read, or why it failed. A failure does not replace the last successful read.</summary>
 public sealed record HostInfoQuery(HostInfoRead? Read, string? Error);

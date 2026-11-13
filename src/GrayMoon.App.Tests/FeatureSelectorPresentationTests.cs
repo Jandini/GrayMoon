@@ -45,6 +45,17 @@ public sealed class FeatureSelectorPresentationTests
         Assert.False(FeatureSelectorPresentation.ShowRemoveAction(Info("Removing")));
     }
 
+    [Theory]
+    [InlineData(true, 2)]
+    [InlineData(false, 1)]
+    public void Trailing_dividers_separate_edit_from_open_in(bool openInShown, int dividerCount)
+    {
+        var dividers = FeatureSelectorPresentation.TrailingDividers(openInShown);
+        Assert.Equal(openInShown, dividers.BeforeOpenIn);
+        Assert.True(dividers.BeforeEdit);
+        Assert.Equal(dividerCount, dividers.Count);
+    }
+
     [Fact]
     public void IsReadOnlyContext_true_only_for_NeedsRepair_Features()
     {

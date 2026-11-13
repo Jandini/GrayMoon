@@ -82,7 +82,8 @@ public sealed class WorkspaceReferenceOperations(
             "Saving the read only default...",
             progress: null,
             (report, ct) => ChangeAsync(workspaceId, repositoryId: null, reference: null, referenceDefault, report, ct),
-            cancellationToken);
+            cancellationToken,
+            WorkspaceJobKeys.ReferenceDefaultOverlayKey(workspaceId));
 
     public Task<WorkspaceReferenceChangeResult> SetRepositoryAsync(
         int workspaceId,
@@ -106,13 +107,14 @@ public sealed class WorkspaceReferenceOperations(
         string displayMessage,
         IProgress<OperationProgress>? progress,
         Func<IProgress<OperationProgress>, CancellationToken, Task<WorkspaceReferenceChangeResult>> work,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? overlayKey = null)
     {
         var tcs = new TaskCompletionSource<WorkspaceReferenceChangeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = operationLock.TryStartStructural(
             workspaceId,
             "reference-mode",
-            WorkspaceJobKeys.RepositoriesOverlayKey(workspaceId),
+            overlayKey ?? WorkspaceJobKeys.RepositoriesOverlayKey(workspaceId),
             displayMessage,
             async (op, ct) =>
             {

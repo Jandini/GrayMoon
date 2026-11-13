@@ -13,6 +13,12 @@ public interface IBackgroundJobService
     bool IsRunning(string jobKey);
 
     /// <summary>
+    /// True while any job of this circuit (browser tab) is running, on whatever page it was started. A full page
+    /// reload ends the circuit and with it every such job, so a caller asks this before it forces one.
+    /// </summary>
+    bool HasRunningJobs { get; }
+
+    /// <summary>
     /// Starts a new background job for jobKey. If a Running job already exists for the key,
     /// or the Workspace or context lock is held by another operation, the work is dropped and the returned handle
     /// shows the running job with <see cref="BackgroundJobHandle.WasStarted"/> false, and this tab is told with a
@@ -73,6 +79,8 @@ public sealed class BackgroundJobService : IBackgroundJobService, IDisposable
 
         return WorkspaceJobKeys.IsMutationKey(jobKey, out var workspaceId) && _runner.IsBusy(workspaceId);
     }
+
+    public bool HasRunningJobs => _jobs.Values.Any(job => job.State == BackgroundJobState.Running);
 
     public BackgroundJobHandle StartJob(string jobKey, string displayMessage,
         Func<BackgroundJobHandle, CancellationToken, Task> work)

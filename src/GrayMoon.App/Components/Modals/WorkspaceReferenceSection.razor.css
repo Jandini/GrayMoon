@@ -1,0 +1,17 @@
+/* Room for the confirmation, about 30% of the dialog, so showing it does not grow the dialog.
+   The grid of tabs takes its height from this panel. */
+.workspace-reference-section {
+    position: relative;
+    padding-bottom: 8rem;
+}
+
+.workspace-reference-confirm {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    background: #3c3c3c;
+    box-shadow: inset 3px 0 0 #6e6e6e;
+    color: #e6e6e6;
+}

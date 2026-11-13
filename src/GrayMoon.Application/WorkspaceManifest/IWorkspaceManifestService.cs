@@ -63,6 +63,12 @@ public interface IWorkspaceManifestService
     Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Writes <c>"codegraph": true</c> or <c>false</c> into <c>graymoon.json</c> and leaves every other property alone.
+    /// Fails when the Workspace has no Workspace repository or the definition cannot be read. Does not delete an index.
+    /// </summary>
+    Task<OperationResult> SetCodeGraphEnabledAsync(int workspaceId, bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The <c>ai</c> section of the Workspace definition (<c>graymoon.json</c> of the special Workspace): per-provider
     /// model choices. Null with no error when there is no Workspace repository, no definition or no <c>ai</c> section;
     /// an error when the definition exists but cannot be read or parsed, so the caller never silently ignores a broken file.
@@ -76,4 +82,13 @@ public interface IWorkspaceManifestService
     /// </summary>
     Task<OperationResult> WriteCodeGraphConfigAsync(int workspaceId, Features.WorkspaceFeatureContextId? contextId = null, CancellationToken cancellationToken = default);
     Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same service, reading and writing the Workspace repository checkout of <paramref name="contextId"/>
+    /// (a Feature's worktree) wherever this service otherwise uses the special Workspace. Workspace settings opened
+    /// from a context use it, so <c>graymoon.json</c>, <c>.gitignore</c> and <c>codegraph.json</c> change in the
+    /// folder the user is working in and the special Workspace's files are left alone. The database is not
+    /// per-context. A test double that keeps no files returns itself.
+    /// </summary>
+    IWorkspaceManifestService ForContext(Features.WorkspaceFeatureContextId contextId) => this;
 }

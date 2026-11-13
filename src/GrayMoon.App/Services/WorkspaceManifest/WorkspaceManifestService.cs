@@ -33,12 +33,27 @@ public sealed class WorkspaceManifestService(
 {
     internal const string NoWorkspaceRepositoryMessage = "No Workspace repository";
 
+    /// <summary>Shown when Use CodeGraph is saved and the flag cannot be stored because there is no Workspace repository.</summary>
+    public const string CodeGraphNeedsWorkspaceRepositoryMessage =
+        "CodeGraph lives in the Workspace definition and needs a Workspace repository.";
+
+    public const string DefinitionNotFoundMessage = "The Workspace definition was not found.";
+
     /// <summary>
     /// One gate per Workspace for the read-change-write of recorded revisions (tag pins and the revisions of
     /// read-only repositories). Repositories of one Workspace are checked out in parallel, each in its own scope,
     /// so without it two changes read the same file and the later write drops the earlier one.
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> TagPinGates = new();
+
+    /// <summary>Set by <see cref="ForContext"/>; null means the special Workspace.</summary>
+    private WorkspaceFeatureContextId? _targetContextId;
+
+    public IWorkspaceManifestService ForContext(WorkspaceFeatureContextId contextId) =>
+        new WorkspaceManifestService(dbContextFactory, manifestFile, workerBridge, pathResolver, contextResolver, logger)
+        {
+            _targetContextId = contextId,
+        };
 
     public async Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
@@ -143,7 +158,7 @@ public sealed class WorkspaceManifestService(
             if (read.Error is not null)
                 return OperationResult.Fail(read.Error);
             if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
-                return OperationResult.Fail("The Workspace definition was not found.");
+                return OperationResult.Fail(DefinitionNotFoundMessage);
             if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
                 return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
 
@@ -405,7 +420,7 @@ public sealed class WorkspaceManifestService(
             if (read.Error is not null)
                 return OperationResult.Fail(read.Error);
             if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
-                return OperationResult.Fail("The Workspace definition was not found.");
+                return OperationResult.Fail(DefinitionNotFoundMessage);
             if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
                 return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
 
@@ -465,6 +480,44 @@ public sealed class WorkspaceManifestService(
     public async Task<bool> IsCodeGraphEnabledAsync(int workspaceId, CancellationToken cancellationToken = default)
         => await GetCodeGraphSwitchAsync(workspaceId, cancellationToken) == true;
 
+    public async Task<OperationResult> SetCodeGraphEnabledAsync(int workspaceId, bool enabled, CancellationToken cancellationToken = default)
+    {
+        var gate = TagPinGates.GetOrAdd(workspaceId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+            if (args.WorkspaceRepositoryName is null)
+                return OperationResult.Fail(CodeGraphNeedsWorkspaceRepositoryMessage);
+
+            var read = await WorkspaceRepositoryFileAccess.ReadAsync(
+                workerBridge, args, manifestFile.FileName, cancellationToken);
+            if (read.Error is not null)
+                return OperationResult.Fail(read.Error);
+            if (!read.Found || string.IsNullOrWhiteSpace(read.Content))
+                return OperationResult.Fail(DefinitionNotFoundMessage);
+            if (!manifestFile.TryParse(read.Content, out var manifest, out var parseError) || manifest is null)
+                return OperationResult.Fail(parseError ?? "The Workspace definition could not be read.");
+
+            var updated = manifest with { CodeGraph = enabled };
+            var content = manifestFile.Serialize(updated);
+            if (string.Equals(content, read.Content.Replace("\r\n", "\n"), StringComparison.Ordinal))
+                return OperationResult.Ok();
+
+            return await WorkspaceRepositoryFileAccess.WriteAsync(
+                workerBridge, args, manifestFile.FileName, content, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Writing the codegraph setting failed. WorkspaceId={WorkspaceId}", workspaceId);
+            return OperationResult.Fail(ex.Message);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public async Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         try
@@ -513,6 +566,7 @@ public sealed class WorkspaceManifestService(
         try
         {
             var targetContextId = contextId
+                ?? _targetContextId
                 ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
             var args = await pathResolver.GetWorkerArgsAsync(targetContextId, cancellationToken);
             if (args.WorkspaceRepositoryName is null)
@@ -667,7 +721,8 @@ public sealed class WorkspaceManifestService(
         int workspaceId,
         CancellationToken cancellationToken)
     {
-        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var contextId = _targetContextId
+            ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         var args = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
         return (contextId, args);
     }
@@ -789,6 +844,7 @@ public static class WorkspaceManifestHooks
     {
         try
         {
+            // A service from ForContext writes all three files into that context's Workspace repository checkout.
             var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
             if (!gitIgnore.Success)
                 return $"Could not update .gitignore in the Workspace repository: {gitIgnore.Error}";

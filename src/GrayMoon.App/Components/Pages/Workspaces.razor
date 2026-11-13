@@ -27,9 +27,14 @@
 @using GrayMoon.Application.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
 @using GrayMoon.App.Services.Ui
+@using GrayMoon.App.Services.Jobs
+@using GrayMoon.App.Services.Worker
 @using GrayMoon.App.Services.WorkspaceManifest
 @using GrayMoon.Application.WorkspaceManifest
 @inject IWorkspaceManifestService ManifestService
+@inject WorkspaceCodeGraphActivation CodeGraphActivation
+@inject HostInfoCache HostInfo
+@inject NavigationManager Navigation
 @inject IToastService ToastService
 @inject GrayMoon.App.Services.Policy.ReferenceImportGuard ReferenceImportGuard
 @using GrayMoon.App.Data
@@ -163,7 +168,7 @@
                                         <td class="col-count">@ReferenceLabel(workspace)</td>
                                         <td class="col-actions">
                                             <button class="btn btn-sm btn-outline-primary me-2"
-                                                    @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
+                                                    @onclick="() => OpenWorkspaceSettingsAsync(workspace.WorkspaceId)">
                                                 Edit
                                             </button>
                                             <button class="btn btn-sm btn-outline-secondary me-2"
@@ -205,6 +210,10 @@
                UseGitVersionChanged="value => editorUseGitVersion = value"
                UseGitHubActions="@editorUseGitHubActions"
                UseGitHubActionsChanged="value => editorUseGitHubActions = value"
+               ShowCodeGraph="@editorShowCodeGraph"
+               IsCodeGraphChecking="@editorCodeGraphChecking"
+               UseCodeGraph="@editorUseCodeGraph"
+               UseCodeGraphChanged="value => editorUseCodeGraph = value"
                IsTypeDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                TypeDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                WorkspaceRepositoryId="@editorWorkspaceRepositoryId"
@@ -220,6 +229,8 @@
                SaveDisabled="@EditorSaveDisabled"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
+
+<WorkspaceSettingsHost @ref="_settingsHost" OnSaved="LoadWorkspacesAsync" />
 
 <RestoreWorkspaceModal @ref="_restoreModal"
                         IsVisible="@showRestoreModal"
@@ -367,6 +378,12 @@
     private WorkspaceType editorType = WorkspaceType.DotNetDependency;
     private bool editorUseGitVersion = true;
     private bool editorUseGitHubActions = true;
+    private bool editorUseCodeGraph;
+    private bool editorShowCodeGraph;
+    private bool editorCodeGraphChecking;
+    private CancellationTokenSource? _codeGraphOfferCts;
+    private bool? editorStoredCodeGraph;
+    private WorkspaceSettingsHost? _settingsHost;
     private int? editorWorkspaceRepositoryId;
     private int? editingWorkspaceRepositoryOriginalId;
     private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
@@ -432,6 +449,7 @@
     public void Dispose()
     {
         _disposed = true;
+        StopCodeGraphOfferCheck();
         WorkerConnectionTracker.RemoveStateChanged(OnWorkerConnectionStateChanged);
         _fetchRepositoriesCts?.Cancel();
         _fetchRepositoriesCts?.Dispose();
@@ -506,6 +524,9 @@
         editorType = WorkspaceType.DotNetDependency;
         editorUseGitVersion = true;
         editorUseGitHubActions = true;
+        editorUseCodeGraph = false;
+        editorShowCodeGraph = false;
+        editorStoredCodeGraph = null;
         editorWorkspaceRepositoryId = null;
         editingWorkspaceRepositoryOriginalId = null;
         editorSourceRepositoryIds = new HashSet<int>();
@@ -533,7 +554,58 @@
         }
 
         showEditorModal = true;
+        _ = LoadCodeGraphOfferAsync();
     }
+
+    /// <summary>
+    /// Asks the Worker whether CodeGraph is installed until it answers or the dialog closes. Without an answer the
+    /// switch stays visible and disabled; it is never hidden because the Worker was not ready yet.
+    /// </summary>
+    private async Task LoadCodeGraphOfferAsync()
+    {
+        StopCodeGraphOfferCheck();
+        var check = new CancellationTokenSource();
+        _codeGraphOfferCts = check;
+        editorCodeGraphChecking = true;
+        try
+        {
+            var offer = await CodeGraphOfferCheck.WaitForAnswerAsync(
+                token => HostInfo.GetAsync(WorkerBridge, refresh: false, token),
+                token => Task.Delay(CodeGraphOfferCheck.RetryInterval, token),
+                check.Token);
+            await InvokeAsync(() =>
+            {
+                if (_disposed || !showEditorModal || !ReferenceEquals(_codeGraphOfferCts, check))
+                    return;
+
+                editorCodeGraphChecking = false;
+                editorShowCodeGraph = offer == CodeGraphOffer.Offered;
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not tell whether CodeGraph is installed.");
+        }
+    }
+
+    private void StopCodeGraphOfferCheck()
+    {
+        var check = _codeGraphOfferCts;
+        _codeGraphOfferCts = null;
+        editorCodeGraphChecking = false;
+        if (check is null)
+            return;
+
+        check.Cancel();
+        check.Dispose();
+    }
+
+    private Task OpenWorkspaceSettingsAsync(int workspaceId) =>
+        _settingsHost?.OpenAsync(workspaceId) ?? Task.CompletedTask;
 
     private bool showRestoreModal;
 
@@ -549,49 +621,6 @@
     {
         await LoadWorkspacesAsync();
         await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task ShowEditModalAsync(int workspaceId)
-    {
-        _directoryInfoDebounceCts?.Cancel();
-        _directoryInfoCts?.Cancel();
-        var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
-        {
-            return;
-        }
-
-        editingWorkspaceId = workspaceId;
-        editingWorkspaceRootPath = workspace.RootPath;
-        editorTitle = "Edit Workspace";
-        workspaceName = workspace.Name;
-        editorErrorMessage = null;
-        editingWorkspaceRepositoryIds = workspace.Repositories
-            .Select(link => link.RepositoryId)
-            .ToHashSet();
-
-        var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
-        editingWorkspaceHasFeatures = features.Count > 0;
-        editorType = workspace.Type;
-        editorUseGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
-        editorUseGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
-        var workspaceRepositoryLink = workspace.Repositories.FirstOrDefault(l => l.Role == WorkspaceRepositoryRole.Workspace);
-        editingWorkspaceRepositoryOriginalId = workspaceRepositoryLink?.RepositoryId;
-        editorWorkspaceRepositoryId = workspaceRepositoryLink?.RepositoryId;
-        editorSourceRepositoryIds = workspace.Repositories
-            .Where(l => l.Role != WorkspaceRepositoryRole.Workspace)
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
-        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
-        await RefreshConnectorAvailabilityAsync();
-
-        directoryExists = false;
-        existingRepositoryCount = 0;
-        ResetExistingFolderState(clearAutoSelection: false);
-        adoptedExistingWorkspaceRepository = false;
-        isDirectoryInfoDirty = false;
-        isLoadingDirectoryInfo = false;
-        showEditorModal = true;
     }
 
     private async Task ShowAddRepositoriesModalAsync(int workspaceId)
@@ -627,6 +656,7 @@
     {
         _directoryInfoDebounceCts?.Cancel();
         _directoryInfoCts?.Cancel();
+        StopCodeGraphOfferCheck();
         showEditorModal = false;
         editorErrorMessage = null;
     }
@@ -649,6 +679,15 @@
         if (editingWorkspaceId == null && !WorkerBridge.IsWorkerConnected)
         {
             editorErrorMessage = "Worker is not available. Please start the GrayMoon Worker to add workspaces.";
+            return;
+        }
+
+        // Before anything is created: a ticked Use CodeGraph with no Workspace repository cannot be stored.
+        if (editingWorkspaceId == null
+            && WorkspaceCodeGraphActivation.MissingWorkspaceRepositoryMessage(
+                editorShowCodeGraph, editorUseCodeGraph, editorWorkspaceRepositoryId) is { } codeGraphNeedsRepository)
+        {
+            editorErrorMessage = codeGraphNeedsRepository;
             return;
         }
 
@@ -729,6 +768,24 @@
                 {
                     editorErrorMessage = editWorkspaceRepositoryError;
                     ToastService.ShowError(editWorkspaceRepositoryError);
+                    return;
+                }
+            }
+
+            if (editorShowCodeGraph && editingWorkspaceId is int codeGraphWorkspaceId)
+            {
+                var codeGraphError = await CodeGraphActivation.SaveAsync(
+                    codeGraphWorkspaceId,
+                    editorStoredCodeGraph,
+                    editorUseCodeGraph,
+                    WorkspaceJobKeys.NormalizeOverlayKey(new Uri(Navigation.Uri).AbsolutePath));
+                if (codeGraphError is not null)
+                {
+                    editorErrorMessage = codeGraphError;
+                    editorStoredCodeGraph = await ManifestService.GetCodeGraphSwitchAsync(codeGraphWorkspaceId);
+                    editorUseCodeGraph = editorStoredCodeGraph == true;
+                    // The Workspace itself is stored; the list shows it while the dialog stays open on the error.
+                    await LoadWorkspacesAsync();
                     return;
                 }
             }

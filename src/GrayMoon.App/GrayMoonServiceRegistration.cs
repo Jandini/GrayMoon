@@ -108,6 +108,7 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<IWorkspaceSelectedFeatureContextService, WorkspaceSelectedFeatureContextService>();
         services.AddScoped<IWorkspaceHookContextAttributor, WorkspaceHookContextAttributor>();
         services.AddScoped<FeatureCodeGraphService>();
+        services.AddScoped<WorkspaceCodeGraphActivation>();
         services.AddScoped<IWorkspaceFeatureOperations, WorkspaceFeatureOperations>();
         services.AddSingleton<IWorkspaceFeatureReconciler, WorkspaceFeatureReconciler>();
         services.AddHostedService(sp => (WorkspaceFeatureReconciler)sp.GetRequiredService<IWorkspaceFeatureReconciler>());

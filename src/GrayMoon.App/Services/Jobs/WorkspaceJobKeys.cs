@@ -51,6 +51,13 @@ public static class WorkspaceJobKeys
     public static string RepositoriesOverlayKey(int workspaceId)
         => NormalizeOverlayKey($"/workspaces/{workspaceId}");
 
+    /// <summary>
+    /// Lock for the "new repositories are locked as read only" switch. Not a page path, so the
+    /// page loading overlay does not flash for a save that only writes that flag.
+    /// </summary>
+    public static string ReferenceDefaultOverlayKey(int workspaceId)
+        => NormalizeOverlayKey($"/workspaces/{workspaceId}/reference-default");
+
     public static string ContextOverlayKey(int workspaceId, int contextId)
         => NormalizeOverlayKey($"/workspaces/{workspaceId}/ctx/{contextId}");
 
