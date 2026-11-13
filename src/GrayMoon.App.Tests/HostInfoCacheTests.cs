@@ -34,10 +34,23 @@ public sealed class HostInfoCacheTests
         Assert.Equal("0.98.0", read.Versions.CodexVersion);
         Assert.Null(read.Versions.CursorAgentVersion);
         Assert.Equal("0.4.0", read.CodeGraphVersion);
+        Assert.True(read.IsCodeGraphInstalled);
         Assert.Equal([HostPrerequisiteIds.CursorAgent], HostPrerequisiteState.GetMissingIds(read.Versions));
         var claude = Assert.Single(read.AiProviders, p => p.ProviderId == AiProviderIds.Claude);
         Assert.True(claude.IsInstalled);
         Assert.True(claude.HasNoTools);
         Assert.False(read.AiProviders.Single(p => p.ProviderId == AiProviderIds.Codex).IsInstalled);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("0.4.0", true)]
+    public void IsCodeGraphInstalled_follows_the_reported_cli(string? version, bool expected)
+    {
+        var read = new HostInfoRead(new HostPrerequisiteVersions(null, null, null), version, null, []);
+
+        Assert.Equal(expected, read.IsCodeGraphInstalled);
     }
 }

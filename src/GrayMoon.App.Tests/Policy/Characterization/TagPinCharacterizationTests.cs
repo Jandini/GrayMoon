@@ -313,6 +313,9 @@ public sealed class TagPinCharacterizationTests
         public Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             Task.FromResult<bool?>(false);
 
+        public Task<OperationResult> SetCodeGraphEnabledAsync(int workspaceId, bool enabled, CancellationToken cancellationToken = default) =>
+            Task.FromResult(OperationResult.Ok());
+
         public Task<(WorkspaceManifestAi? Ai, string? Error)> ReadAiAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             Task.FromResult<(WorkspaceManifestAi?, string?)>((null, null));
 

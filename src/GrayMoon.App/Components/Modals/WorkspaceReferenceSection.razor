@@ -5,9 +5,9 @@
 @inject IWorkspaceOperationRunner OperationRunner
 @inject IToastService ToastService
 
-@* Read-only repositories of one Workspace. Every action here is applied at once, not with the modal's Save. *@
+@* Repository lock for one Workspace. Every action here is applied at once, not with the modal's Save. *@
 <div class="mb-3 workspace-reference-section">
-    <label class="form-label">Read only repositories</label>
+    <label class="form-label">Repository Lock</label>
     @if (_state is null)
     {
         <div class="form-text">Loading...</div>
@@ -16,33 +16,39 @@
     {
         <div class="form-text mt-0 mb-2">@StateText(_state.Aggregate) GrayMoon pulls a read only repository but never commits, pushes or updates it.</div>
         <div class="d-flex flex-nowrap align-items-center gap-2 mb-2">
-            <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0"
+            <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0"
                     disabled="@(Disabled || _state.Aggregate is WorkspaceReferenceAggregate.All or WorkspaceReferenceAggregate.NoSources)"
-                    @onclick="() => Ask(true)">Make all read only</button>
-            <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0"
+                    @onclick="() => Ask(true)">
+                <ReferenceLockIcon AdditionalClass="me-1" />
+                Lock All
+            </button>
+            <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0"
                     disabled="@(Disabled || _state.Aggregate is WorkspaceReferenceAggregate.None or WorkspaceReferenceAggregate.NoSources)"
-                    @onclick="() => Ask(false)">Make all writable</button>
+                    @onclick="() => Ask(false)">
+                <ReferenceLockIcon Open="true" AdditionalClass="me-1" />
+                Unlock All
+            </button>
         </div>
 
         @if (_pending is { } pending)
         {
-            <div class="gm-callout gm-callout--warning" role="alert">
-                <div class="mb-2">@(pending ? "Make all repositories read only?" : "Make all repositories writable?")</div>
+            <div class="gm-callout workspace-reference-confirm" role="alert">
+                <div class="mb-2">@(pending ? "Lock all repositories?" : "Unlock all repositories?")</div>
                 <div class="d-flex flex-nowrap gap-2">
                     <button type="button" class="btn btn-primary btn-sm text-nowrap flex-shrink-0" disabled="@Disabled" @onclick="ApplyAsync">
-                        @(pending ? "Make read only" : "Make writable")
+                        @(pending ? "Lock all" : "Unlock all")
                     </button>
-                    <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0" @onclick="() => _pending = null">Cancel</button>
+                    <button type="button" class="btn btn-secondary btn-sm text-nowrap flex-shrink-0" @onclick="CancelConfirmationAsync">Cancel</button>
                 </div>
             </div>
         }
 
         <div class="form-check form-switch mb-0" @key="_attempt">
-            <input class="form-check-input form-check-input-gray" type="checkbox" role="switch" id="workspaceReferenceDefault"
+            <input class="form-check-input" type="checkbox" role="switch" id="workspaceReferenceDefault"
                    checked="@_state.ReferenceDefault"
                    disabled="@Disabled"
                    @onchange="OnDefaultChangedAsync" />
-            <label class="form-check-label text-nowrap" for="workspaceReferenceDefault">New repositories are read only</label>
+            <label class="form-check-label text-nowrap" for="workspaceReferenceDefault">New repositories are locked as read only</label>
         </div>
 
         var suggested = _state.Repositories.Where(repository => repository.SuggestReference).ToList();
@@ -110,6 +116,9 @@
 @code {
     [Parameter, EditorRequired] public int WorkspaceId { get; set; }
 
+    /// <summary>True while Lock All or Unlock All is waiting for confirmation, so the editor does not save on Enter.</summary>
+    [Parameter] public EventCallback<bool> ConfirmationChanged { get; set; }
+
     private WorkspaceReferenceState? _state;
     private int _loadedWorkspaceId;
     private bool? _pending;
@@ -143,7 +152,7 @@
             return;
 
         _loadedWorkspaceId = WorkspaceId;
-        _pending = null;
+        await SetPendingAsync(null);
         _error = null;
         _notice = null;
         _blocks = [];
@@ -155,7 +164,16 @@
 
     private void OnRunnerChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private void Ask(bool reference) => _pending = reference;
+    private Task Ask(bool reference) => SetPendingAsync(reference);
+
+    private Task CancelConfirmationAsync() => SetPendingAsync(null);
+
+    private async Task SetPendingAsync(bool? pending)
+    {
+        _pending = pending;
+        if (ConfirmationChanged.HasDelegate)
+            await ConfirmationChanged.InvokeAsync(pending is not null);
+    }
 
     /// <summary>Progress arrives from the operation's own thread; the overlay is updated on the renderer.</summary>
     private sealed class ProgressSink(Action<string> onMessage) : IProgress<OperationProgress>
@@ -177,12 +195,12 @@
         if (_pending is not { } reference)
             return;
 
-        _pending = null;
+        await SetPendingAsync(null);
         // The default for new repositories is not touched here; it has its own switch below.
         await RunAsync(
-            reference ? "Making repositories read only..." : "Making repositories writable...",
+            reference ? "Locking repositories..." : "Unlocking repositories...",
             () => ReferenceOperations.SetAllAsync(WorkspaceId, reference, alsoSetDefault: false, OverlayProgress()),
-            reference ? "Repositories are read only." : "Repositories are writable.");
+            reference ? "Repositories are locked as read only." : "Repositories are writable.");
     }
 
     /// <summary>The suggestion for an archived repository. The same check runs as for any other repository.</summary>
@@ -195,11 +213,12 @@
     private Task OnDefaultChangedAsync(ChangeEventArgs e)
     {
         var value = e.Value is true;
-        // A quick save: no overlay.
+        // A quick save. The section overlay stays hidden, and the lock uses a key that is not a page
+        // path, so the page loading overlay does not flash.
         return RunAsync(
             null,
             () => ReferenceOperations.SetDefaultAsync(WorkspaceId, value),
-            value ? "New repositories are read only." : "New repositories are writable.");
+            value ? "New repositories are locked as read only." : "New repositories are writable.");
     }
 
     private async Task RunAsync(string? startMessage, Func<Task<WorkspaceReferenceChangeResult>> change, string doneMessage)
@@ -241,5 +260,10 @@
         }
     }
 
-    public void Dispose() => OperationRunner.Changed -= OnRunnerChanged;
+    public void Dispose()
+    {
+        OperationRunner.Changed -= OnRunnerChanged;
+        if (_pending is not null && ConfirmationChanged.HasDelegate)
+            _ = ConfirmationChanged.InvokeAsync(false);
+    }
 }

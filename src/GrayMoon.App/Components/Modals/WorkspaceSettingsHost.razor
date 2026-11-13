@@ -1,0 +1,427 @@
+@using GrayMoon.Abstractions.Workspaces
+@using GrayMoon.App.Data
+@using GrayMoon.App.Repositories
+@using GrayMoon.App.Services.Features
+@using GrayMoon.App.Services.Jobs
+@using GrayMoon.App.Services.WorkspaceManifest
+@using GrayMoon.Application.Features
+@using GrayMoon.Application.Workspaces
+@using GrayMoon.Application.WorkspaceManifest
+@using Microsoft.EntityFrameworkCore
+@implements IDisposable
+@inject WorkspaceRepository WorkspaceRepository
+@inject WorkspaceProjectRepository WorkspaceProjectRepository
+@inject WorkspacePendingActionsService PendingActionsService
+@inject ConnectorRepository ConnectorRepository
+@inject GitHubRepositoryService RepositoryService
+@inject IWorkspaceFeatureOperations FeatureOperations
+@inject IWorkspaceRepositoryOperations WorkspaceRepositoryOperations
+@inject IWorkspaceManifestService ManifestService
+@inject WorkspaceCodeGraphActivation CodeGraphActivation
+@inject HostInfoCache HostInfo
+@inject IWorkerBridge WorkerBridge
+@inject IDbContextFactory<AppDbContext> DbContextFactory
+@inject IWorkspaceOperationRunner OperationRunner
+@inject NavigationManager Navigation
+@inject WorkspaceService WorkspaceService
+@inject ILogger<WorkspaceSettingsHost> Logger
+
+<WorkspaceModal IsVisible="@_visible"
+               WorkspaceId="@_workspaceId"
+               Title="Edit Workspace"
+               WorkspaceName="@_name"
+               WorkspaceNameChanged="OnNameChanged"
+               WorkspacePath="@Path"
+               IsNameDisabled="@_hasFeatures"
+               NameDisabledHint="@(_hasFeatures ? FeaturesExistMessage : null)"
+               Type="@_type"
+               TypeChanged="OnTypeChanged"
+               UseGitVersion="@_useGitVersion"
+               UseGitVersionChanged="OnGitVersionChanged"
+               UseGitHubActions="@_useGitHubActions"
+               UseGitHubActionsChanged="OnGitHubActionsChanged"
+               ShowCodeGraph="@_showCodeGraph"
+               UseCodeGraph="@_useCodeGraph"
+               UseCodeGraphChanged="OnCodeGraphChanged"
+               IsTypeDisabled="@_hasFeatures"
+               TypeDisabledHint="@(_hasFeatures ? FeaturesExistMessage : null)"
+               WorkspaceRepositoryId="@_repositoryId"
+               WorkspaceRepositoryIdChanged="OnRepositoryChanged"
+               WorkspaceRepositoryChoices="@_choices"
+               IsWorkspaceRepositoryDisabled="@_hasFeatures"
+               WorkspaceRepositoryDisabledHint="@(_hasFeatures ? FeaturesExistMessage : null)"
+               OnFetchRepositories="FetchRepositoriesAsync"
+               FetchDisabled="@(! _hasConnectors || _fetching || _saving)"
+               IsSaving="@_saving"
+               ErrorMessage="@_error"
+               OnSave="SaveAsync"
+               OnCancel="Close" />
+
+@if (_localOverlay)
+{
+    <LoadingOverlay IsVisible="true"
+                    Message="@_overlayMessage"
+                    TerminalBuffer="@_overlayTerminal"
+                    OnAbort="@(_overlayCanBackground ? default(EventCallback) : EventCallback.Factory.Create(this, AbortIndex))"
+                    OnBackground="@(_overlayCanBackground ? EventCallback.Factory.Create(this, BackgroundIndex) : default)" />
+}
+
+@code {
+    private const string FeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
+
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    /// <summary>Workspace pages reload after a save so navigation follows a profile change. The Workspaces list reloads its rows instead.</summary>
+    [Parameter] public bool ReloadAfterSave { get; set; }
+
+    private int? _workspaceId;
+    private bool _visible;
+    private bool _saving;
+    private bool _hasFeatures;
+    private bool _hasConnectors;
+    private bool _fetching;
+    private bool _showCodeGraph;
+    private bool _useCodeGraph;
+    private bool? _storedCodeGraph;
+    private bool _localOverlay;
+    private bool _overlayCanBackground;
+    private bool _disposed;
+    private string _name = string.Empty;
+    private string? _rootPath;
+    private string? _error;
+    private string? _overlayMessage;
+    private WorkspaceType _type = WorkspaceType.DotNetDependency;
+    private bool _useGitVersion = true;
+    private bool _useGitHubActions = true;
+    private int? _repositoryId;
+    private int? _originalRepositoryId;
+    private HashSet<int> _sourceRepositoryIds = [];
+    private HashSet<int> _repositoryIds = [];
+    private IReadOnlyList<RepositoryPickerChoice> _choices = [];
+    private JobTerminalBuffer? _overlayTerminal;
+    private WorkspaceOperation? _overlayOperation;
+
+    private string Path => string.IsNullOrWhiteSpace(_name)
+        ? _rootPath ?? WorkspaceService.RootPath ?? string.Empty
+        : WorkspaceService.GetWorkspacePath(_name, _rootPath);
+
+    protected override void OnInitialized() => OperationRunner.Changed += OnOperationsChanged;
+
+    public async Task OpenAsync(int workspaceId)
+    {
+        if (_saving)
+            return;
+
+        var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null || _disposed)
+            return;
+
+        _workspaceId = workspaceId;
+        _rootPath = workspace.RootPath;
+        _name = workspace.Name;
+        _error = null;
+        _repositoryIds = workspace.Repositories.Select(link => link.RepositoryId).ToHashSet();
+        var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
+        _hasFeatures = features.Count > 0;
+        _type = workspace.Type;
+        _useGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
+        _useGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
+        var workspaceRepository = workspace.Repositories.FirstOrDefault(link => link.Role == WorkspaceRepositoryRole.Workspace);
+        _originalRepositoryId = workspaceRepository?.RepositoryId;
+        _repositoryId = workspaceRepository?.RepositoryId;
+        _sourceRepositoryIds = workspace.Repositories
+            .Where(link => link.Role != WorkspaceRepositoryRole.Workspace)
+            .Select(link => link.RepositoryId)
+            .ToHashSet();
+        _choices = await LoadChoicesAsync(_sourceRepositoryIds);
+        _hasConnectors = await HasConnectorsAsync();
+
+        var storedTask = ManifestService.GetCodeGraphSwitchAsync(workspaceId);
+        var hostTask = HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
+        _storedCodeGraph = await storedTask;
+        var host = await hostTask;
+        _showCodeGraph = host.Read?.IsCodeGraphInstalled == true;
+        _useCodeGraph = _storedCodeGraph == true;
+        _visible = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnNameChanged(string value)
+    {
+        _name = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnTypeChanged(WorkspaceType value)
+    {
+        _type = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnGitVersionChanged(bool value)
+    {
+        _useGitVersion = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnGitHubActionsChanged(bool value)
+    {
+        _useGitHubActions = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnCodeGraphChanged(bool value)
+    {
+        _useCodeGraph = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnRepositoryChanged(int? value)
+    {
+        _repositoryId = value;
+        return Task.CompletedTask;
+    }
+
+    private void Close()
+    {
+        if (_saving)
+            return;
+
+        _visible = false;
+        _error = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_workspaceId is not int workspaceId || _saving)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _error = "Workspace name is required.";
+            return;
+        }
+
+        try
+        {
+            _saving = true;
+            _error = null;
+            Logger.LogInformation("User edited workspace {WorkspaceName}", _name);
+            await WorkspaceRepository.UpdateAsync(
+                workspaceId,
+                _name,
+                _repositoryIds,
+                _rootPath,
+                _type,
+                _useGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
+                _useGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
+
+            var repositoryError = await ApplyRepositoryChangeAsync(workspaceId);
+            if (repositoryError is not null)
+            {
+                _error = repositoryError;
+                return;
+            }
+
+            var syncError = await ManifestService.SyncDefinitionToDiskAsync(workspaceId);
+            if (syncError is not null)
+            {
+                _error = syncError;
+                return;
+            }
+
+            await PendingActionsService.RefreshAsync(workspaceId, WorkspaceRepository, WorkspaceProjectRepository);
+
+            if (_showCodeGraph)
+            {
+                var codeGraphError = await CodeGraphActivation.SaveAsync(
+                    workspaceId,
+                    _storedCodeGraph,
+                    _useCodeGraph,
+                    CurrentPath());
+                if (codeGraphError is not null)
+                {
+                    _error = codeGraphError;
+                    _storedCodeGraph = await ManifestService.GetCodeGraphSwitchAsync(workspaceId);
+                    _useCodeGraph = _storedCodeGraph == true;
+                    return;
+                }
+            }
+
+            _visible = false;
+            await OnSaved.InvokeAsync();
+            if (ReloadAfterSave && !_disposed)
+                Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Error saving workspace {WorkspaceId}", workspaceId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task<string?> ApplyRepositoryChangeAsync(int workspaceId)
+    {
+        if (_repositoryId == _originalRepositoryId)
+            return null;
+
+        if (_hasFeatures)
+            return FeaturesExistMessage;
+
+        try
+        {
+            if (_originalRepositoryId is not null)
+            {
+                var disabled = await WorkspaceRepositoryOperations.DisableWorkspaceRepositoryAsync(workspaceId);
+                _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
+                if (!disabled.Success)
+                    return disabled.Error ?? "Could not disable the Workspace repository.";
+            }
+
+            if (_repositoryId is { } repositoryId)
+            {
+                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId);
+                _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
+                if (!enabled.Success)
+                    return enabled.Error ?? "Could not enable the Workspace repository.";
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Changing the Workspace repository failed for workspace {WorkspaceId}", workspaceId);
+            return ex.Message;
+        }
+    }
+
+    private async Task<int?> CurrentRepositoryIdAsync(int workspaceId)
+    {
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+        return await db.WorkspaceRepositories.AsNoTracking()
+            .Where(link => link.WorkspaceId == workspaceId && link.Role == WorkspaceRepositoryRole.Workspace)
+            .Select(link => (int?)link.RepositoryId)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task<IReadOnlyList<RepositoryPickerChoice>> LoadChoicesAsync(IReadOnlySet<int> sourceRepositoryIds)
+    {
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            var rows = await db.Repositories.AsNoTracking()
+                .Where(repository => repository.Connector != null && repository.Connector.ConnectorType == ConnectorType.GitHub)
+                .Select(repository => new { repository.RepositoryId, repository.RepositoryName, repository.OrgName })
+                .ToListAsync();
+            return WorkspaceModal.BuildWorkspaceRepositoryChoices(
+                rows.Select(row => (row.RepositoryId, row.RepositoryName, row.OrgName)),
+                sourceRepositoryIds);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load repositories for the Workspace repository select.");
+            return [];
+        }
+    }
+
+    private async Task<bool> HasConnectorsAsync()
+    {
+        try
+        {
+            var connectors = await ConnectorRepository.GetAllAsync();
+            return connectors.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load connectors.");
+            return false;
+        }
+    }
+
+    private async Task FetchRepositoriesAsync()
+    {
+        if (!_hasConnectors || _fetching || _saving)
+            return;
+
+        _fetching = true;
+        try
+        {
+            var result = await RepositoryService.RefreshRepositoriesAsync(progress: null, CancellationToken.None);
+            if (result.MergedRepositoryIdMap.Count > 0)
+            {
+                foreach (var staleId in _sourceRepositoryIds.Where(result.MergedRepositoryIdMap.ContainsKey).ToList())
+                {
+                    _sourceRepositoryIds.Remove(staleId);
+                    _sourceRepositoryIds.Add(result.MergedRepositoryIdMap[staleId]);
+                }
+            }
+
+            _choices = await LoadChoicesAsync(_sourceRepositoryIds);
+            _repositoryId = RepositoryPickerState.ReconcileSelection(
+                _repositoryId,
+                result.MergedRepositoryIdMap,
+                _choices.Select(choice => choice.RepositoryId));
+            if (_error == RestoreWorkspaceModal.FetchRepositoriesError)
+                _error = null;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching repositories");
+            _error = RestoreWorkspaceModal.FetchRepositoriesError;
+        }
+        finally
+        {
+            _fetching = false;
+        }
+    }
+
+    private string CurrentPath() =>
+        WorkspaceJobKeys.NormalizeOverlayKey(new Uri(Navigation.Uri).AbsolutePath);
+
+    private void OnOperationsChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            UpdateLocalOverlay();
+            StateHasChanged();
+        });
+
+    private void UpdateLocalOverlay()
+    {
+        if (_disposed || _workspaceId is not int workspaceId)
+        {
+            _localOverlay = false;
+            return;
+        }
+
+        var running = OperationRunner.GetRunning(workspaceId);
+        var path = CurrentPath();
+        var showHere = running is { State: BackgroundJobState.Running, OperationKind: WorkspaceCodeGraphActivation.OperationKind }
+            && string.Equals(WorkspaceJobKeys.NormalizeOverlayKey(running.OverlayKey), path, StringComparison.Ordinal)
+            && !WorkspaceJobKeys.TryGetWorkspaceId(path, out _);
+        _localOverlay = showHere;
+        if (!showHere || running is null)
+            return;
+
+        _overlayMessage = running.DisplayMessage;
+        _overlayTerminal = running.Terminal;
+        _overlayCanBackground = running.CanRunInBackground;
+        _overlayOperation = running;
+    }
+
+    private void BackgroundIndex() => _overlayOperation?.RunInBackground();
+
+    private void AbortIndex() => _overlayOperation?.Abort();
+
+    public void Dispose()
+    {
+        _disposed = true;
+        OperationRunner.Changed -= OnOperationsChanged;
+    }
+}

@@ -6,6 +6,7 @@ using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services.Application;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Policy;
 using GrayMoon.Application;
@@ -180,6 +181,31 @@ public sealed class WorkspaceReferenceOperationsTests
         Assert.Empty(InspectedPaths(ctx));
         Assert.Equal(1, manifest.DefinitionWrites);
         Assert.Empty(manifest.Revisions);
+    }
+
+    [Fact]
+    public async Task Setting_the_new_repository_default_does_not_use_the_page_overlay()
+    {
+        var manifest = new FakeManifest();
+        await using var ctx = await CreateAsync(manifest);
+        await SeedGraphAsync(ctx);
+
+        string? overlayKey = null;
+        await using var scope = ctx.CreateScope();
+        var runner = scope.ServiceProvider.GetRequiredService<IWorkspaceOperationRunner>();
+        runner.Changed += () =>
+        {
+            var key = runner.GetRunning(ctx.WorkspaceId)?.OverlayKey;
+            if (key is not null)
+                overlayKey = key;
+        };
+
+        var result = await scope.ServiceProvider.GetRequiredService<IWorkspaceReferenceOperations>()
+            .SetDefaultAsync(ctx.WorkspaceId, true);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(WorkspaceJobKeys.ReferenceDefaultOverlayKey(ctx.WorkspaceId), overlayKey);
+        Assert.NotEqual(WorkspaceJobKeys.RepositoriesOverlayKey(ctx.WorkspaceId), overlayKey);
     }
 
     [Fact]
@@ -783,6 +809,9 @@ public sealed class WorkspaceReferenceOperationsTests
 
         public Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             Task.FromResult<bool?>(false);
+
+        public Task<OperationResult> SetCodeGraphEnabledAsync(int workspaceId, bool enabled, CancellationToken cancellationToken = default) =>
+            Task.FromResult(OperationResult.Ok());
 
         public Task<(WorkspaceManifestAi? Ai, string? Error)> ReadAiAsync(int workspaceId, CancellationToken cancellationToken = default) =>
             Task.FromResult<(WorkspaceManifestAi?, string?)>((null, null));

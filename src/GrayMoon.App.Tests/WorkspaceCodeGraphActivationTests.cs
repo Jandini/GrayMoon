@@ -1,0 +1,154 @@
+using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Services.Features;
+using GrayMoon.App.Services.WorkspaceManifest;
+using GrayMoon.Application.Features;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace GrayMoon.App.Tests;
+
+public sealed class WorkspaceCodeGraphActivationTests
+{
+    [Theory]
+    [InlineData(null, false, false)]
+    [InlineData(null, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, true)]
+    public void Absent_unchecked_switch_is_not_written(bool? stored, bool selected, bool expected)
+    {
+        Assert.Equal(expected, WorkspaceCodeGraphActivation.ShouldWrite(stored, selected));
+    }
+
+    [Theory]
+    [InlineData("Started", true)]
+    [InlineData("AlreadyRunning", true)]
+    [InlineData("AlreadyInitialized", false)]
+    [InlineData("NotInstalled", false)]
+    public void Only_a_running_build_is_watched(string outcome, bool expected)
+    {
+        Assert.Equal(expected, FeatureCodeGraphService.ShouldWatch(outcome));
+    }
+
+    [Fact]
+    public async Task Already_initialized_workspace_does_not_watch()
+    {
+        var bridge = Bridge("AlreadyInitialized");
+        var operations = new RecordingLock();
+        var activation = Create(bridge, operations);
+
+        Assert.Null(await activation.StartIndexAsync(7, "/workspaces/7"));
+
+        Assert.Equal(WorkerHubMethods.InitCodeGraph, Assert.Single(bridge.Sent).Command);
+        Assert.Equal(@"C:\work\ws", ManifestTestFixture.ToJson(bridge.Sent[0].Args).GetProperty("targetRoot").GetString());
+        Assert.Empty(operations.Kinds);
+    }
+
+    [Fact]
+    public async Task Started_workspace_index_is_watched()
+    {
+        var bridge = Bridge(command => command == WorkerHubMethods.WatchCodeGraphInit ? "NotRunning" : "Started");
+        var operations = new RecordingLock();
+        var activation = Create(bridge, operations);
+
+        Assert.Null(await activation.StartIndexAsync(7, "/workspaces/7"));
+
+        Assert.Equal(
+            [WorkerHubMethods.InitCodeGraph, WorkerHubMethods.WatchCodeGraphInit],
+            bridge.Sent.Select(sent => sent.Command).ToArray());
+        Assert.Equal([WorkspaceCodeGraphActivation.OperationKind], operations.Kinds);
+        Assert.Equal(["/workspaces/7"], operations.OverlayKeys);
+    }
+
+    [Fact]
+    public async Task Not_installed_is_reported_and_not_watched()
+    {
+        var bridge = Bridge("NotInstalled");
+        var operations = new RecordingLock();
+        var activation = Create(bridge, operations);
+
+        Assert.Equal("CodeGraph is not installed.", await activation.StartIndexAsync(7, "/workspaces"));
+        Assert.Empty(operations.Kinds);
+    }
+
+    private static WorkspaceCodeGraphActivation Create(ScriptedWorkerBridge bridge, RecordingLock operations)
+    {
+        var manifest = new RecordingManifestService { CodeGraphEnabled = true };
+        var codeGraph = new FeatureCodeGraphService(
+            manifest,
+            bridge,
+            new WorkspaceRootResolver(),
+            new FakeFeatureContextResolver(),
+            NullLogger<FeatureCodeGraphService>.Instance);
+        return new WorkspaceCodeGraphActivation(manifest, codeGraph, operations, NullLogger<WorkspaceCodeGraphActivation>.Instance);
+    }
+
+    private static ScriptedWorkerBridge Bridge(string outcome) => Bridge(_ => outcome);
+
+    private static ScriptedWorkerBridge Bridge(Func<string, string> outcome) => new()
+    {
+        Handler = (command, _) => new WorkerCommandResponse(true, new { outcome = outcome(command), next = 0 }, null),
+    };
+
+    private sealed class WorkspaceRootResolver : IWorkspaceContextPathResolver
+    {
+        public Task<string> GetContextRootAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(@"C:\work\ws");
+
+        public Task<string> GetRepositoryPathAsync(WorkspaceFeatureContextId contextId, int workspaceRepositoryId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<WorkerWorkspaceArgs> GetWorkerArgsAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class RecordingLock : IWorkspaceOperationLock
+    {
+        public List<string> Kinds { get; } = [];
+
+        public List<string> OverlayKeys { get; } = [];
+
+        public bool IsWorkspaceStructurallyBusy(int workspaceId) => false;
+
+        public bool IsContextBusy(WorkspaceFeatureContextId contextId) => false;
+
+        public bool TryStartContext(
+            WorkspaceFeatureContextId contextId,
+            int workspaceId,
+            string operationKind,
+            string overlayKey,
+            string displayMessage,
+            Func<IWorkspaceLockedOperation, CancellationToken, Task> work,
+            out IWorkspaceLockedOperation operation)
+        {
+            operation = new ImmediateOperation();
+            return false;
+        }
+
+        public bool TryStartStructural(
+            int workspaceId,
+            string operationKind,
+            string overlayKey,
+            string displayMessage,
+            Func<IWorkspaceLockedOperation, CancellationToken, Task> work,
+            out IWorkspaceLockedOperation operation)
+        {
+            Kinds.Add(operationKind);
+            OverlayKeys.Add(overlayKey);
+            operation = new ImmediateOperation();
+            work(operation, CancellationToken.None).GetAwaiter().GetResult();
+            return true;
+        }
+    }
+
+    private sealed class ImmediateOperation : IWorkspaceLockedOperation
+    {
+        public int WorkspaceId => 7;
+        public WorkspaceFeatureContextId? ContextId => null;
+        public string OperationKind => WorkspaceCodeGraphActivation.OperationKind;
+        public string OverlayKey => "/workspaces/7";
+        public string DisplayMessage => "Building the CodeGraph index...";
+        public Task WhenCompleted => Task.CompletedTask;
+        public CancellationToken CancellationToken => CancellationToken.None;
+        public void ReportProgress(string message) { }
+        public Task RunBackgroundableAsync(Func<CancellationToken, Task> work) => work(CancellationToken.None);
+    }
+}

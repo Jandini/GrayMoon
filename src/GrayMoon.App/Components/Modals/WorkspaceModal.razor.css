@@ -1,20 +1,48 @@
-::deep .modal-dialog.modal-dialog-centered {
-    display: flex;
-    align-items: center;
-    min-height: calc(100% - 2rem);
-    margin: 1rem auto;
+.workspace-settings-tabs {
+    border-bottom: 1px solid var(--border-color);
 }
 
-::deep .modal-content {
-    width: 100%;
-    max-height: calc(var(--modal-vh) - 2rem);
+.workspace-settings-tabs .nav-link {
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-bottom: none;
+    margin-bottom: -1px;
+    background: var(--bg-tertiary);
+    border-radius: 0.375rem 0.375rem 0 0;
 }
 
-::deep .modal-body {
-    overflow-y: auto;
+.workspace-settings-tabs .nav-link:hover {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    border-bottom: none;
+    background: var(--bg-hover);
 }
 
-::deep .form-check-input:not(:checked) {
-    background-color: #6c757d;
-    border-color: #6c757d;
+.workspace-settings-tabs .nav-link.active,
+.workspace-settings-tabs .nav-link.active:hover {
+    color: #fff;
+    background: var(--accent-blue);
+    border-color: var(--accent-blue) var(--accent-blue) var(--border-color);
+    border-bottom: 1px solid var(--bg-card, var(--bg-primary));
+}
+
+.workspace-settings-tabs .nav-link:focus {
+    box-shadow: none;
+}
+
+.workspace-settings-tabs .nav-link:focus-visible {
+    box-shadow: 0 0 0 1px var(--focus-ring-outer);
+}
+
+/* One cell for every tab. The row is as tall as the tallest panel, so switching tabs does not resize the dialog. */
+.workspace-settings-panels {
+    display: grid;
+}
+
+.workspace-settings-panels > .workspace-settings-panel {
+    grid-area: 1 / 1;
+}
+
+.workspace-settings-panels > .workspace-settings-panel:not(.is-active) {
+    visibility: hidden;
 }

@@ -41,8 +41,21 @@ internal static class FeatureSelectorPresentation
         // (see CanSelect) - Remove is the only way out of that state from the selector.
         && !string.Equals(option.LifecycleState, "Removing", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Edit... always has one divider above it. When Open in... is shown, a second divider sits above Open in...,
+    /// so the two items are separated. When Open in... is absent that second divider is not drawn.
+    /// </summary>
+    public static FeatureSelectorTrailingDividers TrailingDividers(bool openInShown) =>
+        new(BeforeOpenIn: openInShown, BeforeEdit: true);
+
     public static bool IsReadOnlyContext(WorkspaceFeatureContextInfo? option) =>
         option is not null
         && !option.IsSpecialWorkspace
         && string.Equals(option.LifecycleState, "NeedsRepair", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>The context menu's trailing dividers. <see cref="BeforeEdit"/> is always set.</summary>
+internal readonly record struct FeatureSelectorTrailingDividers(bool BeforeOpenIn, bool BeforeEdit)
+{
+    public int Count => (BeforeOpenIn ? 1 : 0) + (BeforeEdit ? 1 : 0);
 }

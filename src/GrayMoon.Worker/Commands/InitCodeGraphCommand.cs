@@ -6,8 +6,8 @@ using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 
 /// <summary>
-/// Gives a Feature root its own CodeGraph index. Returns as soon as the build has started; the build itself runs in
-/// the background (see <see cref="CodeGraphCli"/>) and is built from scratch, so the Workspace root needs no index.
+/// Starts a CodeGraph index for a directory and returns as soon as the build has started. The build itself runs in
+/// the background (see <see cref="CodeGraphCli"/>). The directory is a Feature root or the Workspace folder.
 /// </summary>
 public sealed class InitCodeGraphCommand(CodeGraphCli codeGraph)
     : ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse>

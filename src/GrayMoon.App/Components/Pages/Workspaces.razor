@@ -27,9 +27,14 @@
 @using GrayMoon.Application.Features
 @inject IWorkspaceFeatureOperations FeatureOperations
 @using GrayMoon.App.Services.Ui
+@using GrayMoon.App.Services.Jobs
+@using GrayMoon.App.Services.Worker
 @using GrayMoon.App.Services.WorkspaceManifest
 @using GrayMoon.Application.WorkspaceManifest
 @inject IWorkspaceManifestService ManifestService
+@inject WorkspaceCodeGraphActivation CodeGraphActivation
+@inject HostInfoCache HostInfo
+@inject NavigationManager Navigation
 @inject IToastService ToastService
 @inject GrayMoon.App.Services.Policy.ReferenceImportGuard ReferenceImportGuard
 @using GrayMoon.App.Data
@@ -163,7 +168,7 @@
                                         <td class="col-count">@ReferenceLabel(workspace)</td>
                                         <td class="col-actions">
                                             <button class="btn btn-sm btn-outline-primary me-2"
-                                                    @onclick="() => ShowEditModalAsync(workspace.WorkspaceId)">
+                                                    @onclick="() => OpenWorkspaceSettingsAsync(workspace.WorkspaceId)">
                                                 Edit
                                             </button>
                                             <button class="btn btn-sm btn-outline-secondary me-2"
@@ -205,6 +210,9 @@
                UseGitVersionChanged="value => editorUseGitVersion = value"
                UseGitHubActions="@editorUseGitHubActions"
                UseGitHubActionsChanged="value => editorUseGitHubActions = value"
+               ShowCodeGraph="@editorShowCodeGraph"
+               UseCodeGraph="@editorUseCodeGraph"
+               UseCodeGraphChanged="value => editorUseCodeGraph = value"
                IsTypeDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                TypeDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                WorkspaceRepositoryId="@editorWorkspaceRepositoryId"
@@ -220,6 +228,8 @@
                SaveDisabled="@EditorSaveDisabled"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
+
+<WorkspaceSettingsHost @ref="_settingsHost" OnSaved="LoadWorkspacesAsync" />
 
 <RestoreWorkspaceModal @ref="_restoreModal"
                         IsVisible="@showRestoreModal"
@@ -367,6 +377,10 @@
     private WorkspaceType editorType = WorkspaceType.DotNetDependency;
     private bool editorUseGitVersion = true;
     private bool editorUseGitHubActions = true;
+    private bool editorUseCodeGraph;
+    private bool editorShowCodeGraph;
+    private bool? editorStoredCodeGraph;
+    private WorkspaceSettingsHost? _settingsHost;
     private int? editorWorkspaceRepositoryId;
     private int? editingWorkspaceRepositoryOriginalId;
     private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
@@ -506,6 +520,9 @@
         editorType = WorkspaceType.DotNetDependency;
         editorUseGitVersion = true;
         editorUseGitHubActions = true;
+        editorUseCodeGraph = false;
+        editorShowCodeGraph = false;
+        editorStoredCodeGraph = null;
         editorWorkspaceRepositoryId = null;
         editingWorkspaceRepositoryOriginalId = null;
         editorSourceRepositoryIds = new HashSet<int>();
@@ -533,7 +550,28 @@
         }
 
         showEditorModal = true;
+        _ = LoadCodeGraphOfferAsync();
     }
+
+    private async Task LoadCodeGraphOfferAsync()
+    {
+        try
+        {
+            var read = await HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
+            if (!showEditorModal)
+                return;
+
+            editorShowCodeGraph = read.Read?.IsCodeGraphInstalled == true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "Could not tell whether CodeGraph is installed.");
+        }
+    }
+
+    private Task OpenWorkspaceSettingsAsync(int workspaceId) =>
+        _settingsHost?.OpenAsync(workspaceId) ?? Task.CompletedTask;
 
     private bool showRestoreModal;
 
@@ -549,49 +587,6 @@
     {
         await LoadWorkspacesAsync();
         await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task ShowEditModalAsync(int workspaceId)
-    {
-        _directoryInfoDebounceCts?.Cancel();
-        _directoryInfoCts?.Cancel();
-        var workspace = await WorkspaceRepository.GetByIdAsync(workspaceId);
-        if (workspace == null)
-        {
-            return;
-        }
-
-        editingWorkspaceId = workspaceId;
-        editingWorkspaceRootPath = workspace.RootPath;
-        editorTitle = "Edit Workspace";
-        workspaceName = workspace.Name;
-        editorErrorMessage = null;
-        editingWorkspaceRepositoryIds = workspace.Repositories
-            .Select(link => link.RepositoryId)
-            .ToHashSet();
-
-        var features = await FeatureOperations.ListFeaturesAsync(workspaceId);
-        editingWorkspaceHasFeatures = features.Count > 0;
-        editorType = workspace.Type;
-        editorUseGitVersion = workspace.VersioningMode == WorkspaceVersioningMode.GitVersion;
-        editorUseGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
-        var workspaceRepositoryLink = workspace.Repositories.FirstOrDefault(l => l.Role == WorkspaceRepositoryRole.Workspace);
-        editingWorkspaceRepositoryOriginalId = workspaceRepositoryLink?.RepositoryId;
-        editorWorkspaceRepositoryId = workspaceRepositoryLink?.RepositoryId;
-        editorSourceRepositoryIds = workspace.Repositories
-            .Where(l => l.Role != WorkspaceRepositoryRole.Workspace)
-            .Select(l => l.RepositoryId)
-            .ToHashSet();
-        editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
-        await RefreshConnectorAvailabilityAsync();
-
-        directoryExists = false;
-        existingRepositoryCount = 0;
-        ResetExistingFolderState(clearAutoSelection: false);
-        adoptedExistingWorkspaceRepository = false;
-        isDirectoryInfoDirty = false;
-        isLoadingDirectoryInfo = false;
-        showEditorModal = true;
     }
 
     private async Task ShowAddRepositoriesModalAsync(int workspaceId)
@@ -729,6 +724,22 @@
                 {
                     editorErrorMessage = editWorkspaceRepositoryError;
                     ToastService.ShowError(editWorkspaceRepositoryError);
+                    return;
+                }
+            }
+
+            if (editorShowCodeGraph && editingWorkspaceId is int codeGraphWorkspaceId)
+            {
+                var codeGraphError = await CodeGraphActivation.SaveAsync(
+                    codeGraphWorkspaceId,
+                    editorStoredCodeGraph,
+                    editorUseCodeGraph,
+                    WorkspaceJobKeys.NormalizeOverlayKey(new Uri(Navigation.Uri).AbsolutePath));
+                if (codeGraphError is not null)
+                {
+                    editorErrorMessage = codeGraphError;
+                    editorStoredCodeGraph = await ManifestService.GetCodeGraphSwitchAsync(codeGraphWorkspaceId);
+                    editorUseCodeGraph = editorStoredCodeGraph == true;
                     return;
                 }
             }

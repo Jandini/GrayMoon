@@ -76,6 +76,56 @@ public sealed class CodeGraphWorkspaceTests
     }
 
     [Fact]
+    public async Task Setting_codegraph_writes_the_flag_and_a_later_rewrite_keeps_it()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var file = new WorkspaceManifestFile();
+        var built = await service.BuildFromDatabaseAsync(workspace.WorkspaceId);
+        var current = file.Serialize(built with { CodeGraph = false });
+        fixture.Bridge.Handler = (command, args) =>
+        {
+            if (command == "GetFileContents")
+                return new WorkerCommandResponse(true, new { content = current }, null);
+
+            if (command == WorkerHubMethods.WriteRepositoryFile)
+            {
+                current = ManifestTestFixture.ToJson(args).GetProperty("content").GetString()!;
+                return new WorkerCommandResponse(true, new { success = true, written = true }, null);
+            }
+
+            return new WorkerCommandResponse(true, new { success = true }, null);
+        };
+
+        var set = await service.SetCodeGraphEnabledAsync(workspace.WorkspaceId, true);
+
+        Assert.True(set.Success, set.Error);
+        Assert.True(file.TryParse(current, out var written, out var writeError), writeError);
+        Assert.True(written!.CodeGraph);
+        Assert.Equal(built.Repositories.Count, written.Repositories.Count);
+
+        var rewrite = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
+
+        Assert.True(rewrite.Success, rewrite.Error);
+        Assert.True(file.TryParse(current, out var kept, out var keptError), keptError);
+        Assert.True(kept!.CodeGraph);
+    }
+
+    [Fact]
+    public async Task Setting_codegraph_without_a_workspace_repository_fails_in_the_open()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.AddWorkspaceAsync("plain");
+
+        var result = await fixture.CreateService().SetCodeGraphEnabledAsync(workspace.WorkspaceId, true);
+
+        Assert.False(result.Success);
+        Assert.Equal(WorkspaceManifestService.CodeGraphNeedsWorkspaceRepositoryMessage, result.Error);
+        Assert.DoesNotContain(fixture.Bridge.Sent, sent => sent.Command == WorkerHubMethods.WriteRepositoryFile);
+    }
+
+    [Fact]
     public async Task Write_manifest_keeps_codegraph_from_the_file()
     {
         await using var fixture = await ManifestTestFixture.CreateAsync();
@@ -253,6 +303,7 @@ public sealed class CodeGraphWorkspaceTests
         manifest,
         bridge,
         new RootPathResolver(),
+        new FakeFeatureContextResolver(),
         NullLogger<FeatureCodeGraphService>.Instance);
 
     /// <summary>Context 1 is the special Workspace; any other context is the Feature <c>feat</c>.</summary>

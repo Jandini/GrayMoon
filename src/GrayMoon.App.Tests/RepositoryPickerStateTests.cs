@@ -249,7 +249,7 @@ public sealed class RepositoryPickerStateTests
     [Fact]
     public void Add_workspace_label_is_not_marked_optional()
     {
-        Assert.Equal("Workspace repository", WorkspaceModal.RepositoryFieldLabel);
+        Assert.Equal("Workspace Repository", WorkspaceModal.RepositoryFieldLabel);
         Assert.DoesNotContain("optional", WorkspaceModal.RepositoryFieldLabel, StringComparison.OrdinalIgnoreCase);
     }
 

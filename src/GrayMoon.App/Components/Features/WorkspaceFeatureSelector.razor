@@ -195,9 +195,12 @@
                     }
                 </li>
             }
-            @if (_desktopAvailable && SelectedContextId is not null)
+            @if (TrailingDividers.BeforeOpenIn)
             {
                 <li><hr class="dropdown-divider branch-menu-divider" /></li>
+            }
+            @if (OpenInShown)
+            {
                 <li class="workspace-feature-selector__flyout">
                     <button type="button" class="dropdown-item workspace-feature-selector__flyout-item" role="menuitem">
                         Open in...
@@ -222,6 +225,15 @@
                     </ul>
                 </li>
             }
+            @if (TrailingDividers.BeforeEdit)
+            {
+                <li><hr class="dropdown-divider branch-menu-divider" /></li>
+            }
+            <li>
+                <button type="button" class="dropdown-item" role="menuitem" disabled="@Disabled" @onclick="RequestSettings">
+                    Edit...
+                </button>
+            </li>
         </ul>
     }
 </div>
@@ -232,8 +244,9 @@
     [Parameter] public EventCallback<WorkspaceFeatureContextId> SelectedContextIdChanged { get; set; }
     [Parameter] public EventCallback<string> OnRequestCreateFeature { get; set; }
     [Parameter] public EventCallback<WorkspaceFeatureContextId> OnRequestRemoveFeature { get; set; }
+    [Parameter] public EventCallback OnRequestSettings { get; set; }
     /// <summary>
-    /// Blocks switching context and New Feature (a running job belongs to the context it started in, and creating a
+    /// Blocks switching context, New Feature and Edit... (a running job belongs to the context it started in, and creating a
     /// Feature needs the Workspace lock). It does not block the pinned Open in tool buttons: launching a tool only posts a
     /// path to Desktop, takes no Workspace lock and reads no job state. Each tool locks only itself while its own
     /// "Starting..." toast shows (<see cref="IsToolLaunchLocked"/>).
@@ -258,6 +271,10 @@
     private readonly Dictionary<int, List<WorkspaceFeatureContextInfo>> _featuresByWorkspace = new();
     private readonly HashSet<int> _featuresLoading = [];
     private readonly Dictionary<int, int> _featureCountByWorkspace = new();
+    private bool OpenInShown => _desktopAvailable && SelectedContextId is not null;
+
+    private FeatureSelectorTrailingDividers TrailingDividers => FeatureSelectorPresentation.TrailingDividers(OpenInShown);
+
     private bool _open;
     private bool _loaded;
     private bool _desktopAvailable;
@@ -1237,6 +1254,13 @@
     {
         _open = false;
         await OnRequestCreateFeature.InvokeAsync("");
+    }
+
+    private async Task RequestSettings()
+    {
+        _open = false;
+        if (OnRequestSettings.HasDelegate)
+            await OnRequestSettings.InvokeAsync();
     }
 
     private async Task RequestRemove(WorkspaceFeatureContextInfo option)

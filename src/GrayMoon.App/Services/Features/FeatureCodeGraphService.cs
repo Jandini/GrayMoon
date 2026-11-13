@@ -12,15 +12,17 @@ namespace GrayMoon.App.Services.Features;
 /// maintains <c>codegraph.json</c> and the managed <c>.gitignore</c> entry, and Repair Feature starts an index.
 /// Create Feature does not read that switch. The New Feature dialog offers the index when the CodeGraph CLI is
 /// installed, including when the Workspace has no Workspace repository and no definition; an explicit
-/// <c>"codegraph": false</c> hides that offer. The Worker builds each index from scratch in the Feature root, so the
-/// Workspace root needs no index of its own. Remove and Roll back always drop a Feature index before any worktree
-/// goes, because a ticked box can leave one behind while the switch is off. CodeGraph is optional: every failure is
-/// logged and never fails the Feature operation.
+/// <c>"codegraph": false</c> hides that offer. Workspace settings indexes the Workspace folder itself when Use
+/// CodeGraph is saved on and the Worker says an index is missing. Remove and Roll back always drop a Feature index
+/// before any worktree goes, because a ticked box can leave one behind while the switch is off. Turning the switch
+/// off does not delete an index. CodeGraph is optional for Feature create and repair: every failure is logged and
+/// never fails that operation. The Workspace settings path reports the Worker's outcome.
 /// </summary>
 public sealed class FeatureCodeGraphService(
     IWorkspaceManifestService manifestService,
     IWorkerBridge workerBridge,
     IWorkspaceContextPathResolver pathResolver,
+    IWorkspaceFeatureContextResolver contextResolver,
     ILogger<FeatureCodeGraphService> logger)
 {
     /// <summary>Outcome when the Workspace definition does not turn CodeGraph on; nothing was sent to the Worker.</summary>
@@ -28,6 +30,13 @@ public sealed class FeatureCodeGraphService(
 
     /// <summary>Outcome when the Worker could not be asked or did not answer.</summary>
     public const string Failed = "Failed";
+
+    public const string Started = "Started";
+    public const string AlreadyRunning = "AlreadyRunning";
+    public const string AlreadyInitialized = "AlreadyInitialized";
+
+    /// <summary>The Worker has a build to watch. An index that is already there does not open the overlay.</summary>
+    public static bool ShouldWatch(string? outcome) => outcome is Started or AlreadyRunning;
 
     /// <summary>
     /// Writes <c>codegraph.json</c> in the Workspace and Feature roots, then asks the Worker to start indexing the
@@ -135,6 +144,41 @@ public sealed class FeatureCodeGraphService(
         else
             logger.LogWarning("CodeGraph uninit for Feature root {Root}: {Outcome}. {Message}", root, outcome, message);
         return outcome;
+    }
+
+    /// <summary>
+    /// Asks the Worker to start indexing the Workspace folder (the special context root). Does not inspect the
+    /// folder itself and does not write <c>codegraph.json</c>; the caller syncs the definition first. Returns the
+    /// Worker's outcome (<see cref="Started"/>, <see cref="AlreadyInitialized"/>, <see cref="AlreadyRunning"/>,
+    /// <c>NotInstalled</c>, ...) or <see cref="Failed"/>.
+    /// </summary>
+    public async Task<string> InitializeWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
+    {
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var targetRoot = await pathResolver.GetContextRootAsync(contextId, cancellationToken);
+        var response = await workerBridge.SendCommandAsync(
+            WorkerHubMethods.InitCodeGraph,
+            new { targetRoot },
+            cancellationToken);
+        var outcome = ReadOutcome(response, out var message);
+        logger.LogInformation(
+            "CodeGraph init for Workspace root {TargetRoot}: {Outcome}. {Message}",
+            targetRoot, outcome, message);
+        return outcome;
+    }
+
+    /// <summary>
+    /// Watches the Workspace folder's index build until it ends, or until <paramref name="cancellationToken"/> is
+    /// cancelled. Cancelling stops only the watching. The definition switch must be on; otherwise this returns
+    /// <see cref="Disabled"/> and sends nothing.
+    /// </summary>
+    public async Task<string> WatchWorkspaceAsync(
+        int workspaceId,
+        CancellationToken cancellationToken = default,
+        IProgress<OperationProgress>? progress = null)
+    {
+        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        return await WatchInitializeAsync(workspaceId, contextId, progress, cancellationToken);
     }
 
     private async Task WriteConfigAsync(int workspaceId, WorkspaceFeatureContextId? contextId, CancellationToken cancellationToken)

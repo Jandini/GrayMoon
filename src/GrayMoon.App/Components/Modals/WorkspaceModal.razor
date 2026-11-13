@@ -13,103 +13,150 @@
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Workspace Name</label>
-                        <input class="form-control workspace-name-input"
-                               placeholder="Enter workspace name"
-                               value="@WorkspaceName"
-                               @oninput="OnNameChanged"
-                               disabled="@IsNameDisabled"
-                               @ref="firstInputElement" />
-                        @if (IsNameDisabled && !string.IsNullOrWhiteSpace(NameDisabledHint))
-                        {
-                            <div class="form-text">@NameDisabledHint</div>
-                        }
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Workspace Path</label>
-                        <input class="form-control workspace-path-input"
-                               value="@WorkspacePath"
-                               readonly
-                               disabled />
-                    </div>
-
-                    <div class="mb-3">
-                        <div class="form-label text-nowrap">Workspace type</div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="workspace-type" id="workspaceTypeDotNet"
-                                   checked="@(Type == WorkspaceType.DotNetDependency)"
-                                   disabled="@IsTypeDisabled"
-                                   @onchange="() => OnTypeChosenAsync(WorkspaceType.DotNetDependency)" />
-                            <label class="form-check-label" for="workspaceTypeDotNet">
-                                .NET Dependency
-                                <div class="form-text">Adds .NET projects, NuGet packages, dependency levels and package-aware push.</div>
-                            </label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="workspace-type" id="workspaceTypeBasic"
-                                   checked="@(Type == WorkspaceType.Basic)"
-                                   disabled="@IsTypeDisabled"
-                                   @onchange="() => OnTypeChosenAsync(WorkspaceType.Basic)" />
-                            <label class="form-check-label" for="workspaceTypeBasic">
-                                Basic
-                                <div class="form-text">Git repositories, branches, Features, pull requests, changes and files.</div>
-                            </label>
-                        </div>
-                        @if (IsTypeDisabled && !string.IsNullOrWhiteSpace(TypeDisabledHint))
-                        {
-                            <div class="form-text">@TypeDisabledHint</div>
-                        }
-                    </div>
-
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="workspaceUseGitVersion"
-                                   checked="@UseGitVersion"
-                                   @onchange="OnGitVersionChanged" />
-                            <label class="form-check-label text-nowrap" for="workspaceUseGitVersion">Calculate versions with GitVersion</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="workspaceUseGitHubActions"
-                                   checked="@UseGitHubActions"
-                                   @onchange="OnGitHubActionsChanged" />
-                            <label class="form-check-label text-nowrap" for="workspaceUseGitHubActions">GitHub Actions</label>
-                        </div>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label text-nowrap" for="workspaceRepositorySelect">@RepositoryFieldLabel</label>
-                        <RepositoryPicker Id="workspaceRepositorySelect"
-                                          Choices="@WorkspaceRepositoryChoices"
-                                          SelectedRepositoryId="@WorkspaceRepositoryId"
-                                          SelectedRepositoryIdChanged="WorkspaceRepositoryIdChanged"
-                                          AllowNone="true"
-                                          Placeholder="None"
-                                          Disabled="@IsWorkspaceRepositoryDisabled"
-                                          OnFetch="OnFetchRepositories"
-                                          FetchDisabled="@FetchDisabled" />
-                        <div class="form-text">The Workspace's own Git repository. Its working tree is the Workspace root and it is the root of every Feature.</div>
-                        @if (IsWorkspaceRepositoryDisabled && !string.IsNullOrWhiteSpace(WorkspaceRepositoryDisabledHint))
-                        {
-                            <div class="form-text">@WorkspaceRepositoryDisabledHint</div>
-                        }
-                    </div>
-
-                    @if (WorkspaceId is { } referenceWorkspaceId)
-                    {
-                        <WorkspaceReferenceSection WorkspaceId="@referenceWorkspaceId" />
-                    }
-
                     @if (DirectoryAlreadyExists)
                     {
-                        <div class="gm-callout gm-callout--warning" role="alert">@ExistingWorkspaceFolder.Callout(FolderIsWorkspaceRepository, WorkspaceRepositoryImported, ExistingRepositoryCount)</div>
+                        <div class="gm-callout gm-callout--warning mb-3" role="alert">@ExistingWorkspaceFolder.Callout(FolderIsWorkspaceRepository, WorkspaceRepositoryImported, ExistingRepositoryCount)</div>
                     }
 
                     @if (ErrorMessage != null)
                     {
-                        <div class="gm-callout gm-callout--error" role="alert">@ErrorMessage</div>
+                        <div class="gm-callout gm-callout--error mb-3" role="alert">@ErrorMessage</div>
                     }
+
+                    <ul class="nav nav-tabs workspace-settings-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(_tab == DetailsTab ? "active" : "")" type="button" role="tab"
+                                    aria-selected="@(_tab == DetailsTab)" @onclick="() => SetTab(DetailsTab)">Details</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(_tab == TypeTab ? "active" : "")" type="button" role="tab"
+                                    aria-selected="@(_tab == TypeTab)" @onclick="() => SetTab(TypeTab)">Type</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(_tab == OptionsTab ? "active" : "")" type="button" role="tab"
+                                    aria-selected="@(_tab == OptionsTab)" @onclick="() => SetTab(OptionsTab)">Options</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(_tab == ReposTab ? "active" : "")" type="button" role="tab"
+                                    aria-selected="@(_tab == ReposTab)" @onclick="() => SetTab(ReposTab)">Repos</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(_tab == LockTab ? "active" : "")" type="button" role="tab"
+                                    aria-selected="@(_tab == LockTab)" @onclick="() => SetTab(LockTab)">Lock</button>
+                        </li>
+                    </ul>
+
+                    @* Every panel stays mounted in one grid cell, so the dialog is as tall as the tallest tab and does not change height when the tab changes. *@
+                    <div class="workspace-settings-panels">
+                        <div class="workspace-settings-panel @PanelClass(DetailsTab)" @attributes="PanelAttributes(DetailsTab)">
+                            <div class="mb-3">
+                                <label class="form-label">Workspace Name</label>
+                                <input class="form-control workspace-name-input"
+                                       placeholder="Enter workspace name"
+                                       value="@WorkspaceName"
+                                       @oninput="OnNameChanged"
+                                       disabled="@IsNameDisabled"
+                                       @ref="firstInputElement" />
+                                @if (IsNameDisabled && !string.IsNullOrWhiteSpace(NameDisabledHint))
+                                {
+                                    <div class="form-text">@NameDisabledHint</div>
+                                }
+                            </div>
+
+                            <div class="mb-0">
+                                <label class="form-label">Workspace Location</label>
+                                <input class="form-control workspace-path-input"
+                                       value="@WorkspacePath"
+                                       readonly
+                                       disabled />
+                            </div>
+                        </div>
+
+                        <div class="workspace-settings-panel @PanelClass(TypeTab)" @attributes="PanelAttributes(TypeTab)">
+                            <div class="mb-0">
+                                <div class="form-label text-nowrap">Workspace Type</div>
+                                <div class="form-check">
+                                    <input class="form-check-input form-check-input-gray" type="radio" name="workspace-type" id="workspaceTypeDotNet"
+                                           checked="@(Type == WorkspaceType.DotNetDependency)"
+                                           disabled="@IsTypeDisabled"
+                                           @onchange="() => OnTypeChosenAsync(WorkspaceType.DotNetDependency)" />
+                                    <label class="form-check-label" for="workspaceTypeDotNet">
+                                        .NET Dependency
+                                        <div class="form-text">Adds .NET projects, NuGet packages, dependency levels and package-aware push.</div>
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input form-check-input-gray" type="radio" name="workspace-type" id="workspaceTypeBasic"
+                                           checked="@(Type == WorkspaceType.Basic)"
+                                           disabled="@IsTypeDisabled"
+                                           @onchange="() => OnTypeChosenAsync(WorkspaceType.Basic)" />
+                                    <label class="form-check-label" for="workspaceTypeBasic">
+                                        Basic
+                                        <div class="form-text">Git repositories, branches, Features, pull requests, changes and files.</div>
+                                    </label>
+                                </div>
+                                @if (IsTypeDisabled && !string.IsNullOrWhiteSpace(TypeDisabledHint))
+                                {
+                                    <div class="form-text">@TypeDisabledHint</div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="workspace-settings-panel @PanelClass(OptionsTab)" @attributes="PanelAttributes(OptionsTab)">
+                            <div class="mb-0">
+                                <div class="form-label">Features</div>
+                                <div class="form-check">
+                                    <input class="form-check-input form-check-input-gray" type="checkbox" id="workspaceUseGitVersion"
+                                           checked="@UseGitVersion"
+                                           @onchange="OnGitVersionChanged" />
+                                    <label class="form-check-label text-nowrap" for="workspaceUseGitVersion">Calculate versions with GitVersion</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input form-check-input-gray" type="checkbox" id="workspaceUseGitHubActions"
+                                           checked="@UseGitHubActions"
+                                           @onchange="OnGitHubActionsChanged" />
+                                    <label class="form-check-label text-nowrap" for="workspaceUseGitHubActions">Show GitHub Actions</label>
+                                </div>
+                                @if (ShowCodeGraph)
+                                {
+                                    <div class="form-check">
+                                        <input class="form-check-input form-check-input-gray" type="checkbox" id="workspaceUseCodeGraph"
+                                               checked="@UseCodeGraph"
+                                               @onchange="OnCodeGraphChanged" />
+                                        <label class="form-check-label text-nowrap" for="workspaceUseCodeGraph">Use CodeGraph</label>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="workspace-settings-panel @PanelClass(ReposTab)" @attributes="PanelAttributes(ReposTab)">
+                            <div class="mb-0">
+                                <label class="form-label text-nowrap" for="workspaceRepositorySelect">@RepositoryFieldLabel</label>
+                                <RepositoryPicker Id="workspaceRepositorySelect"
+                                                  Choices="@WorkspaceRepositoryChoices"
+                                                  SelectedRepositoryId="@WorkspaceRepositoryId"
+                                                  SelectedRepositoryIdChanged="WorkspaceRepositoryIdChanged"
+                                                  AllowNone="true"
+                                                  Placeholder="None"
+                                                  Disabled="@IsWorkspaceRepositoryDisabled"
+                                                  OnFetch="OnFetchRepositories"
+                                                  FetchDisabled="@FetchDisabled" />
+                                <div class="form-text">The Workspace's own Git repository. Its working tree is the Workspace root and it is the root of every Feature.</div>
+                                @if (IsWorkspaceRepositoryDisabled && !string.IsNullOrWhiteSpace(WorkspaceRepositoryDisabledHint))
+                                {
+                                    <div class="form-text">@WorkspaceRepositoryDisabledHint</div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="workspace-settings-panel @PanelClass(LockTab)" @attributes="PanelAttributes(LockTab)">
+                            @if (WorkspaceId is { } referenceWorkspaceId)
+                            {
+                                <WorkspaceReferenceSection WorkspaceId="@referenceWorkspaceId"
+                                                            ConfirmationChanged="OnRepositoryLockConfirmationChanged" />
+                            }
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
@@ -127,10 +174,21 @@
 }
 
 @code {
+    private const string DetailsTab = "details";
+    private const string TypeTab = "type";
+    private const string OptionsTab = "options";
+    private const string ReposTab = "repos";
+    private const string LockTab = "lock";
+    private static readonly Dictionary<string, object> InactivePanelAttributes = new() { ["inert"] = true };
+
     private ElementReference firstInputElement;
+    private bool _seenVisible;
+    private bool _focused;
+    private string _tab = DetailsTab;
+    private bool _repositoryLockConfirming;
 
     [Parameter] public bool IsVisible { get; set; }
-    /// <summary>The Workspace being edited; null for a new one. The read-only section needs an existing Workspace.</summary>
+    /// <summary>The Workspace being edited; null for a new one. Repository lock needs an existing Workspace.</summary>
     [Parameter] public int? WorkspaceId { get; set; }
     [Parameter] public string Title { get; set; } = "Add Workspace";
     [Parameter] public string WorkspaceName { get; set; } = string.Empty;
@@ -154,6 +212,10 @@
     [Parameter] public EventCallback<bool> UseGitVersionChanged { get; set; }
     [Parameter] public bool UseGitHubActions { get; set; } = true;
     [Parameter] public EventCallback<bool> UseGitHubActionsChanged { get; set; }
+    /// <summary>Use CodeGraph is offered only when the CodeGraph CLI is installed. Choosing a type does not change it.</summary>
+    [Parameter] public bool ShowCodeGraph { get; set; }
+    [Parameter] public bool UseCodeGraph { get; set; }
+    [Parameter] public EventCallback<bool> UseCodeGraphChanged { get; set; }
     [Parameter] public bool IsTypeDisabled { get; set; }
     [Parameter] public string? TypeDisabledHint { get; set; }
     [Parameter] public int? WorkspaceRepositoryId { get; set; }
@@ -164,7 +226,7 @@
     [Parameter] public EventCallback OnFetchRepositories { get; set; }
     [Parameter] public bool FetchDisabled { get; set; }
 
-    public const string RepositoryFieldLabel = "Workspace repository";
+    public const string RepositoryFieldLabel = "Workspace Repository";
 
     /// <summary>
     /// Imported repositories that can become the Workspace repository: every repository that is not already a
@@ -183,19 +245,47 @@
             .ThenBy(c => c.RepositoryId)
             .ToList();
 
-    private bool _wasVisible;
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override void OnParametersSet()
     {
-        if (IsVisible && !_wasVisible && !IsNameDisabled)
+        if (IsVisible && !_seenVisible)
         {
-            _wasVisible = true;
-            await firstInputElement.FocusAsync();
+            _seenVisible = true;
+            _focused = false;
+            _tab = DetailsTab;
+            _repositoryLockConfirming = false;
         }
         else if (!IsVisible)
         {
-            _wasVisible = false;
+            _seenVisible = false;
         }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsVisible && !_focused && !IsNameDisabled && _tab == DetailsTab)
+        {
+            _focused = true;
+            try
+            {
+                await firstInputElement.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException or InvalidOperationException)
+            {
+            }
+        }
+    }
+
+    private void SetTab(string tab) => _tab = tab;
+
+    private string PanelClass(string tab) => _tab == tab ? "is-active" : string.Empty;
+
+    private Dictionary<string, object>? PanelAttributes(string tab) =>
+        _tab == tab ? null : InactivePanelAttributes;
+
+    private Task OnRepositoryLockConfirmationChanged(bool open)
+    {
+        _repositoryLockConfirming = open;
+        return Task.CompletedTask;
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
@@ -204,7 +294,11 @@
         {
             await OnCancel.InvokeAsync();
         }
-        else if (ModalKeyboard.IsPlainEnter(e) && !IsSaving && !IsCheckingDirectory && !SaveDisabled)
+        else if (ModalKeyboard.IsPlainEnter(e)
+            && !_repositoryLockConfirming
+            && !IsSaving
+            && !IsCheckingDirectory
+            && !SaveDisabled)
         {
             await OnSave.InvokeAsync();
         }
@@ -232,4 +326,7 @@
 
     private Task OnGitHubActionsChanged(ChangeEventArgs e) =>
         UseGitHubActionsChanged.InvokeAsync(e.Value is true or "true" or "on");
+
+    private Task OnCodeGraphChanged(ChangeEventArgs e) =>
+        UseCodeGraphChanged.InvokeAsync(e.Value is true or "true" or "on");
 }

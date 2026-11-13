@@ -10,6 +10,7 @@
                                  SelectedContextIdChanged="SelectedContextIdChanged"
                                  OnRequestCreateFeature="OpenCreateFeatureAsync"
                                  OnRequestRemoveFeature="OnRequestRemoveFeature"
+                                 OnRequestSettings="OpenSettingsAsync"
                                  Disabled="Disabled" />
     }
     @if (ChildContent is not null)
@@ -19,6 +20,7 @@
         </div>
     }
 </div>
+<WorkspaceSettingsHost @ref="_settingsHost" ReloadAfterSave="true" />
 <CreateFeatureModal IsVisible="_createFeatureModalVisible"
                     WorkspaceId="WorkspaceId"
                     InitialName="@_createFeatureInitialName"
@@ -48,11 +50,15 @@
     [Inject] private IToastService ToastService { get; set; } = default!;
     [Inject] private ILogger<WorkspaceContextBar> Logger { get; set; } = default!;
 
+    private WorkspaceSettingsHost? _settingsHost;
     private bool _createFeatureModalVisible;
     private string? _createFeatureInitialName;
     private string? _createFeatureWorkspaceBranch;
     private bool _featureStatusVisible;
     private WorkspaceFeatureContextId? _featureStatusContextId;
+
+    private Task OpenSettingsAsync() =>
+        _settingsHost?.OpenAsync(WorkspaceId) ?? Task.CompletedTask;
 
     private async Task OpenCreateFeatureAsync(string name)
     {

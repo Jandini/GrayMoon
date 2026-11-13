@@ -63,6 +63,12 @@ public interface IWorkspaceManifestService
     Task<bool?> GetCodeGraphSwitchAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Writes <c>"codegraph": true</c> or <c>false</c> into <c>graymoon.json</c> and leaves every other property alone.
+    /// Fails when the Workspace has no Workspace repository or the definition cannot be read. Does not delete an index.
+    /// </summary>
+    Task<OperationResult> SetCodeGraphEnabledAsync(int workspaceId, bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The <c>ai</c> section of the Workspace definition (<c>graymoon.json</c> of the special Workspace): per-provider
     /// model choices. Null with no error when there is no Workspace repository, no definition or no <c>ai</c> section;
     /// an error when the definition exists but cannot be read or parsed, so the caller never silently ignores a broken file.

@@ -172,8 +172,7 @@
             if (generation != _codeGraphCheck)
                 return;
 
-            var installed = installedRead.Read is { } read
-                && !HostPrerequisiteState.IsMissing(read.CodeGraphVersion);
+            var installed = installedRead.Read?.IsCodeGraphInstalled == true;
             _offerCodeGraphIndex = installed && codeGraphSwitch != false;
             await InvokeAsync(StateHasChanged);
         }
