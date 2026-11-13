@@ -3,6 +3,8 @@
 Purpose: hand this prompt to a strong coding model, run from the repo root `C:\Workspace\GrayMoon\GrayMoon`.
 Do not commit between phases; leave changes uncommitted for human review.
 
+Status (2026-11-13): Phases 0 and 1 are written up in `css-optimization-report.md`. The file and selector budget (phase 2, item 2) is `ScopedCssBudgetTests` and is described in `docs/architecture/06-developer-extension-guide.md` (Convention tests). Do not add that test again. The CSS moves, the visual baseline and the release-build retry are not built.
+
 ---
 
 ## Prompt (copy everything below)
@@ -54,7 +56,7 @@ The regex lives in the .NET SDK, not in our code (we have zero `Regex` usages in
 
 **Phase 2 — Safety net before changing anything.**
 1. Build a visual-regression baseline: for every page and modal in the app, define how to capture before/after (e.g. Playwright screenshots against a running app in both themes at 2 viewport widths) — or if that is not feasible, produce a precise manual checklist per component. Capture the baseline BEFORE any CSS edit.
-2. Add an automated guard that fails the build if any single `*.razor.css` exceeds an agreed size/selector-complexity budget (propose the numbers from phase 0 data), if practical (MSBuild target or test).
+2. Done: `ScopedCssBudgetTests` fails when a `*.razor.css` exceeds 36,000 bytes or 240 selectors, or when the files together exceed 245,000 bytes. Do not add it again.
 3. **Stop for approval.**
 
 **Phase 3 — Implement, one group at a time.**

@@ -449,7 +449,7 @@ A Source repository can be read only in a Workspace (in code: a reference reposi
 - **Changes.** A read only repository is never committed. Staging, unstaging and discarding one named repository still work; Stage All, Unstage All, Discard All and Commit leave it out.
 - **Features.** A read only Source joins a new Feature as a snapshot: a detached worktree at the commit the Workspace checkout had, with no Feature branch. Every checkout in a snapshot is refused. A Source made read only later keeps its existing Feature branches; the flag stops the writes.
 - **Search and lists.** The search box takes `ro:yes` and `ro:no`. The Workspaces list has a Read only column (None, Some, All).
-- **Definition file.** The state, and for a read only repository the branch and commit it is at, are written to `graymoon.json` (version 2) and applied by Restore Workspace. See 03, section 4A.
+- **Definition file.** The state, and for a read only repository the branch and commit it is at, are written to `graymoon.json` (version 2) and applied by Restore Workspace. See 03, section 4A. With no Workspace repository, Edit Workspace says the read only state and those commits are not recorded in a definition, and that restoring the Workspace on another computer needs a Workspace repository.
 
 A repository archived on the provider is a different state: the provider decided it, and only Push reads it (a push of an archived repository is left out of a bulk push and refused for one repository). Edit Workspace and the Switch Branch dialog suggest making an archived repository read only. GrayMoon asks the provider whether a repository marked archived still is, when the Repositories page opens and before a push.
 
