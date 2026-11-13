@@ -227,13 +227,6 @@
     box-shadow: none !important;
 }
 
-.workspace-actions-header .filter-search-clear:focus,
-.workspace-actions-header .filter-search-clear:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 1px var(--focus-ring-outer);
-    border-radius: 0.25rem;
-}
-
 /* Left segment: status label - rounded only on the left so it visually joins the count segment.
    Padding/font-size/line-height mirror bootstrap's .badge box model (app.css grid badges) so the
    chip's height matches the grid's action-badge height exactly. */
@@ -337,17 +330,6 @@
     border-radius: 0.125rem;
 }
 
-.action-link {
-    color: inherit !important;
-    text-decoration: none;
-}
-
-.action-link:hover,
-.action-link:focus {
-    color: inherit !important;
-    text-decoration: underline;
-}
-
 /* Repository column link. The selectors must beat app.css `.table tbody td a:not(.badge)` and its `:hover` twin,
    or the link (and so its hover underline) turns blue. */
 .actions-table td a.repo-link,
@@ -407,10 +389,6 @@
     width: 18%;
 }
 
-.col-event {
-    width: 18%;
-}
-
 .col-last-run {
     width: 18%;
 }
@@ -465,12 +443,6 @@
 /* Optical alignment: badges read left of the column center vs. the "Status" header text */
 .actions-table td.col-action-status .action-badge {
     margin-left: 0.35rem;
-}
-
-.actions-buttons {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
 }
 
 .page-container {

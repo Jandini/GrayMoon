@@ -168,26 +168,6 @@
     justify-content: flex-end;
 }
 
-.branch-delete-link,
-.branch-delete-link i {
-    color: #505050 !important;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-}
-
-.branch-delete-link:hover,
-.branch-delete-link:hover i {
-    color: #707070 !important;
-}
-
-.branch-delete-link-disabled,
-.branch-delete-link-disabled i {
-    color: #6a6a6a !important;
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
 .switch-branch-radio {
     -webkit-appearance: none;
     -moz-appearance: none;

@@ -486,6 +486,74 @@ as "Push committed", toolbar action text, and similar). Use Bootstrap
 "Commit" / "Commit All" or wraps a checkbox label. See also "CSS conventions
 for buttons and action labels" in `CLAUDE.md`.
 
+## CSS: scoped and global stylesheets
+
+The 2026-11-13 CSS review (`docs/todo/css-optimization-report.md`) found the
+patterns below in the 49 scoped stylesheets (about 240 KB). Each has a rule.
+An existing violation is never a pattern to copy.
+
+### How the two kinds of stylesheet behave
+
+- **Scoped** (`Component.razor.css`): the SDK adds a scope attribute
+  (`[b-xxxx]`) to the last compound of each selector, or to the part before
+  `::deep`. The rule then only matches elements written in that component's
+  own `.razor` markup (or, with `::deep`, anything below them). The attribute
+  counts as one class in specificity. Scoped `@keyframes` are renamed with
+  the scope id. Every scoped file is rewritten on every build (`RewriteCss`)
+  and ends up in `GrayMoon.App.styles.css`, which is linked last.
+- **Global** (`wwwroot/app.css`, `wwwroot/css/*.css`): linked in
+  `Components/App.razor` before the scoped bundle, so at equal specificity a
+  scoped rule wins over a global one.
+
+### Patterns found, and the rule for each
+
+| Pattern found | Rule |
+|---|---|
+| The same rule copied into several components (the two merge pull request dialogs, the three branch dialogs, the repository pick lists, page callouts, split-button menus: about 12 KB) | A rule used by two or more components lives once, in a global file under `wwwroot/css/`. Never copy a rule into a second `.razor.css` |
+| The same declarations under different selectors (grid table `th`/`td` in 9 files, page subtitle in 7 pages, the green GitHub-style button in 3 dialogs) | Give the elements one shared class with one global rule, instead of a private class per page |
+| Rules for classes that no markup uses any more (`col-sync`, `col-deps`, `action-link`, ...) | When markup is deleted or a class is renamed, delete its rules in the same change |
+| Rules without `::deep` for elements another component renders, so they can never match (header rules left in `WorkspaceRepositories.razor.css` after the header became `WorkspaceRepositoriesHeader`) | When markup moves to another component, its CSS moves with it. A selector without `::deep` must name a class from the component's own `.razor` file |
+| Scoped rules that repeat a global rule with the same declarations | Search `app.css` and `wwwroot/css/` before writing a rule; do not restate what is there |
+| `::deep` in front of a bare generic class (`::deep .col-repo`, `.dropdown-item`, `.modal-content`), which reaches into every child component; one page file with 168 `::deep` selectors | Anchor every `::deep` selector on a class that belongs to the component (`::deep .repositories-table td.col-repo`). A file that is mostly `::deep` is global CSS in a scoped file: keep it small or make it a global file on purpose |
+| A selector repeated lower in the same file to override itself | One rule per selector per file; edit the first one |
+| Longer selectors and `!important` added to beat `app.css` or Bootstrap | Allowed only with a comment that names the rule it must beat. Prefer fixing the general rule |
+| Literal colors (`#505050`, `#868e96`, `#fff`) next to theme variables | Use the variables from `app.css` (`--text-muted`, `--bg-input`, `--border-light`, ...). Add a variable when a color is used twice |
+| The same `@keyframes` under two names in two files | A shared animation is one global `@keyframes` |
+| Class names built by concatenation, so a search cannot prove whether a rule is used | Write full class names in markup and code. If a name must be built, list the possible classes in a comment next to the rule |
+| One stylesheet of 34 KB and 217 selectors | `ScopedCssBudgetTests` limits each file (36,000 bytes, 240 selectors) and the total. Do not raise the numbers to get a change through |
+
+### When CSS has to change
+
+Treat a CSS change like a code change with callers: find what it reaches
+before editing.
+
+1. **Find the elements.** Search `.razor`, `.cs` and `wwwroot/js` for each
+   class in the selector. Remember child components and classes set from
+   script (`classList`) or by Blazor, Bootstrap and Monaco.
+2. **Find the competing rules.** Search every stylesheet for the same classes.
+   Note which rule wins today and why (specificity, then order).
+3. **Decide where the rule lives** (table above), then make the smallest
+   change. Do not reorder rules, reformat a file or merge rules "while you
+   are there": order is behavior.
+4. **Adding:** reuse an existing class or variable first. New shared rules go
+   in a global file; component-only rules in the scoped file, anchored on a
+   class of that component.
+5. **Moving a rule from scoped to global:** the selector loses the scope
+   attribute (one class of specificity) and now comes before the scoped
+   bundle. Prefix it with `:root ` to keep the specificity, check that no
+   equal-specificity rule that used to lose now wins, check that the classes
+   are not used by other components that the scoped rule did not reach, and
+   move any `@keyframes` it uses. Add the `<link>` in `App.razor` after the
+   existing global files and before `GrayMoon.App.styles.css`.
+6. **Removing:** only with proof that no markup, code or script uses the
+   class, including names built at run time. When unsure, keep the rule.
+7. **Verify in the running app:** the changed element and its neighbors, at
+   a wide and a narrow window, with hover, focus, disabled and open menu or
+   dialog states. Scoped CSS changes need a build; `wwwroot` CSS is served
+   from source in Development.
+8. Conventions still apply: CRLF, ASCII hyphens in comments, buttons never
+   wrap, gray unchecked checkboxes.
+
 ## Desktop README when features change
 
 When you add a user-facing feature or change how an existing one behaves,

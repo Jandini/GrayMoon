@@ -77,6 +77,7 @@ Test time is dominated by setup, so shared setup lives in fixtures; do not repea
 | Orchestrators, wait loops, cancellation, queues | "Failures, cancellation and waiting" |
 | Worker commands, hook listener, process launch, git | "Worker: input, processes and git" |
 | Middleware, endpoints, secrets, AI prompts, downloads | "Trust boundaries (App)" |
+| Any `.razor.css`, `wwwroot/app.css` or `wwwroot/css/*.css` | "CSS: scoped and global stylesheets" |
 
 The rules come from the 2026-11-10 code review. Its findings were fixed on `code-review-fixes`; `docs/code-review/2026-11-10-fix-summary.md` in the workspace root (one level above this repository) lists each fix by finding number, and what is still open is in `docs/todo/defects/`. The rules stay, and an existing violation is never a pattern to copy.
 
@@ -233,6 +234,10 @@ It is registered **scoped**: one instance per circuit (browser tab), so a toast 
 ### REST API registration
 
 `ApiEndpointRegistration.MapApiEndpoints()` is called in `Program.cs`. Each feature adds a static extension method (e.g., `MapWorkspaceEndpoints()`). Add new API groups there rather than scattering `app.Map*` calls.
+
+### CSS: where a rule goes and how to change one
+
+A rule used by one component goes in its `.razor.css`; a rule used by two or more goes once in a global file under `wwwroot/css/` (linked in `App.razor` before `GrayMoon.App.styles.css`), never copied. Delete or move CSS in the same change as the markup it styles, anchor every `::deep` selector on a class of the component, and do not write a selector without `::deep` for an element a child component renders (it cannot match). Before changing a rule, search `.razor`, `.cs` and `wwwroot/js` for its classes and every stylesheet for competing rules; do not reorder or reformat. Moving a rule from scoped to global changes specificity and order: prefix it with `:root `, move its `@keyframes`, check ties. `ScopedCssBudgetTests` limits the size of each scoped file and the total. Full rules: `AGENTS.md`, "CSS: scoped and global stylesheets", and `.cursor/rules/css-scoped-and-global.mdc`.
 
 ### CSS conventions for buttons and action labels
 
