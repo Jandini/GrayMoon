@@ -71,9 +71,16 @@ public sealed partial class WorkspaceRepositories
     private bool hasReferenceRepos => _linkByRepoId.Values.Any(link => link.IsReference);
     private bool hasIncomingCommits => _headerState?.HasIncomingCommits ?? false;
     private bool? isOutOfSync => _headerState?.IsOutOfSync;
-    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_effectiveSearch);
+    /// <summary>
+    /// The search text the rows and count on screen were loaded for. It trails <see cref="_effectiveSearch"/>
+    /// while a search reload runs, so the count text and the empty-state rows describe what is shown.
+    /// </summary>
+    private string _appliedSearch = string.Empty;
+    /// <summary>Bumped whenever <see cref="_slots"/> is replaced or cleared; a row hydration started for an older list is dropped.</summary>
+    private int _slotsVersion;
+    private bool HasSearchFilter => !string.IsNullOrWhiteSpace(_appliedSearch);
     private bool NoRepositoriesMatchSearch =>
-        hasLoadedOnce && totalCount == 0 && !isInitialLoading && !string.IsNullOrWhiteSpace(_effectiveSearch);
+        hasLoadedOnce && totalCount == 0 && !isInitialLoading && HasSearchFilter;
     private string RepositoriesModalTitle => $"Repositories for {workspace?.Name ?? "Workspace"}";
     private bool ShowRepositoriesFetchOverlay => _repositoriesModal.IsVisible && _repositoriesModal.IsFetching;
     private string RepositoriesFetchOverlayMessage => _repositoriesModal.FetchedRepositoryCount is null || _repositoriesModal.FetchedRepositoryCount == 0
@@ -204,11 +211,12 @@ public sealed partial class WorkspaceRepositories
     }
     private Task<IReadOnlyList<int>> GetRepositoryIdsAtLevelAsync(int? levelKey) =>
         LinkListQueryService.GetRepositoryIdsAtLevelAsync(
-            WorkspaceId, levelKey, _effectiveSearch, _selectedContextId, !_isFeatureContext);
+            WorkspaceId, levelKey, _appliedSearch, _selectedContextId, !_isFeatureContext);
     private WorkspaceRepositoryLink? FindLink(IReadOnlyList<WorkspaceRepositoryLink> links, int repositoryId) =>
         links.FirstOrDefault(w => w.RepositoryId == repositoryId);
     private void ClearGridState(bool clearHeaderState = true)
     {
+        _slotsVersion++;
         _slots.Clear();
         _linkByRepoId.Clear();
         _linkByWrlId.Clear();
@@ -240,6 +248,7 @@ public sealed partial class WorkspaceRepositories
     {
         _workspaceRoleRepositoryIds = GetRepositoryIdsByRole(index, workspaceRole: true);
         _sourceRepositoryIds = GetRepositoryIdsByRole(index, workspaceRole: false);
+        _slotsVersion++;
         _slots.Clear();
         _slots.AddRange(ComputeSlots(index, _presentation.GroupByDependencyLevel));
     }

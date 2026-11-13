@@ -11,7 +11,8 @@ public sealed partial class WorkspaceRepositories
         // once the user pauses typing, so no additional delay is needed here.
         searchTerm = value;
         _effectiveSearch = value;
-        await ResetAndLoadFromTopAsync(restoreScroll: false);
+        // The rows on screen stay until the new result is ready (no blank table or count between searches).
+        await ResetAndLoadFromTopAsync(restoreScroll: false, keepRowsWhileLoading: true);
         if (!_disposed)
         {
             await InvokeAsync(StateHasChanged);
