@@ -52,7 +52,6 @@
     cursor: not-allowed;
 }
 
-
 .workspace-feature-selector__add {
     display: flex;
     align-items: center;
@@ -196,13 +195,6 @@ li:has(> .workspace-feature-selector__repo-item:disabled) {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.workspace-feature-selector__menu .dropdown-item.active,
-.workspace-feature-selector__menu .dropdown-item.active:hover,
-.workspace-feature-selector__menu .dropdown-item.active:focus {
-    background-color: #000;
-    color: var(--text-primary);
 }
 
 .workspace-feature-selector__feature-row {

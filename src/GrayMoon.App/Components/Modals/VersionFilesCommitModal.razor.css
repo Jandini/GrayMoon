@@ -1,10 +1,3 @@
-/* Label above the scrollable file list */
-.version-files-commit-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #868e96;
-}
-
 /* Dark box for file paths, with dark border and scroll (matches other dependency lists) */
 .version-files-commit-box {
     max-height: 200px;
@@ -37,4 +30,3 @@
     background-color: transparent;
     color: #dee2e6;
 }
-

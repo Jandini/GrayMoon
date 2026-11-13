@@ -105,12 +105,6 @@
     min-width: 0;
 }
 
-.workspace-dependencies-header .workspace-grid-search-wrapper,
-.workspace-dependencies-header .workspace-context-search {
-    min-width: 0;
-    flex: 1 1 0%;
-}
-
 .dependencies-page .deps-header-actions {
     flex-wrap: nowrap;
     min-width: 0;

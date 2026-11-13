@@ -1,0 +1,37 @@
+---
+description: Where a CSS rule belongs (scoped .razor.css or global wwwroot/css), and how to add, change, move or remove one without a visual regression
+globs: **/*.css, **/*.razor
+alwaysApply: false
+---
+
+# CSS: scoped and global stylesheets
+
+Full rule and the reasons: `AGENTS.md`, "CSS: scoped and global stylesheets". Short form:
+
+## Where a rule goes
+
+- **One component uses it** - that component's `.razor.css`.
+- **Two or more components use it** - one global file in `src/GrayMoon.App/wwwroot/css/`, linked in `Components/App.razor` before `GrayMoon.App.styles.css`. Never copy a rule into a second `.razor.css`.
+- **Before writing a rule**, search `wwwroot/app.css` and `wwwroot/css/` for the class and for the same declarations. Reuse what exists (`form-check-input-gray`, `text-nowrap`, the grid and callout classes).
+
+## Never
+
+- Copy a rule, a block of declarations, or a `@keyframes` from another stylesheet.
+- Leave CSS behind: when markup is deleted, renamed or moved to another component, its rules are deleted or moved in the same change.
+- Write a selector without `::deep` for an element that a child component renders. It can never match.
+- Write `::deep` in front of a bare generic class or element (`::deep .dropdown-item`, `::deep td`, `::deep .modal-content`). Anchor it: `::deep .my-component-table td`.
+- Repeat a selector lower in the same file to override itself. Edit the first one.
+- Add `!important` or a longer selector to win over another rule without a comment naming the rule it must beat.
+- Use a literal color where a theme variable exists (`var(--text-muted)`, `var(--bg-input)`, `var(--border-light)`, ...).
+- Build a class name by concatenation when a full literal works (`"badge-" + state`). Write the full names so a search finds them; if it must be built, name the possible classes in a comment next to the rule.
+
+## Changing existing CSS
+
+1. Find every element the selector reaches: search `.razor`, `.cs` and `wwwroot/js` for each class in it.
+2. Find every rule that competes for the same element and property (same class in other stylesheets, `app.css`, Bootstrap).
+3. Make the smallest change. Do not reorder rules or reformat the file.
+4. Moving a rule from scoped to global changes its specificity (the scope attribute counts as one class) and its order (global files load before the scoped bundle, so it loses ties it used to win). Prefix the moved selector with `:root ` to keep the specificity, move its `@keyframes` with it, and check ties.
+5. Removing a rule needs proof that nothing uses the class: no hit in `.razor`, `.cs`, `wwwroot/js`, and no code that builds the name. When unsure, keep it.
+6. Look at the result in the running app at a wide and a narrow window, including hover, focus, disabled and open-menu states.
+
+`ScopedCssBudgetTests` fails when a `.razor.css` file or their total grows over the budget. Fix it by moving shared rules to a global file or splitting the component, not by raising the numbers.

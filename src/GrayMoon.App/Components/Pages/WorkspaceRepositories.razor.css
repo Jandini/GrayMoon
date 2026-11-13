@@ -1,26 +1,3 @@
-/* Header: title + subtitle on one row (subtitle bottom-aligned); search + buttons full width below. Tight gap to grid. */
-.workspace-repos-header {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-}
-.workspace-repos-title-row {
-    display: flex;
-    align-items: flex-end;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    min-width: 0;
-}
-.workspace-repos-title {
-    margin-bottom: 0;
-}
-.workspace-repos-subtitle {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-}
 .repositories-virtual-tbody tr.virtual-scroll-placeholder td {
     height: 48px;
     max-height: 48px;
@@ -30,20 +7,6 @@
     line-height: 48px;
     overflow: hidden;
 }
-
-.workspace-repos-title-spacer {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-.workspace-repos-worker-tasks {
-    flex-shrink: 0;
-    margin-left: auto;
-}
-.workspace-repos-header-actions {
-    flex-wrap: wrap;
-    width: 100%;
-}
-
 
 /* Match Repositories / Workspaces: left-align all columns, status column right-aligned via col-status-badge; use global resizable-columns padding for header spacing */
 ::deep .repositories-table th,
@@ -381,40 +344,6 @@
     min-width: 0;
 }
 
-::deep .col-sync {
-    width: 100px;
-    min-width: 100px;
-    max-width: 100px;
-    text-align: center;
-}
-
-::deep .repositories-table th.col-sync,
-::deep .repositories-table td.col-sync {
-    text-align: center;
-}
-
-::deep .repositories-table td.col-sync {
-    overflow: visible;
-    text-overflow: clip;
-}
-
-::deep .col-deps {
-    width: 8rem;
-    min-width: 8rem;
-    max-width: 8rem;
-    text-align: center;
-}
-
-::deep .repositories-table th.col-deps,
-::deep .repositories-table td.col-deps {
-    text-align: center;
-}
-
-::deep .repositories-table td.col-deps {
-    overflow: visible;
-    text-overflow: clip;
-}
-
 /* Dependencies column: same badge logic as build (green = all match, red = any unmatched) */
 ::deep .repositories-table .build-dep-badge {
     font-weight: 400;
@@ -562,13 +491,6 @@
     margin-bottom: 0;
 }
 
-::deep .repositories-table .dependency-badge-tooltip-file {
-    display: block;
-    color: #fff;
-    font-size: 0.78rem;
-    margin-bottom: 0.05rem;
-}
-
 ::deep .repositories-table .dependency-badge-tooltip-file-header {
     color: #ccc;
     font-size: 0.78rem;
@@ -601,14 +523,6 @@
 
 ::deep .repositories-table .dependency-badge-tooltip-new-version {
     color: goldenrod;
-}
-
-::deep .repositories-table .dependency-badge-tooltip-file-count {
-    color: #fff;
-}
-
-::deep .repositories-table .dependency-badge-tooltip-versions--after-file {
-    margin-left: 0.35rem;
 }
 
 ::deep .repositories-table .dependency-badge-tooltip-footer {
@@ -687,22 +601,6 @@
     opacity: 0 !important;
     pointer-events: none !important;
     transition: none !important;
-}
-
-::deep .col-commits {
-    width: auto;
-    max-width: 80px;
-    text-align: center;
-}
-
-::deep .repositories-table th.col-commits,
-::deep .repositories-table td.col-commits {
-    text-align: center;
-}
-
-::deep .repositories-table td.col-commits {
-    overflow: visible;
-    text-overflow: clip;
 }
 
 ::deep .repositories-table td.col-pr {
@@ -885,30 +783,6 @@
     border-color: transparent;
     box-shadow: none;
     cursor: default;
-}
-
-/* Workspaces breadcrumb link - same gray as "X repositories", override global a color */
-.grid-page-header .text-muted a.workspaces-breadcrumb-link,
-.grid-page-header .text-muted a.workspaces-breadcrumb-link:hover,
-.grid-page-header .text-muted a.workspaces-breadcrumb-link:visited,
-.grid-page-header .text-muted a.workspaces-breadcrumb-link:focus,
-.grid-page-header .text-muted a.workspaces-breadcrumb-link:active {
-    color: var(--text-muted) !important;
-    text-decoration: none;
-}
-
-.grid-page-header .text-muted a.workspaces-breadcrumb-link:hover {
-    text-decoration: underline;
-}
-
-/* Clickable repositories count under page title */
-.repositories-count-link {
-    cursor: pointer;
-    text-decoration: none;
-}
-
-.repositories-count-link:hover {
-    text-decoration: underline;
 }
 
 /* Repository error row - GHA callout only (no icon, no border frame) */
@@ -1110,12 +984,11 @@ button.page-callout-action:disabled {
 }
 
 ::deep .repositories-table th.col-metrics {
-    text-align: center;    
+    text-align: center;
 }
 
-
 ::deep .repositories-table td.col-metrics {
-    text-align: center;    
+    text-align: center;
 }
 
 ::deep .repositories-table td.col-metrics {

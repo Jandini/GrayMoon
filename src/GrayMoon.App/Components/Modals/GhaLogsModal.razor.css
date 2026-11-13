@@ -80,12 +80,6 @@
     background: #6a6a6a;
 }
 
-/* Zero-height scroll anchor — must not have position: sticky */
-.gha-job-anchor {
-    height: 0;
-    overflow: hidden;
-}
-
 /* ── Job status chips (same box model as WorkspaceActions gha-status-chip, no count) ── */
 
 .gha-log-job {
