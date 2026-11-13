@@ -22,6 +22,13 @@ public sealed class WorkspaceRepository(
     private readonly IWorkspaceGitChangesNotifier _gitChangesNotifier = gitChangesNotifier ?? throw new ArgumentNullException(nameof(gitChangesNotifier));
     private readonly ILogger<WorkspaceRepository> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+    /// <summary>
+    /// Shown when a repository is added or removed while a Feature still exists. A Feature is created
+    /// with one worktree per repository in the Workspace at that moment, and that set is not revised later.
+    /// </summary>
+    public const string MembershipBlockedWhileFeaturesExist =
+        "Cannot add or remove repositories while a Feature exists. A Feature keeps a worktree for every repository that was in the Workspace when the Feature was created, so that list cannot change until the Feature is removed.";
+
     public async Task<List<Workspace>> GetAllAsync()
     {
         return await _dbContext.Workspaces
@@ -512,10 +519,7 @@ public sealed class WorkspaceRepository(
     public async Task AddRepositoriesAsync(int workspaceId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)
     {
         if (await _dbContext.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId, cancellationToken))
-        {
-            throw new InvalidOperationException(
-                "Cannot add Workspace repositories while Features exist. Remove Features first.");
-        }
+            throw new InvalidOperationException(MembershipBlockedWhileFeaturesExist);
 
         var workspace = await _dbContext.Workspaces
             .Include(w => w.Repositories)
@@ -607,11 +611,11 @@ public sealed class WorkspaceRepository(
         if (existingRepoIds.SetEquals(validSet))
             return;
 
+        // A Feature is created with one worktree per repository that belonged to the Workspace at
+        // that moment, and nothing adds or drops a repository inside an existing Feature. Changing
+        // the list would leave the Feature and the Workspace with different repositories.
         if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
-        {
-            throw new InvalidOperationException(
-                "Cannot change Workspace repository membership while Features exist. Remove Features first.");
-        }
+            throw new InvalidOperationException(MembershipBlockedWhileFeaturesExist);
 
         var toRemove = current
             .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && !validSet.Contains(wr.RepositoryId))

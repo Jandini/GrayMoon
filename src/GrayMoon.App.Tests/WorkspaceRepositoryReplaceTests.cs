@@ -1,4 +1,5 @@
 using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Components.Pages;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Repositories;
@@ -275,7 +276,11 @@ public sealed class WorkspaceRepositoryReplaceTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => catalog.UpdateAsync(fx.WorkspaceId, "test-workspace", [fx.RepositoryIds[1]], null));
-        Assert.Contains("Features exist", ex.Message);
+        Assert.Equal(WorkspaceRepository.MembershipBlockedWhileFeaturesExist, ex.Message);
+        Assert.Equal(ex.Message, WorkspaceRepositories.SaveErrorMessage(ex));
+        Assert.Equal(
+            "Failed to save repositories. Please try again.",
+            WorkspaceRepositories.SaveErrorMessage(new IOException("database is locked")));
 
         await using var verify = fx.Factory.CreateDbContext();
         var workspace = await verify.Workspaces.AsNoTracking()

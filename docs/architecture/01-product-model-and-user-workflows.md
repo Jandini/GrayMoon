@@ -925,7 +925,9 @@ every Workspace repository gets a worktree (no repository picker); the base is a
 repositories on a tag get a detached worktree at that tag
 uncommitted Workspace changes are not carried into the Feature
 while Features exist: no rename or root change, no type change, no adding repositories or other
-  membership change, no enabling/disabling the Workspace repository
+  membership change. The Repositories dialog says a Feature keeps a worktree for every repository
+  that was in the Workspace when the Feature was created, so that list cannot change until the
+  Feature is removed. Enabling and disabling the Workspace repository is also refused
 deleting a connector or fetching repositories never removes a repository a Workspace or Feature uses
 a Workspace with Features can be deleted only after the acknowledgement in section 4
 the Branch-menu actions Prepare Workspace, New Branch, Switch Branch and Return to Default are Workspace-only
