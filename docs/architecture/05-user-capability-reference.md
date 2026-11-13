@@ -1189,7 +1189,9 @@ Feature limitations in the current code:
 Features can only be based on the current Workspace (no "default branches" or "from another Feature" base)
 every Workspace repository always gets a worktree (no repository picker)
 one branch per repository per Feature (the Feature name); no adopting an existing branch
-Workspace repository membership, rename and root change are blocked while Features exist
+Workspace repository membership, rename and root change are blocked while Features exist.
+  The Repositories dialog explains that a Feature keeps a worktree for every repository from
+  when it was created, so the list cannot change until the Feature is removed
 REST endpoints always act on the special Workspace context; there are no Feature endpoints
 ```
 

@@ -94,10 +94,19 @@ public sealed partial class WorkspaceRepositories
         {
             Logger.LogError(ex, "Failed to save repositories for workspace {WorkspaceId}", WorkspaceId);
             _repositoriesModal.IsSaving = false;
-            _repositoriesModal.ErrorMessage = "Failed to save repositories. Please try again.";
+            _repositoriesModal.ErrorMessage = SaveErrorMessage(ex);
             StateHasChanged();
         }
     }
+
+    /// <summary>
+    /// A refused save (a Feature still exists, a duplicate name) already carries the sentence the dialog shows.
+    /// Anything else stays the generic retry, so a database failure is not pasted into the dialog.
+    /// </summary>
+    public static string SaveErrorMessage(Exception ex) =>
+        ex is InvalidOperationException
+            ? ex.Message
+            : "Failed to save repositories. Please try again.";
 
     private void AbortFetchRepositories()
     {
