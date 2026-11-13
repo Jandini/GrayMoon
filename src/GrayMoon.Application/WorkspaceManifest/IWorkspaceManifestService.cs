@@ -82,4 +82,13 @@ public interface IWorkspaceManifestService
     /// </summary>
     Task<OperationResult> WriteCodeGraphConfigAsync(int workspaceId, Features.WorkspaceFeatureContextId? contextId = null, CancellationToken cancellationToken = default);
     Task<WorkspaceManifestDrift> DetectDriftAsync(int workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same service, reading and writing the Workspace repository checkout of <paramref name="contextId"/>
+    /// (a Feature's worktree) wherever this service otherwise uses the special Workspace. Workspace settings opened
+    /// from a context use it, so <c>graymoon.json</c>, <c>.gitignore</c> and <c>codegraph.json</c> change in the
+    /// folder the user is working in and the special Workspace's files are left alone. The database is not
+    /// per-context. A test double that keeps no files returns itself.
+    /// </summary>
+    IWorkspaceManifestService ForContext(Features.WorkspaceFeatureContextId contextId) => this;
 }

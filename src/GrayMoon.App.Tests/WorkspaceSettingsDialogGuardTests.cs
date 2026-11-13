@@ -58,6 +58,20 @@ public sealed class WorkspaceSettingsDialogGuardTests
     }
 
     [Fact]
+    public void Settings_opened_from_the_context_bar_write_the_files_of_the_selected_context()
+    {
+        var bar = File.ReadAllText(Path.Combine(Conventions.ConventionSource.AppDirectory, "Components", "Features", "WorkspaceContextBar.razor"));
+        var host = File.ReadAllText(Path.Combine(Modals, "WorkspaceSettingsHost.razor"));
+
+        Assert.Contains("OpenAsync(WorkspaceId, SelectedContextId)", bar);
+        Assert.Contains("ManifestFor(_contextId).SyncDefinitionToDiskAsync(workspaceId)", host);
+        Assert.Matches(@"CurrentPath\(\),\s+_contextId\);", host);
+        // No save path of the dialog goes around the context.
+        Assert.DoesNotContain("ManifestService.SyncDefinitionToDiskAsync", host);
+        Assert.DoesNotContain("ManifestService.GetCodeGraphSwitchAsync", host);
+    }
+
+    [Fact]
     public async Task HasRunningJobs_is_true_for_a_job_started_on_any_page_and_false_when_it_ends()
     {
         var runner = new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance);

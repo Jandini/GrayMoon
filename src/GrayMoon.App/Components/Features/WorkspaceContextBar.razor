@@ -1,4 +1,4 @@
-﻿@using GrayMoon.App.Services.Queries
+@using GrayMoon.App.Services.Queries
 @using GrayMoon.Application.Features
 
 <div class="workspace-context-search">
@@ -58,7 +58,7 @@
     private WorkspaceFeatureContextId? _featureStatusContextId;
 
     private Task OpenSettingsAsync() =>
-        _settingsHost?.OpenAsync(WorkspaceId) ?? Task.CompletedTask;
+        _settingsHost?.OpenAsync(WorkspaceId, SelectedContextId) ?? Task.CompletedTask;
 
     private async Task OpenCreateFeatureAsync(string name)
     {

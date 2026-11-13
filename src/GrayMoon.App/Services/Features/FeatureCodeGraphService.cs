@@ -152,9 +152,14 @@ public sealed class FeatureCodeGraphService(
     /// Worker's outcome (<see cref="Started"/>, <see cref="AlreadyInitialized"/>, <see cref="AlreadyRunning"/>,
     /// <c>NotInstalled</c>, ...) or <see cref="Failed"/>.
     /// </summary>
-    public async Task<string> InitializeWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default)
+    public async Task<string> InitializeWorkspaceAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId? targetContextId = null,
+        CancellationToken cancellationToken = default)
     {
-        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        // Workspace settings opened from a Feature index that Feature's folder, not the Workspace folder.
+        var contextId = targetContextId
+            ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         var targetRoot = await pathResolver.GetContextRootAsync(contextId, cancellationToken);
         var response = await workerBridge.SendCommandAsync(
             WorkerHubMethods.InitCodeGraph,
@@ -175,8 +180,16 @@ public sealed class FeatureCodeGraphService(
     public async Task<string> WatchWorkspaceAsync(
         int workspaceId,
         CancellationToken cancellationToken = default,
-        IProgress<OperationProgress>? progress = null)
+        IProgress<OperationProgress>? progress = null,
+        WorkspaceFeatureContextId? targetContextId = null)
     {
+        if (targetContextId is { } target)
+        {
+            // The switch was just saved in that context's own definition; the special Workspace's switch says
+            // nothing about it.
+            return await WatchInitializeAsync(workspaceId, target, progress, cancellationToken, honorDefinitionSwitch: false);
+        }
+
         var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         return await WatchInitializeAsync(workspaceId, contextId, progress, cancellationToken);
     }

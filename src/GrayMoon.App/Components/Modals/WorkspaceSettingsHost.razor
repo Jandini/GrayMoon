@@ -92,6 +92,15 @@
     private bool _overlayCanBackground;
     private bool _disposed;
     private int _openGeneration;
+    private WorkspaceFeatureContextId? _contextId;
+
+    /// <summary>
+    /// The definition files of the context the dialog was opened from. The Workspaces list passes no context and
+    /// gets the special Workspace; a page with a context bar passes its selected context, so a save in a Feature
+    /// writes graymoon.json, .gitignore and codegraph.json in that Feature's folder.
+    /// </summary>
+    private IWorkspaceManifestService ManifestFor(WorkspaceFeatureContextId? contextId) =>
+        contextId is { } target ? ManifestService.ForContext(target) : ManifestService;
     private string _name = string.Empty;
     private string? _rootPath;
     private string? _error;
@@ -113,7 +122,11 @@
 
     protected override void OnInitialized() => OperationRunner.Changed += OnOperationsChanged;
 
-    public async Task OpenAsync(int workspaceId)
+    /// <summary>
+    /// Opens the settings of a Workspace. <paramref name="contextId"/> is the context whose files a save writes:
+    /// null (the Workspaces list) is the special Workspace, a Feature is that Feature's Workspace repository checkout.
+    /// </summary>
+    public async Task OpenAsync(int workspaceId, WorkspaceFeatureContextId? contextId = null)
     {
         if (_saving)
             return;
@@ -136,7 +149,7 @@
             var choices = await LoadChoicesAsync(sourceRepositoryIds);
             var hasConnectors = await HasConnectorsAsync();
 
-            var storedTask = ManifestService.GetCodeGraphSwitchAsync(workspaceId);
+            var storedTask = ManifestFor(contextId).GetCodeGraphSwitchAsync(workspaceId);
             var hostTask = HostInfo.GetAsync(WorkerBridge, refresh: false, CancellationToken.None);
             var storedCodeGraph = await storedTask;
             var host = await hostTask;
@@ -145,6 +158,7 @@
                 return;
 
             _workspaceId = workspaceId;
+            _contextId = contextId;
             _rootPath = workspace.RootPath;
             _name = workspace.Name;
             _error = null;
@@ -251,7 +265,7 @@
                 return;
             }
 
-            var syncError = await ManifestService.SyncDefinitionToDiskAsync(workspaceId);
+            var syncError = await ManifestFor(_contextId).SyncDefinitionToDiskAsync(workspaceId);
             if (syncError is not null)
             {
                 _error = syncError;
@@ -266,11 +280,12 @@
                     workspaceId,
                     _storedCodeGraph,
                     _useCodeGraph,
-                    CurrentPath());
+                    CurrentPath(),
+                    _contextId);
                 if (codeGraphError is not null)
                 {
                     _error = codeGraphError;
-                    _storedCodeGraph = await ManifestService.GetCodeGraphSwitchAsync(workspaceId);
+                    _storedCodeGraph = await ManifestFor(_contextId).GetCodeGraphSwitchAsync(workspaceId);
                     _useCodeGraph = _storedCodeGraph == true;
                     return;
                 }

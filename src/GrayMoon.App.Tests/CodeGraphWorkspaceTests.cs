@@ -113,6 +113,65 @@ public sealed class CodeGraphWorkspaceTests
     }
 
     [Fact]
+    public async Task Settings_saved_from_a_feature_change_that_feature_definition_and_not_the_workspace_one()
+    {
+        // Unticking Use CodeGraph inside a Feature used to rewrite graymoon.json and .gitignore of the special
+        // Workspace and leave the Feature's own files as they were.
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var file = new WorkspaceManifestFile();
+        var special = fixture.CreateService();
+        var seeded = file.Serialize(await special.BuildFromDatabaseAsync(workspace.WorkspaceId) with { CodeGraph = true });
+        var files = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ws/graymoon.json"] = seeded,
+            ["feature-x/graymoon.json"] = seeded,
+        };
+        fixture.Bridge.Handler = (command, args) =>
+        {
+            var json = ManifestTestFixture.ToJson(args);
+            var key = json.GetProperty("workspaceName").GetString() + "/" + json.GetProperty("filePath").GetString();
+            if (command == "GetFileContents")
+                return new WorkerCommandResponse(true, new { content = files.GetValueOrDefault(key) }, null);
+
+            if (command == WorkerHubMethods.WriteRepositoryFile)
+                files[key] = json.GetProperty("content").GetString()!;
+            return new WorkerCommandResponse(true, new { success = true, written = true }, null);
+        };
+        var feature = new WorkspaceManifestService(
+            fixture.Factory,
+            file,
+            fixture.Bridge,
+            new ContextFolderPathResolver(),
+            new FakeFeatureContextResolver(),
+            NullLogger<WorkspaceManifestService>.Instance).ForContext(new WorkspaceFeatureContextId(42));
+
+        var set = await feature.SetCodeGraphEnabledAsync(workspace.WorkspaceId, false);
+        var synced = await feature.SyncDefinitionToDiskAsync(workspace.WorkspaceId);
+
+        Assert.True(set.Success, set.Error);
+        Assert.Null(synced);
+        Assert.False(await feature.GetCodeGraphSwitchAsync(workspace.WorkspaceId));
+        Assert.Contains("\"codegraph\": false", files["feature-x/graymoon.json"], StringComparison.Ordinal);
+        Assert.Equal(seeded, files["ws/graymoon.json"]);
+        Assert.DoesNotContain(files.Keys, key => key.StartsWith("ws/", StringComparison.Ordinal) && key != "ws/graymoon.json");
+        Assert.Contains("feature-x/.gitignore", files.Keys);
+    }
+
+    /// <summary>Context 42 is a Feature in folder <c>feature-x</c>; every other context is the special Workspace <c>ws</c>.</summary>
+    private sealed class ContextFolderPathResolver : IWorkspaceContextPathResolver
+    {
+        public Task<string> GetContextRootAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<string> GetRepositoryPathAsync(WorkspaceFeatureContextId contextId, int workspaceRepositoryId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<WorkerWorkspaceArgs> GetWorkerArgsAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WorkerWorkspaceArgs(ManifestTestFixture.WorkspaceRoot, contextId.Value == 42 ? "feature-x" : "ws", "ws-root"));
+    }
+
+    [Fact]
     public async Task Setting_codegraph_without_a_workspace_repository_fails_in_the_open()
     {
         await using var fixture = await ManifestTestFixture.CreateAsync();

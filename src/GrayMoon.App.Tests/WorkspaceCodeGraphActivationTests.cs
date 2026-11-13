@@ -119,9 +119,36 @@ public sealed class WorkspaceCodeGraphActivationTests
         Assert.Equal(refused ? WorkspaceManifestService.CodeGraphNeedsWorkspaceRepositoryMessage : null, message);
     }
 
-    private static WorkspaceCodeGraphActivation Create(ScriptedWorkerBridge bridge, RecordingLock operations)
+    [Fact]
+    public async Task Settings_opened_from_a_feature_index_that_feature_folder_not_the_workspace_folder()
     {
-        var manifest = new RecordingManifestService { CodeGraphEnabled = true };
+        // The save used to index and watch the special Workspace folder whichever context the dialog came from.
+        var bridge = Bridge(command => command == WorkerHubMethods.WatchCodeGraphInit ? "Completed" : "Started");
+        var activation = Create(bridge, new RecordingLock(), codeGraphEnabled: false);
+
+        Assert.Null(await activation.StartIndexAsync(7, "/workspaces/7", new WorkspaceFeatureContextId(42)));
+
+        var sent = bridge.Sent.Select(s => (s.Command, Args: ManifestTestFixture.ToJson(s.Args).GetRawText())).ToList();
+        Assert.Contains(sent, s => s.Command == WorkerHubMethods.InitCodeGraph && s.Args.Contains(@"C:\\features\\f42", StringComparison.Ordinal));
+        // The special Workspace's switch is off here; the Feature's own build is still watched.
+        Assert.Contains(sent, s => s.Command == WorkerHubMethods.WatchCodeGraphInit && s.Args.Contains(@"C:\\features\\f42", StringComparison.Ordinal));
+        Assert.DoesNotContain(sent, s => s.Args.Contains(@"C:\\work\\ws", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Settings_opened_from_the_workspaces_list_index_the_workspace_folder()
+    {
+        var bridge = Bridge(command => command == WorkerHubMethods.WatchCodeGraphInit ? "Completed" : "Started");
+        var activation = Create(bridge, new RecordingLock());
+
+        Assert.Null(await activation.StartIndexAsync(7, "/workspaces"));
+
+        Assert.All(bridge.Sent, s => Assert.Contains(@"C:\\work\\ws", ManifestTestFixture.ToJson(s.Args).GetRawText(), StringComparison.Ordinal));
+    }
+
+    private static WorkspaceCodeGraphActivation Create(ScriptedWorkerBridge bridge, RecordingLock operations, bool codeGraphEnabled = true)
+    {
+        var manifest = new RecordingManifestService { CodeGraphEnabled = codeGraphEnabled };
         var codeGraph = new FeatureCodeGraphService(
             manifest,
             bridge,
@@ -141,7 +168,7 @@ public sealed class WorkspaceCodeGraphActivationTests
     private sealed class WorkspaceRootResolver : IWorkspaceContextPathResolver
     {
         public Task<string> GetContextRootAsync(WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(@"C:\work\ws");
+            Task.FromResult(contextId.Value == 1 ? @"C:\work\ws" : @"C:\features\f" + contextId.Value);
 
         public Task<string> GetRepositoryPathAsync(WorkspaceFeatureContextId contextId, int workspaceRepositoryId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

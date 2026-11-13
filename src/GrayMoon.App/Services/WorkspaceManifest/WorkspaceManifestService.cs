@@ -46,6 +46,15 @@ public sealed class WorkspaceManifestService(
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> TagPinGates = new();
 
+    /// <summary>Set by <see cref="ForContext"/>; null means the special Workspace.</summary>
+    private WorkspaceFeatureContextId? _targetContextId;
+
+    public IWorkspaceManifestService ForContext(WorkspaceFeatureContextId contextId) =>
+        new WorkspaceManifestService(dbContextFactory, manifestFile, workerBridge, pathResolver, contextResolver, logger)
+        {
+            _targetContextId = contextId,
+        };
+
     public async Task<WorkspaceManifest> BuildFromDatabaseAsync(int workspaceId, CancellationToken cancellationToken = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -557,6 +566,7 @@ public sealed class WorkspaceManifestService(
         try
         {
             var targetContextId = contextId
+                ?? _targetContextId
                 ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
             var args = await pathResolver.GetWorkerArgsAsync(targetContextId, cancellationToken);
             if (args.WorkspaceRepositoryName is null)
@@ -711,7 +721,8 @@ public sealed class WorkspaceManifestService(
         int workspaceId,
         CancellationToken cancellationToken)
     {
-        var contextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
+        var contextId = _targetContextId
+            ?? await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         var args = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
         return (contextId, args);
     }
@@ -833,6 +844,7 @@ public static class WorkspaceManifestHooks
     {
         try
         {
+            // A service from ForContext writes all three files into that context's Workspace repository checkout.
             var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
             if (!gitIgnore.Success)
                 return $"Could not update .gitignore in the Workspace repository: {gitIgnore.Error}";

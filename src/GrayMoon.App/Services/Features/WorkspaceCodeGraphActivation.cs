@@ -9,10 +9,11 @@ namespace GrayMoon.App.Services.Features;
 /// Saves the workspace-wide CodeGraph switch into <c>graymoon.json</c> and, when it is on, starts an index for the
 /// Workspace folder. The App does not look in <c>.codegraph</c> itself: the Worker says whether a build is needed.
 /// An index that is already there does not open the overlay. Unchecking the switch writes <c>false</c> and does not
-/// delete an index.
+/// delete an index. The files and the index are those of the context the settings were opened from: the special
+/// Workspace from the Workspaces list, a Feature's own folder from that Feature.
 /// </summary>
 public sealed class WorkspaceCodeGraphActivation(
-    IWorkspaceManifestService manifest,
+    IWorkspaceManifestService workspaceManifest,
     FeatureCodeGraphService codeGraph,
     IWorkspaceOperationLock operations,
     ILogger<WorkspaceCodeGraphActivation> logger)
@@ -54,10 +55,15 @@ public sealed class WorkspaceCodeGraphActivation(
         bool? storedSwitch,
         bool selected,
         string overlayKey,
+        WorkspaceFeatureContextId? contextId = null,
         CancellationToken cancellationToken = default)
     {
         if (!ShouldWrite(storedSwitch, selected))
             return null;
+
+        // Opened from a context: that context's definition, .gitignore, codegraph.json and index. Opened from the
+        // Workspaces list (null): the special Workspace's.
+        var manifest = contextId is { } target ? workspaceManifest.ForContext(target) : workspaceManifest;
 
         var write = await manifest.SetCodeGraphEnabledAsync(workspaceId, selected, cancellationToken);
         if (!write.Success && write.Error == WorkspaceManifestService.DefinitionNotFoundMessage)
@@ -79,7 +85,7 @@ public sealed class WorkspaceCodeGraphActivation(
         if (!selected)
             return null;
 
-        return await StartIndexAsync(workspaceId, overlayKey, cancellationToken);
+        return await StartIndexAsync(workspaceId, overlayKey, contextId, cancellationToken);
     }
 
     /// <summary>
@@ -88,12 +94,16 @@ public sealed class WorkspaceCodeGraphActivation(
     /// <see cref="FeatureCodeGraphService.AlreadyRunning"/> are watched under the structural lock, and the overlay
     /// offers Background. Any other outcome is a failure.
     /// </summary>
-    public async Task<string?> StartIndexAsync(int workspaceId, string overlayKey, CancellationToken cancellationToken = default)
+    public async Task<string?> StartIndexAsync(
+        int workspaceId,
+        string overlayKey,
+        WorkspaceFeatureContextId? contextId = null,
+        CancellationToken cancellationToken = default)
     {
         string outcome;
         try
         {
-            outcome = await codeGraph.InitializeWorkspaceAsync(workspaceId, cancellationToken);
+            outcome = await codeGraph.InitializeWorkspaceAsync(workspaceId, contextId, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -111,7 +121,7 @@ public sealed class WorkspaceCodeGraphActivation(
         Volatile.Write(ref _activeWorkspaceId, workspaceId);
         try
         {
-            return await WatchIndexAsync(workspaceId, overlayKey, cancellationToken);
+            return await WatchIndexAsync(workspaceId, overlayKey, contextId, cancellationToken);
         }
         finally
         {
@@ -119,7 +129,11 @@ public sealed class WorkspaceCodeGraphActivation(
         }
     }
 
-    private async Task<string?> WatchIndexAsync(int workspaceId, string overlayKey, CancellationToken cancellationToken)
+    private async Task<string?> WatchIndexAsync(
+        int workspaceId,
+        string overlayKey,
+        WorkspaceFeatureContextId? contextId,
+        CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = operations.TryStartStructural(
@@ -138,7 +152,7 @@ public sealed class WorkspaceCodeGraphActivation(
                         using var watch = CancellationTokenSource.CreateLinkedTokenSource(background, ct);
                         try
                         {
-                            watched = await codeGraph.WatchWorkspaceAsync(workspaceId, watch.Token);
+                            watched = await codeGraph.WatchWorkspaceAsync(workspaceId, watch.Token, targetContextId: contextId);
                         }
                         catch (OperationCanceledException) when (background.IsCancellationRequested && !ct.IsCancellationRequested)
                         {
