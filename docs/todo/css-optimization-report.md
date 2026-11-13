@@ -1,6 +1,6 @@
 # CSS optimization report
 
-Status: Phase 0 (evidence) complete. No CSS, markup or build file has been changed yet.
+Status: Phase 0 (evidence) and Phase 1 (analysis) are complete. No scoped CSS or markup was changed. The size guard from the prompt's phase 2 is in place (`ScopedCssBudgetTests`: 36,000 bytes and 240 selectors per file, 245,000 bytes in total) and is described in `docs/architecture/06-developer-extension-guide.md` (Convention tests) and `AGENTS.md` (CSS). Groups A, B and C below are still a proposal. The release-build retry is not built.
 
 ## Phase 0 - Evidence
 

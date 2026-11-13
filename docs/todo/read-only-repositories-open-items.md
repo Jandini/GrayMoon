@@ -14,11 +14,10 @@ The feature is built and merged to `main`. This is everything that is still open
 | 4 | Convention test: see tag reads inside query expressions | Developer | No, tests only |
 | 5 | Mutation checks that were never run | Developer | No, tests only |
 | 6 | Render tests for the Switch Branch dialog and the settings section | Developer | No, tests only |
-| 7 | Delete the working documents | Owner | After item 1 |
 
 Not open: the code, the automated tests (build 0 warnings, Common 446, Worker 1034 with 1 known skip, App 4841, both `Long` runs) and the architecture documentation. How the feature works is in `docs/architecture/` (01, 02 section 7B, 03, 04, 05, 06, 07), `AGENTS.md` and `CLAUDE.md`.
 
-The other read only documents in this folder (idea note, plan, inventory, test log, 0B follow-ups) are history. They describe how the work was done and say "open" in places that are closed now. When one of them and this document differ, this document is right.
+The working documents (idea note, implementation plan, inventory, test log, 0B follow-ups) were removed on 2026-11-13. They described work that is already in those architecture documents.
 
 ## 1. Manual smoke M1-M13 (owner, after the release)
 
@@ -100,15 +99,3 @@ A mutation that does not fail its tests is a finding: add the missing test.
 `ReferenceMarkupRenderTests` renders the padlock, the Workspace repositories row and the Git Changes repository label. Not rendered: `SwitchBranchModal` and `WorkspaceReferenceSection`. Both contain the loading overlay, which injects six services and the script runtime.
 
 Done when: both render in a test with stubbed services, and the tests assert the padlock in the dialog header, the Lock / Unlock label for each state, and the three state texts of the section.
-
-## 7. Housekeeping
-
-The working documents of the feature are still here. Delete them when item 1 is done, and remove or shorten the row in [README](README.md):
-
-- `ideas/read-only-repositories.md`
-- `read-only-repositories-implementation-plan.md`
-- `read-only-repositories-inventory.md`
-- `read-only-repositories-test-log.md`
-- `read-only-repositories-0b-follow-ups.md`
-
-Then this document keeps only what is still open, or is deleted too.
