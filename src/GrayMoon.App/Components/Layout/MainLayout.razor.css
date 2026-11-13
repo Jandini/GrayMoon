@@ -166,6 +166,20 @@ article.content {
     text-decoration: none;
 }
 
+/* Version opens releases. Resting color matches the top-bar text. Hover is brighter white
+   with no underline, and must beat .top-row ::deep a:hover (blue + underline). */
+.top-row.top-row-main .header-version a.header-version-link,
+.top-row.top-row-main .header-version a.header-version-link:visited {
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.top-row.top-row-main .header-version a.header-version-link:hover,
+.top-row.top-row-main .header-version a.header-version-link:focus-visible {
+    color: #fff;
+    text-decoration: none;
+}
+
 /* Collapsed: width = topbar height; update --sidebar-width for loading overlay */
 .page--navbar-collapsed {
     --sidebar-width: 3.5rem;
