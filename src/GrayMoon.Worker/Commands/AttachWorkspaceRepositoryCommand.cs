@@ -80,6 +80,10 @@ public sealed class AttachWorkspaceRepositoryCommand(
                 return Fail(message);
             }
 
+            var branchError = await EnsureRequestedBranchAsync(request, path, cancellationToken);
+            if (branchError is not null)
+                return Fail(branchError);
+
             await FinishAsync(request, path, cancellationToken);
             return await SuccessAsync(path, cancellationToken);
         }
@@ -99,7 +103,22 @@ public sealed class AttachWorkspaceRepositoryCommand(
         if (!fetchOk)
             return Fail(fetchError ?? "Git fetch failed.");
 
-        var defaultBranch = await FindFetchedDefaultBranchAsync(path, bearerToken, cancellationToken);
+        var defaultBranch = string.IsNullOrWhiteSpace(request.BranchName)
+            ? await FindFetchedDefaultBranchAsync(path, bearerToken, cancellationToken)
+            : request.BranchName.Trim();
+
+        if (!string.IsNullOrWhiteSpace(request.BranchName))
+        {
+            var requestedError = ValidateRequestedBranchName(defaultBranch!);
+            if (requestedError is null
+                && await reader.RevParseAsync(path, $"refs/remotes/origin/{defaultBranch}", cancellationToken) is null)
+            {
+                requestedError = BranchMissingMessage(defaultBranch!);
+            }
+
+            if (requestedError is not null)
+                return Fail(requestedError);
+        }
 
         if (!string.IsNullOrWhiteSpace(defaultBranch))
         {
@@ -118,6 +137,46 @@ public sealed class AttachWorkspaceRepositoryCommand(
 
         await FinishAsync(request, path, cancellationToken);
         return await SuccessAsync(path, cancellationToken);
+    }
+
+    private static string BranchMissingMessage(string branch) =>
+        $"Branch '{branch}' was not found on the remote. It may have been deleted; choose another branch.";
+
+    /// <summary>The branch name ends up in a git argument string, so only plain ref names are accepted.</summary>
+    private static string? ValidateRequestedBranchName(string branch) =>
+        OriginDefaultRef.IsPlainRefName(branch)
+        && !branch.Contains("..", StringComparison.Ordinal)
+        && !branch.Contains("@{", StringComparison.Ordinal)
+        && !branch.StartsWith("refs/", StringComparison.Ordinal)
+            ? null
+            : $"'{branch}' is not a valid branch name.";
+
+    /// <summary>
+    /// After a clone (which checks out the remote default), switches to the requested remote branch and verifies HEAD
+    /// is on it. Returns an error message, or null when no branch was requested or HEAD is on the requested branch.
+    /// </summary>
+    private async Task<string?> EnsureRequestedBranchAsync(AttachWorkspaceRepositoryRequest request, string path, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.BranchName))
+            return null;
+
+        var branch = request.BranchName.Trim();
+        if (ValidateRequestedBranchName(branch) is { } invalid)
+            return invalid;
+
+        if (!string.Equals(await reader.GetCurrentBranchNameAsync(path, cancellationToken), branch, StringComparison.Ordinal))
+        {
+            if (await reader.RevParseAsync(path, $"refs/remotes/origin/{branch}", cancellationToken) is null)
+                return BranchMissingMessage(branch);
+
+            var (ok, error) = await git.CheckoutTrackingAsync(path, branch, cancellationToken);
+            if (!ok)
+                return error ?? "Git checkout failed.";
+        }
+
+        return string.Equals(await reader.GetCurrentBranchNameAsync(path, cancellationToken), branch, StringComparison.Ordinal)
+            ? null
+            : $"The Workspace repository could not be checked out on branch '{branch}'.";
     }
 
     // A remote that is empty can still name an unborn HEAD branch; only a branch the fetch actually brought

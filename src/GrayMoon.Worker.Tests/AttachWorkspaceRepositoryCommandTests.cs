@@ -298,6 +298,68 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         Assert.False(second.IsUnborn);
     }
 
+    [Fact]
+    public async Task A_clone_is_checked_out_on_the_requested_remote_branch()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Assert.Equal(0, RunGit(remote, "branch", "graymoon/workspace-setup", "main").ExitCode);
+        var request = NewRequest(remote);
+        request.BranchName = "graymoon/workspace-setup";
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("graymoon/workspace-setup", response.Branch);
+        Assert.Equal("graymoon/workspace-setup", RunGit(RootPath, "rev-parse", "--abbrev-ref", "HEAD").Stdout.Trim());
+    }
+
+    [Fact]
+    public async Task A_missing_requested_branch_fails_instead_of_falling_back_to_the_default()
+    {
+        var remote = CreateRemote(withCommit: true);
+        var request = NewRequest(remote);
+        request.BranchName = "deleted-branch";
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.False(response.Success);
+        Assert.Contains("deleted-branch", response.ErrorMessage);
+        Assert.Contains("not found", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task A_non_empty_root_is_initialized_on_the_requested_branch()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Assert.Equal(0, RunGit(remote, "branch", "setup", "main").ExitCode);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+        var request = NewRequest(remote);
+        request.BranchName = "setup";
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("setup", response.Branch);
+    }
+
+    [Theory]
+    [InlineData("--upload-pack=x")]
+    [InlineData("a b")]
+    [InlineData("a..b")]
+    [InlineData("x\"y")]
+    public async Task An_unsafe_requested_branch_name_is_refused(string branch)
+    {
+        var remote = CreateRemote(withCommit: true);
+        var request = NewRequest(remote);
+        request.BranchName = branch;
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.False(response.Success);
+        Assert.Contains("not a valid branch name", response.ErrorMessage);
+    }
+
     private string RootPath => Path.Combine(_workspaceRoot, "ws");
 
     private AttachWorkspaceRepositoryRequest NewRequest(string cloneUrl) => new()

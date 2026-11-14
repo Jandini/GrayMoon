@@ -117,11 +117,11 @@ public sealed class WorkspaceRepositoryOperations(
         return OperationResult.Ok();
     }
 
-    public async Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default)
+    public async Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default, string? branchName = null)
     {
         try
         {
-            var (plan, error) = await CheckRemoteDefinitionAsync(repositoryId, cancellationToken);
+            var (plan, error) = await CheckRemoteDefinitionAsync(repositoryId, NormalizeBranch(branchName), cancellationToken);
             if (plan is null)
                 return RestoreWorkspacePreflight.Failed(error!);
 
@@ -150,11 +150,12 @@ public sealed class WorkspaceRepositoryOperations(
         int repositoryId,
         string workspaceName,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? branchName = null)
     {
         try
         {
-            return await RestoreCoreAsync(repositoryId, workspaceName, progress, cancellationToken);
+            return await RestoreCoreAsync(repositoryId, workspaceName, NormalizeBranch(branchName), progress, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -268,6 +269,7 @@ public sealed class WorkspaceRepositoryOperations(
     private async Task<RestoreWorkspaceResult> RestoreCoreAsync(
         int repositoryId,
         string workspaceName,
+        string? branchName,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -280,7 +282,7 @@ public sealed class WorkspaceRepositoryOperations(
             return RestoreWorkspaceResult.Failed(workerUnavailable);
 
         progress.Report("Checking Workspace definition...");
-        var (checkedDefinition, definitionError) = await CheckRemoteDefinitionAsync(repositoryId, cancellationToken);
+        var (checkedDefinition, definitionError) = await CheckRemoteDefinitionAsync(repositoryId, NormalizeBranch(branchName), cancellationToken);
         if (checkedDefinition is null)
             return RestoreWorkspaceResult.Failed(definitionError!);
 
@@ -307,7 +309,7 @@ public sealed class WorkspaceRepositoryOperations(
         var cloneUrl = checkedDefinition.Context.CloneUrl;
         try
         {
-            var (result, error) = await RestoreIntoWorkspaceAsync(workspaceId, repositoryId, checkedDefinition.Context, progress, cancellationToken);
+            var (result, error) = await RestoreIntoWorkspaceAsync(workspaceId, repositoryId, branchName, checkedDefinition.Context, progress, cancellationToken);
             if (result is not null)
                 return result;
 
@@ -335,12 +337,13 @@ public sealed class WorkspaceRepositoryOperations(
     private async Task<(RestoreWorkspaceResult? Result, string? Error)> RestoreIntoWorkspaceAsync(
         int workspaceId,
         int repositoryId,
+        string? branchName,
         RestoreContext context,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         var attach = await LinkAndAttachAsync(
-            workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true, attachMessage: "Cloning Workspace repository...");
+            workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true, attachMessage: "Cloning Workspace repository...", branchName: branchName);
         if (!attach.Success)
             return (null, attach.Error ?? "Cloning the Workspace repository failed.");
 
@@ -499,13 +502,13 @@ public sealed class WorkspaceRepositoryOperations(
     }
 
     /// <summary>Reads the repository's definition through its connector and evaluates it against this computer.</summary>
-    private async Task<(CheckedDefinition? Definition, string? Error)> CheckRemoteDefinitionAsync(int repositoryId, CancellationToken cancellationToken)
+    private async Task<(CheckedDefinition? Definition, string? Error)> CheckRemoteDefinitionAsync(int repositoryId, string? branchName, CancellationToken cancellationToken)
     {
         var context = await LoadRestoreContextAsync(repositoryId, cancellationToken);
         if (context is null)
             return (null, "Repository not found.");
 
-        var read = await remoteManifestReader.ReadAsync(repositoryId, cancellationToken);
+        var read = await remoteManifestReader.ReadAsync(repositoryId, branchName, cancellationToken);
         if (read.Error is not null)
             return (null, read.Error);
 
@@ -550,7 +553,8 @@ public sealed class WorkspaceRepositoryOperations(
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken,
         bool requireEmptyRoot = false,
-        string attachMessage = "Attaching Workspace repository...")
+        string attachMessage = "Attaching Workspace repository...",
+        string? branchName = null)
     {
         int workspaceRepositoryId;
         string cloneUrl;
@@ -593,7 +597,7 @@ public sealed class WorkspaceRepositoryOperations(
         try
         {
             progress.Report(attachMessage);
-            (error, adoptedExisting) = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, cancellationToken);
+            (error, adoptedExisting) = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, branchName, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -626,6 +630,7 @@ public sealed class WorkspaceRepositoryOperations(
         string cloneUrl,
         string? bearerToken,
         bool requireEmptyRoot,
+        string? branchName,
         CancellationToken cancellationToken)
     {
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
@@ -641,6 +646,7 @@ public sealed class WorkspaceRepositoryOperations(
                 workspaceId,
                 repositoryId,
                 requireEmptyRoot,
+                branchName,
             },
             cancellationToken);
 
@@ -655,6 +661,10 @@ public sealed class WorkspaceRepositoryOperations(
 
         return (null, data.AdoptedExisting);
     }
+
+    /// <summary>A blank branch means "the default branch" (null). The name is otherwise kept exactly as the provider spelled it.</summary>
+    private static string? NormalizeBranch(string? branchName) =>
+        string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim();
 
     private async Task RemoveLinkAsync(int workspaceRepositoryId, int repositoryId, int workspaceId)
     {

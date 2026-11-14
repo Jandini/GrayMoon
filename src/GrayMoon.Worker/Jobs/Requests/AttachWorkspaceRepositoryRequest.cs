@@ -31,4 +31,11 @@ public sealed class AttachWorkspaceRepositoryRequest : WorkspaceCommandRequest
     /// <summary>When true, fails without changing anything if the root folder exists and contains any entry.</summary>
     [JsonPropertyName("requireEmptyRoot")]
     public bool RequireEmptyRoot { get; set; }
+
+    /// <summary>
+    /// Remote branch to check out instead of the remote default branch (a restore from a chosen branch). Null or blank
+    /// keeps the default. A branch that is missing on the remote fails the attach; it never falls back to the default.
+    /// </summary>
+    [JsonPropertyName("branchName")]
+    public string? BranchName { get; set; }
 }

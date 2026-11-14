@@ -16,15 +16,17 @@ public interface IWorkspaceRepositoryOperations
     /// <summary>
     /// Read-only check of an imported repository before a restore: reads <c>graymoon.json</c> through the connector
     /// (no Worker, no clone, no database change), validates it and previews what a restore would resolve locally.
+    /// <paramref name="branchName"/> is the remote branch to read it from; null reads the default branch.
     /// </summary>
-    Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default);
+    Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default, string? branchName = null);
 
     /// <summary>
     /// Restores a Workspace from a repository that holds a valid Workspace definition. Validates everything it can
     /// before creating anything; a failure after the Workspace was created rolls it back (database row, links and
-    /// the root folder when the Worker can prove the restore created it).
+    /// the root folder when the Worker can prove the restore created it). <paramref name="branchName"/> is the branch the
+    /// Workspace repository is checked out on (and the one whose definition is validated); null restores the default branch.
     /// </summary>
-    Task<RestoreWorkspaceResult> RestoreFromRepositoryAsync(int repositoryId, string workspaceName, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task<RestoreWorkspaceResult> RestoreFromRepositoryAsync(int repositoryId, string workspaceName, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default, string? branchName = null);
 }
 
 /// <summary>
@@ -81,4 +83,19 @@ public sealed record RestoreWorkspacePreflight
     public bool ReferenceDefault { get; init; }
 
     public static RestoreWorkspacePreflight Failed(string error) => new() { Success = false, Error = error };
+}
+
+/// <summary>Remote branches of an imported repository, read through its connector (no Worker, no clone).</summary>
+/// <param name="DefaultBranchName">The provider's default branch; null when it names none.</param>
+/// <param name="Branches">Branch names, default first, then ordinal-ignore-case sorted. Never silently shortened.</param>
+/// <param name="Truncated">True when the provider has more branches than were read.</param>
+/// <param name="Error">Set when the list could not be read at all.</param>
+public sealed record RemoteBranchList(string? DefaultBranchName, IReadOnlyList<string> Branches, bool Truncated, string? Error)
+{
+    public static RemoteBranchList Failed(string error) => new(null, Array.Empty<string>(), false, error);
+}
+
+public interface IRemoteRepositoryBranchReader
+{
+    Task<RemoteBranchList> ListAsync(int repositoryId, CancellationToken cancellationToken = default);
 }

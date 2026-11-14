@@ -66,7 +66,7 @@ public sealed partial class GitHubService
     }
 
     /// <summary>Loads a repository file as UTF-8 text (e.g. workflow YAML). Returns null if missing or not a file.</summary>
-    public async Task<string?> GetRepositoryFileUtf8TextAsync(Connector connector, string owner, string repo, string filePath, CancellationToken cancellationToken = default)
+    public async Task<string?> GetRepositoryFileUtf8TextAsync(Connector connector, string owner, string repo, string filePath, CancellationToken cancellationToken = default, string? reference = null)
     {
         EnsureConnectorConfigured(connector);
         if (string.IsNullOrWhiteSpace(owner))
@@ -77,7 +77,7 @@ public sealed partial class GitHubService
             return null;
 
         var encodedPath = string.Join("/", filePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
-        using var response = await GetResponseAsync(connector, $"repos/{owner}/{repo}/contents/{encodedPath}", cancellationToken);
+        using var response = await GetResponseAsync(connector, $"repos/{owner}/{repo}/contents/{encodedPath}" + (string.IsNullOrWhiteSpace(reference) ? string.Empty : "?ref=" + Uri.EscapeDataString(reference)), cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
             return null;
         if (!response.IsSuccessStatusCode)

@@ -59,6 +59,13 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
     private readonly RestorePreflightGate _preflightGate = new();
     private CancellationTokenSource? _preflightCts;
     private RestoreWorkspacePreflight? _preflight;
+    private RemoteBranchList? _branchList;
+    private bool _branchesLoading;
+    private string? _branch;
+    private string? _branchText;
+    private string? _branchError;
+    private int _branchGeneration;
+    private CancellationTokenSource? _branchesCts;
     private string? _error;
     private string? _errorResidue;
     private bool _busy;
@@ -81,7 +88,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
 
     private bool PreflightPending => _preflightGate.IsPending;
 
-    private bool CanRestore => RestoreWorkspaceFlow.CanRestore(new RestoreReadiness(
+    private bool CanRestore => _branch is not null && RestoreWorkspaceFlow.CanRestore(new RestoreReadiness(
         _busy,
         _checking,
         WorkerUnavailable,
@@ -131,6 +138,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         _folder = null;
         _checking = false;
         CancelPreflight();
+        ClearBranches();
         _preflight = null;
         _error = null;
         _errorResidue = null;
@@ -235,7 +243,11 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         _errorResidue = null;
         var choice = _choices.FirstOrDefault(c => c.RepositoryId == _repositoryId);
 
-        var preflight = StartPreflightAsync(_repositoryId);
+        // A new repository clears the branch and its preflight at once; the branch list is read next and the
+        // default branch is then selected, which starts the (single) manifest preflight.
+        CancelPreflight();
+        _preflight = null;
+        var preflight = LoadBranchesAsync(_repositoryId);
 
         // Keep following the repository name until the user types their own.
         var (name, autoName) = RestoreWorkspaceFlow.FollowRepositoryName(_name, _autoName, choice?.RepositoryName);
@@ -253,12 +265,115 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         await preflight;
     }
 
-    private async Task StartPreflightAsync(int? repositoryId)
+    private void ClearBranches()
+    {
+        _branchGeneration++;
+        _branchesCts?.Cancel();
+        _branchesCts?.Dispose();
+        _branchesCts = null;
+        _branchList = null;
+        _branchesLoading = false;
+        _branch = null;
+        _branchText = null;
+        _branchError = null;
+    }
+
+    /// <summary>Lists the remote branches of the selected repository, then selects its default branch (never a guess).</summary>
+    private async Task LoadBranchesAsync(int? repositoryId)
+    {
+        ClearBranches();
+        if (repositoryId is not { } id)
+            return;
+
+        var cts = _branchesCts = new CancellationTokenSource();
+        var generation = _branchGeneration;
+        _branchesLoading = true;
+        RemoteBranchList list;
+        try
+        {
+            list = await ScopedExecutor.ExecuteAsync<IRemoteRepositoryBranchReader, RemoteBranchList>(
+                reader => reader.ListAsync(id, cts.Token),
+                cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Listing branches failed for repository {RepositoryId}", id);
+            list = RemoteBranchList.Failed(ex.Message);
+        }
+
+        // A newer repository selection owns the dialog now.
+        if (generation != _branchGeneration || _disposed)
+            return;
+
+        _branchesLoading = false;
+        _branchList = list;
+        if (list.Error is not null)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (list.DefaultBranchName is { } defaultBranch && list.Branches.Contains(defaultBranch, StringComparer.Ordinal))
+        {
+            _branch = defaultBranch;
+            _branchText = defaultBranch;
+            var preflight = StartPreflightAsync(id, defaultBranch);
+            await InvokeAsync(StateHasChanged);
+            await preflight;
+            return;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Only a branch from the list counts, and only a committed choice (not each keystroke) starts a preflight.</summary>
+    private async Task OnBranchChangedAsync(ChangeEventArgs e)
+    {
+        var typed = e.Value?.ToString()?.Trim() ?? string.Empty;
+        if (_repositoryId is not { } id || _branchList is not { Error: null } list)
+            return;
+
+        CancelPreflight();
+        _preflight = null;
+        _error = null;
+        _errorResidue = null;
+        _branchText = typed;
+        _branchError = null;
+
+        // A truncated list cannot prove a name is wrong; the preflight and the Worker then decide.
+        if (typed.Length == 0 || (!list.Truncated && !list.Branches.Contains(typed, StringComparer.Ordinal)))
+        {
+            // The typed text stays in the field; Restore is off until a listed branch is chosen.
+            _branch = null;
+            _branchError = typed.Length == 0 ? "Choose a branch." : $"Branch '{typed}' is not in the list. Choose a listed branch.";
+            return;
+        }
+
+        _branch = typed;
+        var preflight = StartPreflightAsync(id, typed);
+        StateHasChanged();
+        await preflight;
+    }
+
+    /// <summary>
+    /// Keys in the branch field do not reach the dialog: Enter there commits the typed or picked branch, and the
+    /// dialog's Enter would otherwise start a restore from the previously validated branch before that change arrives.
+    /// </summary>
+    private async Task HandleBranchKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await CancelAsync();
+    }
+
+    private async Task StartPreflightAsync(int repositoryId, string branchName)
     {
         CancelPreflight();
         _preflight = null;
-        if (repositoryId is not { } id)
-            return;
+        var id = repositoryId;
 
         var cts = _preflightCts = new CancellationTokenSource();
         var token = _preflightGate.Begin(id);
@@ -266,7 +381,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         try
         {
             result = await ScopedExecutor.ExecuteAsync<IWorkspaceRepositoryOperations, RestoreWorkspacePreflight>(
-                operations => operations.PreflightRestoreAsync(id, cts.Token),
+                operations => operations.PreflightRestoreAsync(id, cts.Token, branchName),
                 cts.Token);
         }
         catch (OperationCanceledException)
@@ -280,7 +395,8 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         }
 
         // A newer selection owns the dialog now; this answer is for a repository the user moved away from.
-        if (!_preflightGate.TryComplete(token, _repositoryId))
+        // The token also covers a branch change: choosing another branch begins a newer token.
+        if (!_preflightGate.TryComplete(token, _repositoryId) || !string.Equals(_branch, branchName, StringComparison.Ordinal))
             return;
 
         _preflight = result;
@@ -350,6 +466,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
             return;
 
         var repositoryId = _repositoryId!.Value;
+        var branchName = _branch!;
         var name = _name.Trim();
         var jobKey = new Uri(NavigationManager.Uri).AbsolutePath.ToLowerInvariant();
         if (JobService.IsRunning(jobKey))
@@ -372,7 +489,8 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
                         name,
                         (workspaceId, progress, token) => SyncNewWorkspaceAsync(workspaceId, progress, token),
                         job.ToOperationProgress(),
-                        ct),
+                        ct,
+                        branchName),
                     ct);
             }
             catch (OperationCanceledException)
@@ -515,6 +633,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         _checkCts?.Cancel();
         _checkCts?.Dispose();
         CancelPreflight();
+        ClearBranches();
     }
 }
 
@@ -822,9 +941,10 @@ public static class RestoreWorkspaceFlow
         string workspaceName,
         Func<int, IProgress<OperationProgress>?, CancellationToken, Task> requestSync,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? branchName = null)
     {
-        var restore = await operations.RestoreFromRepositoryAsync(repositoryId, workspaceName.Trim(), progress, cancellationToken);
+        var restore = await operations.RestoreFromRepositoryAsync(repositoryId, workspaceName.Trim(), progress, cancellationToken, branchName);
         if (!restore.Success || restore.WorkspaceId is not { } workspaceId)
             return new RestoreFlowOutcome(restore, false, null);
 

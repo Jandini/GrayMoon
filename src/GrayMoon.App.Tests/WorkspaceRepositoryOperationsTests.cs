@@ -338,6 +338,60 @@ public sealed class WorkspaceRepositoryOperationsTests
     }
 
     [Fact]
+    public async Task Preflight_reads_the_definition_at_the_selected_branch()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var root = await fixture.SeedRootAsync();
+        fixture.UseDefinition(Definition(("basic", "none", "none"), ["https://github.com"]));
+
+        var onBranch = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId, default, "graymoon/workspace-setup");
+        var onDefault = await fixture.Operations.PreflightRestoreAsync(root.RepositoryId, default, "  ");
+
+        Assert.True(onBranch.Success, onBranch.Error);
+        Assert.True(onDefault.Success, onDefault.Error);
+        Assert.Equal(["graymoon/workspace-setup", null], fixture.Remote.Branches.ToArray());
+    }
+
+    [Fact]
+    public async Task Restore_validates_and_attaches_the_same_branch()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var root = await fixture.SeedRootAsync();
+        fixture.UseDefinition(Definition(("basic", "none", "none"), ["https://github.com"]));
+
+        var result = await fixture.Operations.RestoreFromRepositoryAsync(
+            root.RepositoryId, "branch-restore", branchName: "graymoon/workspace-setup");
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(["graymoon/workspace-setup"], fixture.Remote.Branches.ToArray());
+        var attach = Assert.Single(fixture.Bridge.Sent, s => s.Command == "AttachWorkspaceRepository");
+        Assert.Equal("graymoon/workspace-setup", ManifestTestFixture.ToJson(attach.Args).GetProperty("branchName").GetString());
+    }
+
+    [Fact]
+    public async Task Restore_without_a_branch_keeps_the_default_branch_behavior()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var root = await fixture.SeedRootAsync();
+        fixture.UseDefinition(Definition(("basic", "none", "none"), ["https://github.com"]));
+
+        var result = await fixture.Operations.RestoreFromRepositoryAsync(root.RepositoryId, "default-restore");
+
+        Assert.True(result.Success, result.Error);
+        var attach = Assert.Single(fixture.Bridge.Sent, s => s.Command == "AttachWorkspaceRepository");
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, ManifestTestFixture.ToJson(attach.Args).GetProperty("branchName").ValueKind);
+    }
+
+    [Fact]
+    public void Branch_order_puts_the_default_first_then_sorts_ignoring_case_without_duplicates()
+    {
+        var ordered = GitHubRemoteWorkspaceManifestReader.OrderBranches(
+            "trunk", ["zeta", "Alpha", "trunk", "beta", "Alpha"]);
+
+        Assert.Equal(["trunk", "Alpha", "beta", "zeta"], ordered);
+    }
+
+    [Fact]
     public async Task Restore_keeps_a_canonical_definition_untouched()
     {
         await using var fixture = await OperationsFixture.CreateAsync();
@@ -824,9 +878,12 @@ internal sealed class FakeRemoteManifestReader : IRemoteWorkspaceManifestReader
 
     public List<int> Reads { get; } = [];
 
-    public Task<RemoteManifestRead> ReadAsync(int repositoryId, CancellationToken cancellationToken = default)
+    public List<string?> Branches { get; } = [];
+
+    public Task<RemoteManifestRead> ReadAsync(int repositoryId, string? branchName, CancellationToken cancellationToken = default)
     {
         Reads.Add(repositoryId);
+        Branches.Add(branchName);
         if (Error is not null)
             return Task.FromResult(new RemoteManifestRead(false, null, Error));
         return Task.FromResult(Content is null

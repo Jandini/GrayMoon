@@ -92,6 +92,50 @@
 
                         @if (_repositoryId is not null)
                         {
+                            <div class="mb-3">
+                                <label class="form-label text-nowrap" for="restore-workspace-branch">Branch</label>
+                                @if (_branchesLoading)
+                                {
+                                    <div class="text-muted small" role="status">Loading branches...</div>
+                                }
+                                else if (_branchList is { Error: not null } branchFailed)
+                                {
+                                    <div class="@ValidationCalloutClass" role="alert">@branchFailed.Error</div>
+                                }
+                                else if (_branchList is { } branches)
+                                {
+                                    <input type="text"
+                                           id="restore-workspace-branch"
+                                           class="form-control @(_branchError is not null ? "is-invalid" : null)"
+                                           list="restore-workspace-branch-list"
+                                           autocomplete="off"
+                                           placeholder="Search branches"
+                                           value="@_branchText"
+                                           onfocus="this.select()"
+                                           @onchange="OnBranchChangedAsync"
+                                           @onkeydown="HandleBranchKeyDownAsync"
+                                           @onkeydown:stopPropagation="true" />
+                                    <datalist id="restore-workspace-branch-list">
+                                        @foreach (var branch in branches.Branches)
+                                        {
+                                            <option value="@branch">@(branch == branches.DefaultBranchName ? "Default" : null)</option>
+                                        }
+                                    </datalist>
+                                    @if (_branchError is not null)
+                                    {
+                                        <div class="invalid-feedback d-block">@_branchError</div>
+                                    }
+                                    @if (branches.DefaultBranchName is null)
+                                    {
+                                        <div class="form-text">The repository does not name a default branch. Choose a branch.</div>
+                                    }
+                                    @if (branches.Truncated)
+                                    {
+                                        <div class="form-text">Only the first branches are listed. Type an exact branch name that is not shown to use it.</div>
+                                    }
+                                }
+                            </div>
+
                             @if (PreflightPending)
                             {
                                 <div class="text-muted small mb-3" role="status">@RestoreWorkspaceFlow.CheckingDefinitionStatus</div>

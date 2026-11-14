@@ -197,6 +197,7 @@ public static class GrayMoonServiceRegistration
         services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();
         services.AddScoped<GrayMoon.Application.WorkspaceManifest.IWorkspaceManifestService, GrayMoon.App.Services.WorkspaceManifest.WorkspaceManifestService>();
         services.AddScoped<GrayMoon.App.Services.WorkspaceManifest.IRemoteWorkspaceManifestReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
+        services.AddScoped<GrayMoon.Application.Workspaces.IRemoteRepositoryBranchReader, GrayMoon.App.Services.WorkspaceManifest.GitHubRemoteWorkspaceManifestReader>();
         services.AddScoped<IWorkspaceRepositoryOperations, GrayMoon.App.Services.Application.WorkspaceRepositoryOperations>();
         services.AddScoped<IWorkspaceReferenceOperations, GrayMoon.App.Services.Application.WorkspaceReferenceOperations>();
         services.AddScoped<WorkspaceBranchHandler>();
