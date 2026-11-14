@@ -93,10 +93,57 @@ public sealed class WorkspaceManifestReferenceTests
 
         Assert.True(result.Success, result.Error);
         var content = WrittenContent(fixture);
-        Assert.Contains("\"version\": 1", content);
+        Assert.Contains("\"version\": 2", content);
         Assert.DoesNotContain("branch", content);
         Assert.DoesNotContain("commit", content);
-        Assert.DoesNotContain("reference", content);
+        var written = Parse(content);
+        Assert.False(written.Workspace.Reference);
+        Assert.All(written.Repositories, repository => Assert.False(repository.Reference));
+    }
+
+    [Fact]
+    public async Task A_version_2_definition_stays_version_2_when_the_last_read_only_repository_is_writable_again_and_a_second_save_is_identical()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        await SetReferenceAsync(fixture, workspace, "Api", true);
+        var file = File.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        await SetReferenceAsync(fixture, workspace, "Api", false);
+        fixture.Bridge.RespondWithFile(file);
+        Assert.True((await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId)).Success);
+        var unlocked = WrittenContent(fixture);
+
+        Assert.Equal(2, Parse(unlocked).SchemaVersion);
+
+        fixture.Bridge.RespondWithFile(unlocked);
+        Assert.True((await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId)).Success);
+        var writes = fixture.Bridge.Sent.Where(sent => sent.Command == "WriteRepositoryFile").ToList();
+        Assert.Equal(unlocked, ManifestTestFixture.ToJson(writes[1].Args).GetProperty("content").GetString());
+
+        await SetReferenceAsync(fixture, workspace, "Api", true);
+        Assert.True((await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId)).Success);
+        var relocked = Parse(ManifestTestFixture.ToJson(
+            fixture.Bridge.Sent.Where(sent => sent.Command == "WriteRepositoryFile").Last().Args).GetProperty("content").GetString()!);
+        Assert.Equal(2, relocked.SchemaVersion);
+        Assert.True(relocked.Repositories.Single(repository => repository.Name == "Api").Reference);
+    }
+
+    [Fact]
+    public async Task A_version_1_definition_with_no_read_only_state_stays_version_1()
+    {
+        await using var fixture = await ManifestTestFixture.CreateAsync();
+        var workspace = await fixture.SeedWorkspaceWithRootRepositoryAsync();
+        var service = fixture.CreateService();
+        var v1 = File.Serialize(await service.BuildFromDatabaseAsync(workspace.WorkspaceId));
+        Assert.Contains("\"version\": 1", v1);
+        fixture.Bridge.RespondWithFile(v1);
+
+        var result = await service.WriteAuthoritativeManifestAsync(workspace.WorkspaceId);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Contains("\"version\": 1", WrittenContent(fixture));
+        Assert.DoesNotContain("reference", WrittenContent(fixture));
     }
 
     [Fact]
@@ -115,7 +162,7 @@ public sealed class WorkspaceManifestReferenceTests
 
         Assert.True(result.Success, result.Error);
         var api = Parse(WrittenContent(fixture)).Repositories.Single(repository => repository.Name == "Api");
-        Assert.Null(api.Reference);
+        Assert.False(api.Reference);
         Assert.Equal("v1.0.0", api.Tag);
         Assert.Equal(Sha, api.Commit);
     }

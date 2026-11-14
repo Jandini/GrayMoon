@@ -12,7 +12,8 @@ public interface IWorkspaceManifestFile
 
     /// <summary>
     /// The newest schema version this GrayMoon reads. <see cref="Serialize"/> chooses the version it writes from the
-    /// content: 2 when the definition holds <c>reference</c> or <c>branch</c>, otherwise 1.
+    /// higher of the version the model carries and the version its content needs (2 when it holds <c>reference</c> or
+    /// <c>branch</c>, otherwise 1). A model that carries 2 is written as 2: version 2 is never implicitly downgraded.
     /// </summary>
     int CurrentSchemaVersion { get; }
 

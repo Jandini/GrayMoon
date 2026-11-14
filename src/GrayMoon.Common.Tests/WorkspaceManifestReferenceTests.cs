@@ -79,11 +79,14 @@ public sealed class WorkspaceManifestReferenceTests
     }
 
     [Fact]
-    public void A_definition_without_reference_data_stays_version_1_whatever_version_it_is_given()
+    public void A_definition_without_reference_data_stays_version_1_unless_it_already_is_version_2()
     {
-        var content = ManifestFile.Serialize(Sample(null, Repository("Billing"), Repository("Platform", tag: "v1.0.0", commit: Sha)) with { SchemaVersion = 2 });
+        var model = Sample(null, Repository("Billing"), Repository("Platform", tag: "v1.0.0", commit: Sha));
+        Assert.Contains("\"version\": 1", ManifestFile.Serialize(model));
 
-        Assert.Contains("\"version\": 1", content);
+        var content = ManifestFile.Serialize(model with { SchemaVersion = 2 });
+
+        Assert.Contains("\"version\": 2", content);
         Assert.DoesNotContain("reference", content);
         Assert.DoesNotContain("branch", content);
     }
@@ -95,6 +98,23 @@ public sealed class WorkspaceManifestReferenceTests
         Assert.Contains("\"version\": 2", ManifestFile.Serialize(Sample(false, Repository("Billing"))));
     }
 
+    [Fact]
+    public void A_version_2_definition_with_explicit_false_values_stays_version_2_and_round_trips()
+    {
+        var content = ManifestFile.Serialize(Sample(false, Repository("Billing", reference: false)) with { SchemaVersion = 2 });
+
+        Assert.Contains("\"version\": 2", content);
+        Assert.True(ManifestFile.TryParse(content, out var parsed, out var error), error);
+        Assert.Equal(2, parsed!.SchemaVersion);
+        Assert.Equal(content, ManifestFile.Serialize(parsed));
+    }
+
+    [Fact]
+    public void A_version_1_file_with_reference_data_is_still_rejected()
+    {
+        Assert.False(ManifestFile.TryParse(Json("\"version\": 1,", "\"reference\": false", ""), out _, out var error));
+        Assert.Contains("version", error);
+    }
     [Fact]
     public void The_newest_version_this_GrayMoon_reads_is_2()
     {
