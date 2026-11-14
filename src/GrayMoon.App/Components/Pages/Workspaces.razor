@@ -219,6 +219,9 @@
                WorkspaceRepositoryId="@editorWorkspaceRepositoryId"
                WorkspaceRepositoryIdChanged="value => editorWorkspaceRepositoryId = value"
                WorkspaceRepositoryChoices="@editorWorkspaceRepositoryChoices"
+               ShowSetupBranch="@EditorNeedsSetupBranch"
+               SetupBranchName="@editorSetupBranch"
+               SetupBranchNameChanged="value => editorSetupBranch = value"
                IsWorkspaceRepositoryDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                WorkspaceRepositoryDisabledHint="@(editingWorkspaceHasFeatures ? WorkspaceRepositoryFeaturesExistMessage : null)"
                OnFetchRepositories="FetchRepositoriesAsync"
@@ -386,6 +389,11 @@
     private WorkspaceSettingsHost? _settingsHost;
     private int? editorWorkspaceRepositoryId;
     private int? editingWorkspaceRepositoryOriginalId;
+    private string editorSetupBranch = GrayMoon.Application.Workspaces.WorkspaceSetupBranch.DefaultName;
+
+    /// <summary>A folder that already is the chosen repository is adopted as it is, so it gets no setup branch.</summary>
+    private bool EditorNeedsSetupBranch => WorkspaceModal.NeedsSetupBranch(
+        editorWorkspaceRepositoryId, editingWorkspaceRepositoryOriginalId, detectedWorkspaceRepositoryId);
     private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
     private HashSet<int> editorSourceRepositoryIds = new();
     private RestoreWorkspaceModal? _restoreModal;
@@ -529,6 +537,7 @@
         editorStoredCodeGraph = null;
         editorWorkspaceRepositoryId = null;
         editingWorkspaceRepositoryOriginalId = null;
+        editorSetupBranch = GrayMoon.Application.Workspaces.WorkspaceSetupBranch.DefaultName;
         editorSourceRepositoryIds = new HashSet<int>();
         editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
         await RefreshConnectorAvailabilityAsync();
@@ -715,6 +724,14 @@
             {
                 _directoryInfoDebounceCts?.Cancel();
                 await LoadDirectoryInfoAsync();
+            }
+
+            // Before anything is created: a bad branch name keeps the dialog open with nothing changed.
+            if (EditorNeedsSetupBranch
+                && GrayMoon.Application.Workspaces.WorkspaceSetupBranch.Validate(editorSetupBranch) is { } setupBranchError)
+            {
+                editorErrorMessage = setupBranchError;
+                return;
             }
 
             isSaving = true;
@@ -1401,10 +1418,13 @@
 
             if (editorWorkspaceRepositoryId is { } repositoryId)
             {
-                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId);
+                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(
+                    workspaceId, repositoryId, setupBranchName: EditorNeedsSetupBranch ? editorSetupBranch : null);
                 editingWorkspaceRepositoryOriginalId = await GetCurrentWorkspaceRepositoryIdAsync(workspaceId);
                 if (!enabled.Success)
                     return enabled.Error ?? "Could not enable the Workspace repository.";
+                if (enabled.HasWarnings)
+                    ToastService.ShowWarning(enabled.WarningSummary ?? string.Join(" ", enabled.Warnings!));
             }
 
             return null;

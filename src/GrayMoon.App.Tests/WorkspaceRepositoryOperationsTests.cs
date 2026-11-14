@@ -54,20 +54,82 @@ public sealed class WorkspaceRepositoryOperationsTests
     }
 
     [Fact]
-    public async Task Enable_refused_when_repository_is_already_source()
+    public async Task Enable_moves_a_source_repository_to_the_workspace_role()
     {
         await using var fixture = await OperationsFixture.CreateAsync();
         var (workspace, root) = await fixture.SeedEnableScenarioAsync();
         await fixture.Seed.LinkAsync(workspace, root, WorkspaceRepositoryRole.Source);
+        var sourceLinkId = await MarkSourceStateAsync(fixture, workspace.WorkspaceId);
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Single(fixture.Bridge.Sent, s => s.Command == "AttachWorkspaceRepository");
+        Assert.Equal(["gitignore", "manifest"], fixture.Manifest.Calls.ToArray());
+        // One link, now the Workspace repository, starting clean: nothing of the Source checkout's state is carried over.
+        var link = Assert.Single(await fixture.GetLinksAsync(workspace.WorkspaceId));
+        Assert.Equal(WorkspaceRepositoryRole.Workspace, link.Role);
+        Assert.Equal(root.RepositoryId, link.RepositoryId);
+        Assert.NotEqual(sourceLinkId, link.WorkspaceRepositoryId);
+        Assert.False(link.IsReference);
+        Assert.Null(link.BranchName);
+        // The user is told the earlier folder stays behind.
+        Assert.True(result.HasWarnings);
+        Assert.Contains("left on disk", result.WarningSummary);
+    }
+
+    [Fact]
+    public async Task A_failed_attach_leaves_a_source_repository_exactly_as_it_was()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        await fixture.Seed.LinkAsync(workspace, root, WorkspaceRepositoryRole.Source);
+        var sourceLinkId = await MarkSourceStateAsync(fixture, workspace.WorkspaceId);
+        fixture.Bridge.Handler = (command, _) => command == "AttachWorkspaceRepository"
+            ? new WorkerCommandResponse(true, new { success = false, errorMessage = "Git fetch failed." }, null)
+            : new WorkerCommandResponse(true, new { success = true }, null);
 
         var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId);
 
         Assert.False(result.Success);
-        Assert.Contains("already a Source", result.Error);
-        Assert.Empty(fixture.Bridge.Sent);
-        Assert.Empty(fixture.GitChangesScans);
+        Assert.Equal("Git fetch failed.", result.Error);
+        Assert.Empty(fixture.Manifest.Calls);
+        // Same row, same role, and the state a delete-and-re-add would have lost is still there.
         var link = Assert.Single(await fixture.GetLinksAsync(workspace.WorkspaceId));
+        Assert.Equal(sourceLinkId, link.WorkspaceRepositoryId);
         Assert.Equal(WorkspaceRepositoryRole.Source, link.Role);
+        Assert.True(link.IsReference);
+        Assert.Equal("feature/in-progress", link.BranchName);
+    }
+
+    /// <summary>Gives the seeded Source link state that only a destructive move would lose. Returns its id.</summary>
+    private static async Task<int> MarkSourceStateAsync(OperationsFixture fixture, int workspaceId)
+    {
+        await using var db = new AppDbContext(fixture.Seed.Options);
+        var link = await db.WorkspaceRepositories.SingleAsync(l => l.WorkspaceId == workspaceId);
+        link.IsReference = true;
+        link.BranchName = "feature/in-progress";
+        await db.SaveChangesAsync();
+        return link.WorkspaceRepositoryId;
+    }
+
+    [Fact]
+    public async Task Files_kept_in_the_folder_are_reported_as_a_warning_not_a_failure()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        fixture.Bridge.Handler = (command, _) => command == "AttachWorkspaceRepository"
+            ? new WorkerCommandResponse(true, new { success = true, branch = "main", keptFiles = new[] { ".claude/settings.local.json", "CLAUDE.md" }, keptFileCount = 3 }, null)
+            : new WorkerCommandResponse(true, new { success = true }, null);
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(["gitignore", "manifest"], fixture.Manifest.Calls.ToArray());
+        var warning = Assert.Single(result.Warnings!);
+        Assert.Equal(
+            "The repository's files were checked out into the Workspace folder, which is now its working copy. 3 files already in the Workspace folder were kept instead of the repository's versions: .claude/settings.local.json, CLAUDE.md and 1 more. They show in Changes.",
+            warning);
     }
 
     [Fact]
@@ -112,6 +174,196 @@ public sealed class WorkspaceRepositoryOperationsTests
         Assert.Equal(ManifestTestFixture.WorkspaceRoot, args.GetProperty("workspaceRoot").GetString());
         Assert.False(args.GetProperty("requireEmptyRoot").GetBoolean());
     }
+
+    private const string SetupBranch = "graymoon/workspace-setup";
+
+    /// <summary>A Worker that clones onto <paramref name="attachedBranch"/> and answers CreateBranch with <paramref name="createBranch"/>.</summary>
+    private static void ScriptSetupBranchWorker(OperationsFixture fixture, object createBranch, string attachedBranch = "main", bool isUnborn = false, bool adoptedExisting = false) =>
+        fixture.Bridge.Handler = (command, _) => command switch
+        {
+            "AttachWorkspaceRepository" => new WorkerCommandResponse(true, new { success = true, branch = attachedBranch, isUnborn, adoptedExisting }, null),
+            "CreateBranch" => new WorkerCommandResponse(true, createBranch, null),
+            _ => new WorkerCommandResponse(true, new { success = true }, null),
+        };
+
+    [Fact]
+    public async Task Enable_with_a_setup_branch_creates_it_from_the_cloned_branch_before_writing_the_files()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        var order = new List<string>();
+        fixture.Bridge.Handler = (command, _) =>
+        {
+            order.Add(command);
+            return command switch
+            {
+                "AttachWorkspaceRepository" => new WorkerCommandResponse(true, new { success = true, branch = "trunk" }, null),
+                "CreateBranch" => new WorkerCommandResponse(true, new { success = true, currentBranch = SetupBranch }, null),
+                _ => new WorkerCommandResponse(true, new { success = true }, null),
+            };
+        };
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId, setupBranchName: "  " + SetupBranch + " ");
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(["AttachWorkspaceRepository", "CreateBranch"], order.Take(2).ToArray());
+        // The files are written only after the branch exists.
+        Assert.Equal(["gitignore", "manifest"], fixture.Manifest.Calls.ToArray());
+        var create = Assert.Single(fixture.Bridge.Sent, s => s.Command == "CreateBranch");
+        var args = ManifestTestFixture.ToJson(create.Args);
+        Assert.Equal(SetupBranch, args.GetProperty("newBranchName").GetString());
+        Assert.Equal("trunk", args.GetProperty("baseBranchName").GetString());
+        Assert.Equal("ws-root", args.GetProperty("repositoryName").GetString());
+        Assert.Equal("ws-root", args.GetProperty("workspaceRepositoryName").GetString());
+        Assert.Equal(ManifestTestFixture.WorkspaceFolder, args.GetProperty("workspaceName").GetString());
+        Assert.Equal(root.RepositoryId, args.GetProperty("repositoryId").GetInt32());
+        // GrayMoon never commits or pushes the branch.
+        Assert.DoesNotContain(fixture.Bridge.Sent, s => s.Command.Contains("Commit", StringComparison.OrdinalIgnoreCase) || s.Command.Contains("Push", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("graymoon/workspace-setup")]
+    [InlineData("GrayMoon/Workspace-Setup")]
+    public async Task Enable_with_a_setup_branch_that_exists_on_the_remote_changes_nothing(string existing)
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        fixture.Remote.BranchList = new("main", ["main", existing], false, null);
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId, setupBranchName: SetupBranch);
+
+        Assert.False(result.Success);
+        Assert.Equal(GrayMoon.Application.Workspaces.WorkspaceSetupBranch.ExistsMessage(SetupBranch), result.Error);
+        Assert.Empty(fixture.Bridge.Sent);
+        Assert.Empty(fixture.Manifest.Calls);
+        Assert.Empty(await fixture.GetLinksAsync(workspace.WorkspaceId));
+    }
+
+    [Fact]
+    public async Task Enable_with_a_setup_branch_stops_when_the_remote_branches_cannot_be_read()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        fixture.Remote.BranchList = GrayMoon.Application.Workspaces.RemoteBranchList.Failed("GitHub is unreachable.");
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId, setupBranchName: SetupBranch);
+
+        Assert.False(result.Success);
+        Assert.Contains("GitHub is unreachable.", result.Error);
+        Assert.Empty(fixture.Bridge.Sent);
+        Assert.Empty(await fixture.GetLinksAsync(workspace.WorkspaceId));
+    }
+
+    [Theory]
+    [InlineData("-x")]
+    [InlineData("a b")]
+    [InlineData("a..b")]
+    [InlineData("refs/heads/x")]
+    public async Task Enable_with_an_invalid_setup_branch_name_changes_nothing(string name)
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId, setupBranchName: name);
+
+        Assert.False(result.Success);
+        Assert.Equal(GrayMoon.Application.Workspaces.WorkspaceSetupBranch.InvalidMessage(name), result.Error);
+        Assert.Equal(0, fixture.Remote.BranchListReads);
+        Assert.Empty(fixture.Bridge.Sent);
+        Assert.Empty(await fixture.GetLinksAsync(workspace.WorkspaceId));
+    }
+
+    [Theory]
+    [InlineData(false, "main")]
+    [InlineData(true, null)]
+    public async Task Enable_writes_no_files_when_the_setup_branch_is_not_checked_out(bool success, string? currentBranch)
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        ScriptSetupBranchWorker(fixture, success
+            ? new { success, currentBranch, errorMessage = (string?)null }
+            : new { success, currentBranch, errorMessage = (string?)"fatal: cannot lock ref" });
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId, setupBranchName: SetupBranch);
+
+        Assert.False(result.Success);
+        Assert.Contains("were not written", result.Error);
+        // Nothing may be written on the default branch.
+        Assert.Empty(fixture.Manifest.Calls);
+        // The clone stays attached: removing the link would make a retry adopt the folder without a branch.
+        Assert.Single(await fixture.GetLinksAsync(workspace.WorkspaceId, WorkspaceRepositoryRole.Workspace));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Enable_creates_no_setup_branch_for_an_empty_repository_or_an_adopted_folder(bool isUnborn, bool adoptedExisting)
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+        ScriptSetupBranchWorker(fixture, new { success = true, currentBranch = SetupBranch }, isUnborn: isUnborn, adoptedExisting: adoptedExisting);
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId, setupBranchName: SetupBranch);
+
+        Assert.True(result.Success, result.Error);
+        Assert.DoesNotContain(fixture.Bridge.Sent, s => s.Command == "CreateBranch");
+        // An adopted folder keeps its files; an empty repository gets them on its unborn branch as before.
+        Assert.Equal(adoptedExisting ? [] : new[] { "gitignore", "manifest" }, fixture.Manifest.Calls.ToArray());
+    }
+
+    [Fact]
+    public async Task Enable_without_a_setup_branch_asks_for_no_branches_and_creates_none()
+    {
+        await using var fixture = await OperationsFixture.CreateAsync();
+        var (workspace, root) = await fixture.SeedEnableScenarioAsync();
+
+        var result = await fixture.Operations.EnableWorkspaceRepositoryAsync(workspace.WorkspaceId, root.RepositoryId);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(0, fixture.Remote.BranchListReads);
+        Assert.DoesNotContain(fixture.Bridge.Sent, s => s.Command == "CreateBranch");
+    }
+
+    [Theory]
+    [InlineData("graymoon/workspace-setup", true)]
+    [InlineData("feature/a.b_c-1", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("-x", false)]
+    [InlineData("a b", false)]
+    [InlineData("a..b", false)]
+    [InlineData("a@{b", false)]
+    [InlineData("@", false)]
+    [InlineData("HEAD", false)]
+    [InlineData("/a", false)]
+    [InlineData("a/", false)]
+    [InlineData("a//b", false)]
+    [InlineData("a/.b", false)]
+    [InlineData("a.lock", false)]
+    [InlineData("a.lock/b", false)]
+    [InlineData("a.", false)]
+    [InlineData("a~1", false)]
+    [InlineData("a^", false)]
+    [InlineData("a:b", false)]
+    [InlineData("a?", false)]
+    [InlineData("a*", false)]
+    [InlineData("a[b", false)]
+    [InlineData("a\\b", false)]
+    [InlineData("a\"b", false)]
+    [InlineData("a'b", false)]
+    [InlineData("refs/heads/a", false)]
+    public void Setup_branch_names_follow_the_git_ref_rules(string name, bool valid) =>
+        Assert.Equal(valid, GrayMoon.Application.Workspaces.WorkspaceSetupBranch.Validate(name) is null);
+
+    [Theory]
+    [InlineData(5, null, null, true)]
+    [InlineData(5, 4, null, true)]
+    [InlineData(5, 5, null, false)]
+    [InlineData(null, 5, null, false)]
+    [InlineData(5, null, 5, false)]
+    [InlineData(5, null, 6, true)]
+    public void The_setup_branch_is_asked_for_only_when_a_new_repository_will_be_set_up(int? selected, int? current, int? folder, bool expected) =>
+        Assert.Equal(expected, GrayMoon.App.Components.Modals.WorkspaceModal.NeedsSetupBranch(selected, current, folder));
 
     [Fact]
     public async Task Enable_leaves_an_existing_workspace_repository_definition_unchanged()
@@ -786,6 +1038,7 @@ internal sealed class OperationsFixture : IAsyncDisposable
             seed.Factory,
             seed.Bridge,
             Remote,
+            Remote,
             new WorkspaceManifestFile(),
             Manifest,
             new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance),
@@ -869,8 +1122,19 @@ internal sealed class OperationsFixture : IAsyncDisposable
 }
 
 /// <summary>Stands in for reading graymoon.json through the GitHub connector.</summary>
-internal sealed class FakeRemoteManifestReader : IRemoteWorkspaceManifestReader
+internal sealed class FakeRemoteManifestReader : IRemoteWorkspaceManifestReader, GrayMoon.Application.Workspaces.IRemoteRepositoryBranchReader
 {
+    /// <summary>What the connector lists as the remote branches.</summary>
+    public GrayMoon.Application.Workspaces.RemoteBranchList BranchList { get; set; } = new("main", ["main"], false, null);
+
+    public int BranchListReads { get; private set; }
+
+    public Task<GrayMoon.Application.Workspaces.RemoteBranchList> ListAsync(int repositoryId, CancellationToken cancellationToken = default)
+    {
+        BranchListReads++;
+        return Task.FromResult(BranchList);
+    }
+
     /// <summary>File content; null means the repository has no definition.</summary>
     public string? Content { get; set; }
 

@@ -339,14 +339,19 @@ From the user's view a Workspace repository makes the Workspace itself a Git rep
 **Enable / adopt** (Workspace modal, pick a repository for "Workspace repository"). The Worker attaches the root folder:
 
 ```text
-root already has .git with the same origin  -> adopted as is
+root already has .git with the same origin  -> adopted as is (when no commit is checked out, because an
+                                               earlier attach stopped: finished as a fresh attach)
 root has .git with a different origin       -> refused ("Root already has a different Git repository")
 root is empty                               -> cloned into the root
 root is non-empty without .git              -> git init, add origin, fetch, check out the default branch
                                                (an empty remote gives an unborn main)
 ```
 
-After a fresh attach GrayMoon writes the managed `.gitignore` section and `graymoon.json`. An adopted repository's files are left untouched (rewriting would drop entries not yet imported), and adopting imports the definition's version files. GrayMoon never commits these files; they appear in Changes like any other edit.
+Files already in the folder are never overwritten. A file that the repository also contains is kept as it is and shows in Changes as a modification against the repository's version; the save reports how many were kept and names the first ones.
+
+The picker also offers the Workspace's own Source repositories, marked **Source**. Choosing one moves it: the repository is checked out again in the Workspace root and stops being a Source. Its earlier folder is left on disk and is no longer managed (it then shows as untracked in the Workspace repository); the dialog says so before the save and the result repeats it. When the attach fails, the repository stays a Source with all its state.
+
+When the chosen repository will be set up (it is not the current Workspace repository and, in Add Workspace, not the repository the folder already holds), the Repo tab shows a **New Branch** field, prefilled with `graymoon/workspace-setup`. After a fresh attach GrayMoon creates that branch from the branch the attach checked out, checks it out, and only then writes the managed `.gitignore` section and `graymoon.json`, so nothing is written on the default branch. An invalid name, or a name that already exists on the remote, stops the save before anything changes; an existing branch is never reused. A repository with no commits gets no setup branch (the files are written on its unborn branch), and neither does an adopted folder. An adopted repository's files are left untouched (rewriting would drop entries not yet imported), and adopting imports the definition's version files. GrayMoon never commits these files and never pushes the setup branch; the files appear in Changes like any other edit, and the user commits and pushes the branch.
 
 **Restore** ("Restore from repository" on the Workspaces page, dialog "Restore Workspace"). The user picks a GitHub repository; a preflight reads `graymoon.json` through the GitHub API from the branch chosen in the dialog's Branch field (the provider's default branch is preselected, so a setup branch can be restored before it is merged) and reports which repositories and connectors are missing on this computer. Restore stays disabled, and any previous preview is cleared, until that read finishes. Restore clones the Workspace repository into an empty root and checks out that branch, creates the Workspace with the profile from the definition, links the Source repositories it finds, merges the definition's version files into the database (file wins) and runs an initial Sync. A failure or cancellation before the Workspace is usable rolls everything back. A failed `.gitignore` or definition write afterwards is a warning on a successful restore, repaired later from the drift banner. Missing repositories are reported (as `owner/name`); import them before using "Write Workspace definition to disk", which would otherwise drop them.
 

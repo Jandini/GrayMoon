@@ -96,6 +96,12 @@ public interface IGitService
     Task<bool> RepairOriginHeadAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git checkout -b &lt;branch&gt; --track origin/&lt;branch&gt;</c>; the error is git's own message verbatim.</summary>
     Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct);
+    /// <summary>
+    /// Checks out <paramref name="branch"/> tracking <c>origin/&lt;branch&gt;</c> in a repository with no commit checked out,
+    /// without overwriting any file already in the folder: the branch and the index are set, then only missing files
+    /// are written. <c>KeptFiles</c> are the existing files that differ from the repository (they show as modified).
+    /// </summary>
+    Task<(bool Success, string? Error, IReadOnlyList<string> KeptFiles)> CheckoutTrackingKeepingFilesAsync(string repoPath, string branch, CancellationToken ct);
     /// <summary>Points HEAD at an unborn branch with <c>git symbolic-ref HEAD refs/heads/&lt;branch&gt;</c>.</summary>
     Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct);
     /// <summary>

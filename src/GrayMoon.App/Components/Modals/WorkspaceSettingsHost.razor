@@ -51,6 +51,9 @@
                WorkspaceRepositoryId="@_repositoryId"
                WorkspaceRepositoryIdChanged="OnRepositoryChanged"
                WorkspaceRepositoryChoices="@_choices"
+               ShowSetupBranch="@NeedsSetupBranch"
+               SetupBranchName="@_setupBranch"
+               SetupBranchNameChanged="value => _setupBranch = value"
                IsWorkspaceRepositoryDisabled="@_hasFeatures"
                WorkspaceRepositoryDisabledHint="@(_hasFeatures ? FeaturesExistMessage : null)"
                OnFetchRepositories="FetchRepositoriesAsync"
@@ -113,6 +116,8 @@
     private bool _useGitHubActions = true;
     private int? _repositoryId;
     private int? _originalRepositoryId;
+    private string _setupBranch = WorkspaceSetupBranch.DefaultName;
+    private bool NeedsSetupBranch => WorkspaceModal.NeedsSetupBranch(_repositoryId, _originalRepositoryId);
     private HashSet<int> _sourceRepositoryIds = [];
     private HashSet<int> _repositoryIds = [];
     private IReadOnlyList<RepositoryPickerChoice> _choices = [];
@@ -169,6 +174,7 @@
             _useGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
             _originalRepositoryId = workspaceRepository?.RepositoryId;
             _repositoryId = workspaceRepository?.RepositoryId;
+            _setupBranch = WorkspaceSetupBranch.DefaultName;
             _sourceRepositoryIds = sourceRepositoryIds;
             _choices = choices;
             _hasConnectors = hasConnectors;
@@ -291,6 +297,13 @@
             return;
         }
 
+        // Before anything is stored: a bad branch name keeps the dialog open with nothing changed.
+        if (NeedsSetupBranch && WorkspaceSetupBranch.Validate(_setupBranch) is { } branchError)
+        {
+            _error = branchError;
+            return;
+        }
+
         var stored = false;
         var closed = false;
         try
@@ -376,6 +389,8 @@
         if (_hasFeatures)
             return FeaturesExistMessage;
 
+        // Read before the old repository is disabled: that changes what the field compares against.
+        var setupBranch = NeedsSetupBranch ? _setupBranch : null;
         try
         {
             if (_originalRepositoryId is not null)
@@ -388,10 +403,12 @@
 
             if (_repositoryId is { } repositoryId)
             {
-                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId);
+                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId, setupBranchName: setupBranch);
                 _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
                 if (!enabled.Success)
                     return enabled.Error ?? "Could not enable the Workspace repository.";
+                if (enabled.HasWarnings)
+                    ToastService.ShowWarning(enabled.WarningSummary ?? string.Join(" ", enabled.Warnings!));
             }
 
             return null;

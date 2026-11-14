@@ -7,8 +7,12 @@ public interface IWorkspaceRepositoryOperations
     /// <summary>
     /// Links repositoryId as the Workspace repository and attaches it to the root (D4), then writes manifest and .gitignore (D5, D12).
     /// When the folder is already that repository, <c>graymoon.json</c> and <c>.gitignore</c> are left unchanged.
+    /// <paramref name="setupBranchName"/> is a new branch (see <see cref="WorkspaceSetupBranch"/>) that is created from
+    /// the checked-out default branch and checked out before the files are written; the files stay uncommitted and
+    /// nothing is pushed. A name that already exists on the remote fails before anything changes. It is not used
+    /// when the folder already is that repository or the repository has no commits. Null writes on the checked-out branch.
     /// </summary>
-    Task<OperationResult> EnableWorkspaceRepositoryAsync(int workspaceId, int repositoryId, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task<OperationResult> EnableWorkspaceRepositoryAsync(int workspaceId, int repositoryId, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default, string? setupBranchName = null);
 
     /// <summary>Removes the Workspace-role link only. Never deletes files or .git.</summary>
     Task<OperationResult> DisableWorkspaceRepositoryAsync(int workspaceId, CancellationToken cancellationToken = default);
