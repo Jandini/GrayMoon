@@ -301,7 +301,11 @@ When a Workspace has a Workspace-role repository, its root holds `graymoon.json`
 ```text
 version            int, key "version" (WorkspaceManifestFile.MaxSchemaVersion = 2); a value > 2 is rejected:
                    "Workspace definition schema N is newer than this GrayMoon".
-                   Written as 2 when the file holds any reference or branch, else 1, whatever the caller asks for;
+                   Written as the higher of the version the model carries and the version its content needs (2 when
+                   any reference or branch is present, else 1). The level is sticky: a version 1 file stays 1 until
+                   read only data needs 2; a version 2 file is never written back as 1, even when every repository is
+                   writable again. WorkspaceManifestSchemaPolicy.KeepSchema lifts the database-built model to the
+                   version of the file on disk and makes every reference explicit (true or false).
                    reference or branch in a version 1 file is rejected
 workspace          required object. The local Workspace name is not stored. A leftover name is ignored
                    and omitted the next time the file is written.

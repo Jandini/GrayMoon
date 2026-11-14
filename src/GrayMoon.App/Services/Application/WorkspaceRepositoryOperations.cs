@@ -537,7 +537,9 @@ public sealed class WorkspaceRepositoryOperations(
             return true;
 
         var database = WorkspaceRepositoryRevisionPins.CopyOnto(
-            await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken),
+            WorkspaceManifestSchemaPolicy.KeepSchema(
+                await manifestService.BuildFromDatabaseAsync(workspaceId, cancellationToken),
+                fileManifest),
             fileManifest) with
         {
             CodeGraph = fileManifest.CodeGraph,

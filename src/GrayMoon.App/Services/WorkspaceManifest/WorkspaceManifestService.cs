@@ -102,8 +102,10 @@ public sealed class WorkspaceManifestService(
 
         var versionFiles = await BuildVersionFilesAsync(db, workspaceId, cancellationToken);
 
+        // A Workspace with no read-only state is built as version 1; WorkspaceManifestSchemaPolicy.KeepSchema lifts
+        // it to the version of the definition already on disk, so one that reached version 2 stays there.
         return new WorkspaceManifest(
-            manifestFile.CurrentSchemaVersion,
+            writeReference ? manifestFile.CurrentSchemaVersion : WorkspaceManifestFile.SchemaVersion,
             new WorkspaceManifestWorkspace(
                 new WorkspaceManifestProfile(
                     WorkspaceManifestProfileNames.ToManifest(workspace.Type),
@@ -347,6 +349,7 @@ public sealed class WorkspaceManifestService(
                 && manifestFile.TryParse(read.Content, out var existing, out _)
                 && existing is not null)
             {
+                manifest = WorkspaceManifestSchemaPolicy.KeepSchema(manifest, existing);
                 manifest = WorkspaceRepositoryRevisionPins.CopyOnto(manifest, existing);
                 // File-owned sections: the database has no copy of them, so the file's value is kept.
                 manifest = manifest with { CodeGraph = existing.CodeGraph, Ai = existing.Ai };
@@ -359,6 +362,7 @@ public sealed class WorkspaceManifestService(
             }
 
             var content = manifestFile.Serialize(manifest);
+            // The Worker writes only when the content differs (onlyIfChanged), so an unchanged definition is not rewritten.
             return await WorkspaceRepositoryFileAccess.WriteAsync(
                 workerBridge, args, manifestFile.FileName, content, cancellationToken);
         }

@@ -40,9 +40,7 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
 
         var sorted = manifest with
         {
-            // The content decides the version, not the caller: a definition without read-only data stays readable
-            // by every GrayMoon.
-            SchemaVersion = UsesReferenceData(manifest) ? MaxSchemaVersion : SchemaVersion,
+            SchemaVersion = ResolveOutputVersion(manifest),
             Connectors = (manifest.Connectors ?? [])
                 .OrderBy(c => c.Url, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
@@ -60,6 +58,17 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
         var json = JsonSerializer.Serialize(sorted, WriteOptions).Replace("\r\n", "\n");
         return json + "\n";
     }
+
+    /// <summary>
+    /// The version written: the higher of the version the model carries (clamped to what this GrayMoon writes) and the
+    /// version its content needs (2 for <c>reference</c> or <c>branch</c>, otherwise 1). A model that carries 2 keeps it
+    /// when every reference value is false or absent, so a definition never drops back to version 1. A model that
+    /// carries 1 is upgraded only by its content.
+    /// </summary>
+    internal static int ResolveOutputVersion(WorkspaceManifest manifest) =>
+        Math.Max(
+            Math.Clamp(manifest.SchemaVersion, SchemaVersion, MaxSchemaVersion),
+            UsesReferenceData(manifest) ? MaxSchemaVersion : SchemaVersion);
 
     public bool TryParse(string? content, out WorkspaceManifest? manifest, out string? error)
     {
