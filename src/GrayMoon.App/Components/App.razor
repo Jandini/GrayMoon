@@ -154,9 +154,14 @@
             var page = document.querySelector('.page');
             if (!page) return;
             var collapsed = page.classList.toggle('page--navbar-collapsed');
+            // Chromium sends Origin on this POST. Without X-GrayMoon-Request the API
+            // rejects the save, and the next page renders the sidebar collapsed again.
             fetch('/api/settings/sidebar-collapsed', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-GrayMoon-Request': '1'
+                },
                 body: JSON.stringify({ value: collapsed })
             }).catch(function () { });
         };
