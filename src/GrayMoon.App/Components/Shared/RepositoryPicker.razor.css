@@ -11,9 +11,23 @@
     min-width: 0;
 }
 
-.repository-picker-input {
+/* Square right corners only where the Fetch button is attached; without it the input keeps its own corners. */
+.repository-picker:not(.repository-picker--no-fetch) .repository-picker-input {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
+}
+
+/* Closed, the field is a button that opens the list; it becomes a text field (search) only once open. */
+.repository-picker-input--closed {
+    cursor: pointer;
+}
+
+.repository-picker-selected-badge {
+    position: absolute;
+    top: 50%;
+    right: 0.6rem;
+    transform: translateY(-50%);
+    pointer-events: none;
 }
 
 .repository-picker-fetch {

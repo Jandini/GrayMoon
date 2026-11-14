@@ -94,49 +94,59 @@
                         {
                             <div class="mb-3">
                                 <label class="form-label text-nowrap" for="restore-workspace-branch">Branch</label>
-                                @if (_branchesLoading)
-                                {
-                                    <div class="text-muted small" role="status">Loading branches...</div>
-                                }
-                                else if (_branchList is { Error: not null } branchFailed)
+                                @if (_branchList is { Error: not null } branchFailed)
                                 {
                                     <div class="@ValidationCalloutClass" role="alert">@branchFailed.Error</div>
                                 }
-                                else if (_branchList is { } branches)
+                                else
                                 {
-                                    <input type="text"
-                                           id="restore-workspace-branch"
-                                           class="form-control @(_branchError is not null ? "is-invalid" : null)"
-                                           list="restore-workspace-branch-list"
-                                           autocomplete="off"
-                                           placeholder="Search branches"
-                                           value="@_branchText"
-                                           onfocus="this.select()"
-                                           @onchange="OnBranchChangedAsync"
-                                           @onkeydown="HandleBranchKeyDownAsync"
-                                           @onkeydown:stopPropagation="true" />
-                                    <datalist id="restore-workspace-branch-list">
-                                        @foreach (var branch in branches.Branches)
-                                        {
-                                            <option value="@branch">@(branch == branches.DefaultBranchName ? "Default" : null)</option>
-                                        }
-                                    </datalist>
+                                    @* The field stays in place (disabled) while the branches are read, so the dialog does not jump. *@
+                                    <RepositoryPicker Id="restore-workspace-branch"
+                                                      Choices="@_branchChoices"
+                                                      SelectedRepositoryId="@SelectedBranchIndex"
+                                                      SelectedRepositoryIdChanged="OnBranchPickedAsync"
+                                                      Placeholder="@(_branchesLoading ? "Loading branches..." : "Select a branch")"
+                                                      SearchPlaceholder="Search branches"
+                                                      EmptyText="No matching branches"
+                                                      Disabled="@_branchesLoading"
+                                                      ShowFetch="false" />
+                                }
+                                @if (!_branchesLoading && _branchList is { Error: null } branches)
+                                {
+                                    @if (branches.Truncated)
+                                    {
+                                        <div class="form-text">Only the first @branches.Branches.Count branches are listed. For a branch that is not listed, type its exact name:</div>
+                                        <input type="text"
+                                               class="form-control mt-1 @(_branchError is not null ? "is-invalid" : null)"
+                                               autocomplete="off"
+                                               aria-label="Exact branch name"
+                                               placeholder="Exact branch name"
+                                               value="@_branchText"
+                                               @onchange="OnBranchChangedAsync"
+                                               @onkeydown="HandleBranchKeyDownAsync"
+                                               @onkeydown:stopPropagation="true" />
+                                    }
                                     @if (_branchError is not null)
                                     {
-                                        <div class="invalid-feedback d-block">@_branchError</div>
+                                        <div class="invalid-feedback d-block restore-name-error">@_branchError</div>
                                     }
                                     @if (branches.DefaultBranchName is null)
                                     {
                                         <div class="form-text">The repository does not name a default branch. Choose a branch.</div>
                                     }
-                                    @if (branches.Truncated)
-                                    {
-                                        <div class="form-text">Only the first branches are listed. Type an exact branch name that is not shown to use it.</div>
-                                    }
                                 }
                             </div>
 
-                            @if (PreflightPending)
+                            @if (RestoreWorkspaceFlow.ShowPreviewPlaceholder(_branchesLoading, PreflightPending, _heldPreview) && _heldPreview is { } held)
+                            {
+                                @* Skeleton: the last preview drawn as pulsing bars, so the dialog keeps its exact size while the next one is read. *@
+                                <div class="restore-preview-skeleton" role="status" aria-label="@RestoreWorkspaceFlow.CheckingDefinitionStatus">
+                                    <div aria-hidden="true">
+                                        @PreviewContent(held)
+                                    </div>
+                                </div>
+                            }
+                            else if (PreflightPending)
                             {
                                 <div class="text-muted small mb-3" role="status">@RestoreWorkspaceFlow.CheckingDefinitionStatus</div>
                             }
@@ -144,43 +154,9 @@
                             {
                                 <div class="@ValidationCalloutClass" role="alert">@failed.Error</div>
                             }
-                            else if (_preflight is { Success: true } preview)
+                            else if (_preflight is { Success: true } shown)
                             {
-                                <div class="restore-preview p-2 mb-3">
-                                    <dl class="restore-preview-grid small mb-0">
-                                        <dt>Profile</dt>
-                                        <dd>@RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)</dd>
-                                        <dt>Versioning</dt>
-                                        <dd>@RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)</dd>
-                                        <dt>CI</dt>
-                                        <dd>@RestoreWorkspaceFlow.CiLabel(preview.CiProvider)</dd>
-                                        <dt>Repositories</dt>
-                                        <dd>@preview.RepositoryCount</dd>
-                                        @if (RestoreWorkspaceFlow.ReferenceSummary(preview) is { } referenceSummary)
-                                        {
-                                            <dt>Read only</dt>
-                                            <dd>@referenceSummary</dd>
-                                        }
-                                        <dt>Connectors</dt>
-                                        <dd>@preview.ConfiguredConnectorCount configured locally<br />@preview.MissingConnectors.Count missing</dd>
-                                    </dl>
-                                </div>
-                                @if (RestoreWorkspaceFlow.MissingSummary(preview) is { } missingSummary)
-                                {
-                                    <div class="gm-callout gm-callout--warning mb-3" role="status">
-                                        <div>@missingSummary</div>
-                                        <ul class="restore-missing-list small mb-0 mt-1">
-                                            @foreach (var repository in preview.MissingRepositories)
-                                            {
-                                                <li>@repository</li>
-                                            }
-                                            @foreach (var connector in preview.MissingConnectors)
-                                            {
-                                                <li>Connector: @connector</li>
-                                            }
-                                        </ul>
-                                    </div>
-                                }
+                                @PreviewContent(shown)
                             }
                         }
 
@@ -242,4 +218,46 @@
             </div>
         </div>
     </div>
+}
+
+@code {
+    /// <summary>The restore preview of one checked definition; also rendered invisibly as the size placeholder.</summary>
+    private RenderFragment PreviewContent(GrayMoon.Application.Workspaces.RestoreWorkspacePreflight preview) =>
+        @<text>
+                                <div class="restore-preview p-2 mb-3">
+                                    <dl class="restore-preview-grid small mb-0">
+                                        <dt>Profile</dt>
+                                        <dd>@RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)</dd>
+                                        <dt>Versioning</dt>
+                                        <dd>@RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)</dd>
+                                        <dt>CI</dt>
+                                        <dd>@RestoreWorkspaceFlow.CiLabel(preview.CiProvider)</dd>
+                                        <dt>Repositories</dt>
+                                        <dd>@preview.RepositoryCount</dd>
+                                        @if (RestoreWorkspaceFlow.ReferenceSummary(preview) is { } referenceSummary)
+                                        {
+                                            <dt>Read only</dt>
+                                            <dd>@referenceSummary</dd>
+                                        }
+                                        <dt>Connectors</dt>
+                                        <dd>@preview.ConfiguredConnectorCount configured locally<br />@preview.MissingConnectors.Count missing</dd>
+                                    </dl>
+                                </div>
+                                @if (RestoreWorkspaceFlow.MissingSummary(preview) is { } missingSummary)
+                                {
+                                    <div class="gm-callout gm-callout--warning mb-3" role="status">
+                                        <div>@missingSummary</div>
+                                        <ul class="restore-missing-list small mb-0 mt-1">
+                                            @foreach (var repository in preview.MissingRepositories)
+                                            {
+                                                <li>@repository</li>
+                                            }
+                                            @foreach (var connector in preview.MissingConnectors)
+                                            {
+                                                <li>Connector: @connector</li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+        </text>;
 }

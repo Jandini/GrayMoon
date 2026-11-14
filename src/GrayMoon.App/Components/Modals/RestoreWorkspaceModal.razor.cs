@@ -59,10 +59,17 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
     private readonly RestorePreflightGate _preflightGate = new();
     private CancellationTokenSource? _preflightCts;
     private RestoreWorkspacePreflight? _preflight;
+
+    /// <summary>
+    /// The last successful preview. It is drawn invisibly while the next branch or repository is read, so the dialog
+    /// keeps its size; there is none before the first successful check or after a failed one.
+    /// </summary>
+    private RestoreWorkspacePreflight? _heldPreview;
     private RemoteBranchList? _branchList;
     private bool _branchesLoading;
     private string? _branch;
     private string? _branchText;
+    private IReadOnlyList<RepositoryPickerChoice> _branchChoices = Array.Empty<RepositoryPickerChoice>();
     private string? _branchError;
     private int _branchGeneration;
     private CancellationTokenSource? _branchesCts;
@@ -140,6 +147,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         CancelPreflight();
         ClearBranches();
         _preflight = null;
+        _heldPreview = null;
         _error = null;
         _errorResidue = null;
         _busy = false;
@@ -276,6 +284,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         _branch = null;
         _branchText = null;
         _branchError = null;
+        _branchChoices = Array.Empty<RepositoryPickerChoice>();
     }
 
     /// <summary>Lists the remote branches of the selected repository, then selects its default branch (never a guess).</summary>
@@ -283,7 +292,10 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
     {
         ClearBranches();
         if (repositoryId is not { } id)
+        {
+            _heldPreview = null;
             return;
+        }
 
         var cts = _branchesCts = new CancellationTokenSource();
         var generation = _branchGeneration;
@@ -311,8 +323,10 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
 
         _branchesLoading = false;
         _branchList = list;
+        _branchChoices = RestoreWorkspaceFlow.ToBranchChoices(list);
         if (list.Error is not null)
         {
+            _heldPreview = null;
             await InvokeAsync(StateHasChanged);
             return;
         }
@@ -320,7 +334,6 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         if (list.DefaultBranchName is { } defaultBranch && list.Branches.Contains(defaultBranch, StringComparer.Ordinal))
         {
             _branch = defaultBranch;
-            _branchText = defaultBranch;
             var preflight = StartPreflightAsync(id, defaultBranch);
             await InvokeAsync(StateHasChanged);
             await preflight;
@@ -330,7 +343,33 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
         await InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Only a branch from the list counts, and only a committed choice (not each keystroke) starts a preflight.</summary>
+    /// <summary>The picker identifies a branch by its position in the list; null when no listed branch is selected.</summary>
+    private int? SelectedBranchIndex => RestoreWorkspaceFlow.BranchIndex(_branchList, _branch);
+
+    /// <summary>A branch picked from the list: the one manifest preflight for that branch starts here.</summary>
+    private async Task OnBranchPickedAsync(int? index)
+    {
+        if (_repositoryId is not { } id || _branchList is not { Error: null } list
+            || index is not { } i || i < 0 || i >= list.Branches.Count)
+            return;
+
+        var branch = list.Branches[i];
+        CancelPreflight();
+        _preflight = null;
+        _error = null;
+        _errorResidue = null;
+        _branchError = null;
+        _branchText = null;
+        _branch = branch;
+        var preflight = StartPreflightAsync(id, branch);
+        StateHasChanged();
+        await preflight;
+    }
+
+    /// <summary>
+    /// The exact-name field of a truncated list: a committed name (not each keystroke) starts a preflight, and the
+    /// preflight and the Worker decide whether the branch exists.
+    /// </summary>
     private async Task OnBranchChangedAsync(ChangeEventArgs e)
     {
         var typed = e.Value?.ToString()?.Trim() ?? string.Empty;
@@ -400,6 +439,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
             return;
 
         _preflight = result;
+        _heldPreview = result.Success ? result : null;
         if (!_disposed)
             await InvokeAsync(StateHasChanged);
     }
@@ -755,6 +795,37 @@ public sealed record RestoreResultPanel(
 /// <summary>Pure and service-level pieces of the restore dialog, kept out of the component so they can be tested.</summary>
 public static class RestoreWorkspaceFlow
 {
+    /// <summary>
+    /// True while the branch list or the definition is being read and an earlier preview exists to hold the size.
+    /// Without an earlier preview there is nothing to size a placeholder from, so the plain status line is shown.
+    /// </summary>
+    public static bool ShowPreviewPlaceholder(bool branchesLoading, bool preflightPending, RestoreWorkspacePreflight? heldPreview) =>
+        (branchesLoading || preflightPending) && heldPreview is { Success: true };
+
+    public const string DefaultBranchBadge = "Default";
+
+    /// <summary>Branches as picker rows: the row id is the position in the list, and the default branch carries the Default badge.</summary>
+    public static IReadOnlyList<RepositoryPickerChoice> ToBranchChoices(RemoteBranchList list) =>
+        list.Branches
+            .Select((branch, index) => new RepositoryPickerChoice(
+                index, branch, string.Equals(branch, list.DefaultBranchName, StringComparison.Ordinal) ? DefaultBranchBadge : null))
+            .ToList();
+
+    /// <summary>Position of <paramref name="branch"/> in the list (exact, case-sensitive), or null when it is not listed.</summary>
+    public static int? BranchIndex(RemoteBranchList? list, string? branch)
+    {
+        if (list is null || branch is null)
+            return null;
+
+        for (var i = 0; i < list.Branches.Count; i++)
+        {
+            if (string.Equals(list.Branches[i], branch, StringComparison.Ordinal))
+                return i;
+        }
+
+        return null;
+    }
+
     public const string CheckingDefinitionStatus = "Checking Workspace definition...";
 
     public const string CheckingFolderStatus = "Checking folder...";

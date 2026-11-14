@@ -1,7 +1,11 @@
 namespace GrayMoon.App.Components.Shared;
 
-/// <summary>One entry of a <see cref="RepositoryPicker"/>: the repository and the text it is listed and shown as.</summary>
-public sealed record RepositoryPickerChoice(int RepositoryId, string DisplayName);
+/// <summary>
+/// One entry of a <see cref="RepositoryPicker"/>: the repository and the text it is listed and shown as.
+/// <paramref name="Badge"/> is an optional short label drawn as a badge after the text (for example "Default"); it is
+/// not part of the text the filter searches.
+/// </summary>
+public sealed record RepositoryPickerChoice(int RepositoryId, string DisplayName, string? Badge = null);
 
 /// <summary>A selection the picker made: a repository, or "None" (<c>null</c>) when the picker allows it.</summary>
 public readonly record struct RepositoryPickerSelection(int? RepositoryId);

@@ -17,6 +17,42 @@ namespace GrayMoon.App.Tests;
 public sealed class RestoreWorkspaceFlowTests
 {
     [Fact]
+    public void Branch_choices_list_every_branch_and_badge_the_default()
+    {
+        var list = new RemoteBranchList("main", ["main", "develop", "graymoon/workspace-setup"], false, null);
+
+        var choices = RestoreWorkspaceFlow.ToBranchChoices(list);
+
+        Assert.Equal(["main", "develop", "graymoon/workspace-setup"], choices.Select(c => c.DisplayName).ToArray());
+        Assert.Equal(["Default", null, null], choices.Select(c => c.Badge).ToArray());
+        Assert.Equal([0, 1, 2], choices.Select(c => c.RepositoryId).ToArray());
+    }
+
+    [Fact]
+    public void The_size_placeholder_needs_a_refresh_and_an_earlier_successful_preview()
+    {
+        var held = new RestoreWorkspacePreflight { Success = true };
+
+        Assert.True(RestoreWorkspaceFlow.ShowPreviewPlaceholder(branchesLoading: true, preflightPending: false, held));
+        Assert.True(RestoreWorkspaceFlow.ShowPreviewPlaceholder(branchesLoading: false, preflightPending: true, held));
+        Assert.False(RestoreWorkspaceFlow.ShowPreviewPlaceholder(branchesLoading: false, preflightPending: false, held));
+        Assert.False(RestoreWorkspaceFlow.ShowPreviewPlaceholder(branchesLoading: true, preflightPending: true, null));
+        Assert.False(RestoreWorkspaceFlow.ShowPreviewPlaceholder(
+            branchesLoading: false, preflightPending: true, RestoreWorkspacePreflight.Failed("no definition")));
+    }
+
+    [Fact]
+    public void Branch_index_is_exact_and_null_for_a_branch_that_is_not_listed()
+    {
+        var list = new RemoteBranchList("main", ["main", "Develop"], false, null);
+
+        Assert.Equal(1, RestoreWorkspaceFlow.BranchIndex(list, "Develop"));
+        Assert.Null(RestoreWorkspaceFlow.BranchIndex(list, "develop"));
+        Assert.Null(RestoreWorkspaceFlow.BranchIndex(list, null));
+        Assert.Null(RestoreWorkspaceFlow.BranchIndex(null, "main"));
+    }
+
+    [Fact]
     public async Task Restore_creates_workspace_links_and_profile_then_syncs()
     {
         await using var fixture = await OperationsFixture.CreateAsync();
