@@ -19,6 +19,37 @@ public sealed class WorkspaceCodeGraphActivationTests
     }
 
     [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(null, false, false)]
+    [InlineData(false, true, true)]
+    public void A_switch_read_before_the_Workspace_repository_was_removed_is_not_written_back(bool? stored, bool selected, bool expected)
+    {
+        // Removing the Workspace repository with the box unchecked used to fail the save with
+        // "CodeGraph lives in the Workspace definition and needs a Workspace repository."
+        Assert.Equal(expected, WorkspaceCodeGraphActivation.ShouldWrite(stored, selected, hasWorkspaceRepository: false));
+    }
+
+    [Theory]
+    [InlineData(332, null, true)]
+    [InlineData(332, 332, false)]
+    [InlineData(332, 400, false)]
+    [InlineData(null, null, false)]
+    [InlineData(null, 332, false)]
+    public void Only_a_save_that_removed_the_Workspace_repository_skips_the_switch(int? before, int? after, bool expected)
+    {
+        // The box is still ticked from the stored "codegraph": true when the repository is removed. Saving the
+        // switch then failed with "CodeGraph lives in the Workspace definition and needs a Workspace repository."
+        Assert.Equal(expected, WorkspaceCodeGraphActivation.RemovedWorkspaceRepository(before, after));
+    }
+
+    [Fact]
+    public void A_stored_switch_is_still_written_while_the_Workspace_repository_is_there()
+    {
+        Assert.True(WorkspaceCodeGraphActivation.ShouldWrite(false, selected: false, hasWorkspaceRepository: true));
+    }
+
+    [Theory]
     [InlineData("Started", true)]
     [InlineData("AlreadyRunning", true)]
     [InlineData("AlreadyInitialized", false)]

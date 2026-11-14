@@ -321,6 +321,7 @@
                 _useGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
             stored = true;
 
+            var repositoryIdBeforeSave = _originalRepositoryId;
             var repositoryError = await ApplyRepositoryChangeAsync(workspaceId);
             if (repositoryError is not null)
             {
@@ -337,14 +338,17 @@
 
             await PendingActionsService.RefreshAsync(workspaceId, WorkspaceRepository, WorkspaceProjectRepository);
 
-            if (_showCodeGraph)
+            // Removing the Workspace repository takes the switch with it; a ticked box is then not an error.
+            if (_showCodeGraph && !WorkspaceCodeGraphActivation.RemovedWorkspaceRepository(repositoryIdBeforeSave, _originalRepositoryId))
             {
                 var codeGraphError = await CodeGraphActivation.SaveAsync(
                     workspaceId,
                     _storedCodeGraph,
                     _useCodeGraph,
                     CurrentPath(),
-                    _contextId);
+                    _contextId,
+                    // The repository change above has run: null means the Workspace repository was just removed.
+                    hasWorkspaceRepository: _originalRepositoryId is not null);
                 if (codeGraphError is not null)
                 {
                     _error = codeGraphError;
@@ -395,10 +399,15 @@
         {
             if (_originalRepositoryId is not null)
             {
+                var removedId = _originalRepositoryId.Value;
                 var disabled = await WorkspaceRepositoryOperations.DisableWorkspaceRepositoryAsync(workspaceId);
                 _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
                 if (!disabled.Success)
                     return disabled.Error ?? "Could not disable the Workspace repository.";
+
+                // The dialog can stay open after this (a later step failed). Saving again must not link the
+                // removed repository as a Source repository.
+                _repositoryIds.Remove(removedId);
             }
 
             if (_repositoryId is { } repositoryId)
@@ -407,6 +416,7 @@
                 _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
                 if (!enabled.Success)
                     return enabled.Error ?? "Could not enable the Workspace repository.";
+                _repositoryIds.Add(repositoryId);
                 if (enabled.HasWarnings)
                     ToastService.ShowWarning(enabled.WarningSummary ?? string.Join(" ", enabled.Warnings!));
             }
