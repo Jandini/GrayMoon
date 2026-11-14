@@ -20,4 +20,16 @@ public sealed class AttachWorkspaceRepositoryResponse
     /// <summary>True when the folder was already this repository, so its files were left unchanged.</summary>
     [JsonPropertyName("adoptedExisting")]
     public bool AdoptedExisting { get; set; }
+
+    /// <summary>
+    /// Files that were already in the folder and differ from the repository's version. They were kept and show as
+    /// modified. At most <see cref="MaxKeptFiles"/> names; <see cref="KeptFileCount"/> is the full count.
+    /// </summary>
+    [JsonPropertyName("keptFiles")]
+    public List<string>? KeptFiles { get; set; }
+
+    [JsonPropertyName("keptFileCount")]
+    public int KeptFileCount { get; set; }
+
+    public const int MaxKeptFiles = 20;
 }

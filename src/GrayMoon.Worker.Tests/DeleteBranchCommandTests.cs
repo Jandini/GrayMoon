@@ -79,6 +79,7 @@ public sealed class DeleteBranchCommandTests
         public Task<string?> GetRemoteDefaultBranchAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotSupportedException();
         public Task<bool> RepairOriginHeadAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
+        public Task<(bool Success, string? Error, IReadOnlyList<string> KeptFiles)> CheckoutTrackingKeepingFilesAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct) => throw new NotImplementedException();

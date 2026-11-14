@@ -46,6 +46,21 @@ public sealed class WorkspaceCodeGraphActivation(
         selected || storedSwitch is not null;
 
     /// <summary>
+    /// As <see cref="ShouldWrite(bool?, bool)"/>, for a save that may just have removed the Workspace repository:
+    /// the switch read when the dialog opened then belongs to a definition the Workspace no longer has, so an
+    /// unchecked box has nothing to write. A checked box is still written, and fails in the open.
+    /// </summary>
+    public static bool ShouldWrite(bool? storedSwitch, bool selected, bool hasWorkspaceRepository) =>
+        selected || (hasWorkspaceRepository && storedSwitch is not null);
+
+    /// <summary>
+    /// True when this save removed the Workspace repository. The switch then goes with the definition: there is
+    /// nothing to write and nothing to refuse, also when the box is still ticked from the stored value.
+    /// </summary>
+    public static bool RemovedWorkspaceRepository(int? repositoryIdBeforeSave, int? repositoryIdAfterSave) =>
+        repositoryIdBeforeSave is not null && repositoryIdAfterSave is null;
+
+    /// <summary>
     /// Writes the switch when <see cref="ShouldWrite"/> says so, syncs <c>.gitignore</c> and <c>codegraph.json</c>,
     /// then starts the Workspace index when the switch is on. Returns the message to show, or null when the save
     /// can close. A missing Workspace repository fails in the open: the flag is not pretended to be stored.
@@ -56,9 +71,10 @@ public sealed class WorkspaceCodeGraphActivation(
         bool selected,
         string overlayKey,
         WorkspaceFeatureContextId? contextId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool hasWorkspaceRepository = true)
     {
-        if (!ShouldWrite(storedSwitch, selected))
+        if (!ShouldWrite(storedSwitch, selected, hasWorkspaceRepository))
             return null;
 
         // Opened from a context: that context's definition, .gitignore, codegraph.json and index. Opened from the

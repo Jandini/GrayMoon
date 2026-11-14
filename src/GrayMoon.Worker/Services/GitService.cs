@@ -1236,6 +1236,49 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
+    public async Task<(bool Success, string? Error, IReadOnlyList<string> KeptFiles)> CheckoutTrackingKeepingFilesAsync(string repoPath, string branch, CancellationToken ct)
+    {
+        if (!OriginDefaultRef.IsPlainRefName(branch))
+            return (false, $"'{branch}' is not a valid branch name.", []);
+
+        // The branch and the index are set without touching the working tree, so a file that is already there
+        // is never overwritten. Each step is plumbing with its own argument list.
+        string[][] steps =
+        [
+            ["update-ref", $"refs/heads/{branch}", $"refs/remotes/origin/{branch}"],
+            ["symbolic-ref", "HEAD", $"refs/heads/{branch}"],
+            ["branch", $"--set-upstream-to=origin/{branch}", branch],
+            ["reset", "-q"],
+        ];
+        foreach (var step in steps)
+        {
+            var (exitCode, stdout, stderr) = await runner.RunAsync("git", step, repoPath, null, ct);
+            if (exitCode != 0)
+            {
+                logger.LogError("Git {Step} failed while keeping existing files for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", step[0], repoPath, exitCode, stdout, stderr);
+                return (false, BuildProcessError(stderr, stdout, $"Git {step[0]} failed (exit code {exitCode})"), []);
+            }
+        }
+
+        // Without -f this writes only the files that are missing; it reports each existing file, so its exit
+        // code is not the answer. The check below is.
+        await runner.RunAsync("git", ["checkout-index", "-a"], repoPath, null, ct);
+
+        var missing = await runner.RunAsync("git", ["ls-files", "--deleted"], repoPath, null, ct);
+        if (missing.ExitCode != 0 || !string.IsNullOrWhiteSpace(missing.Stdout))
+        {
+            logger.LogError("Git checkout-index left files missing for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, missing.ExitCode, missing.Stdout, missing.Stderr);
+            return (false, BuildProcessError(missing.Stderr, null, "Some files of the repository could not be written to the folder."), []);
+        }
+
+        var modified = await runner.RunAsync("git", ["-c", "core.quotepath=false", "ls-files", "--modified"], repoPath, null, ct);
+        var kept = modified.ExitCode == 0
+            ? (modified.Stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+        logger.LogInformation("Checked out {Branch} in {RepoPath} keeping {KeptCount} existing file(s) that differ from the repository", branch, repoPath, kept.Length);
+        return (true, null, kept);
+    }
+
     public async Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct)
     {
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"symbolic-ref HEAD \"refs/heads/{branch}\"", repoPath, ct);

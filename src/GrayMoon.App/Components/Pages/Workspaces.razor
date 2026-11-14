@@ -219,6 +219,9 @@
                WorkspaceRepositoryId="@editorWorkspaceRepositoryId"
                WorkspaceRepositoryIdChanged="value => editorWorkspaceRepositoryId = value"
                WorkspaceRepositoryChoices="@editorWorkspaceRepositoryChoices"
+               ShowSetupBranch="@EditorNeedsSetupBranch"
+               SetupBranchName="@editorSetupBranch"
+               SetupBranchNameChanged="value => editorSetupBranch = value"
                IsWorkspaceRepositoryDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                WorkspaceRepositoryDisabledHint="@(editingWorkspaceHasFeatures ? WorkspaceRepositoryFeaturesExistMessage : null)"
                OnFetchRepositories="FetchRepositoriesAsync"
@@ -386,6 +389,11 @@
     private WorkspaceSettingsHost? _settingsHost;
     private int? editorWorkspaceRepositoryId;
     private int? editingWorkspaceRepositoryOriginalId;
+    private string editorSetupBranch = GrayMoon.Application.Workspaces.WorkspaceSetupBranch.DefaultName;
+
+    /// <summary>A folder that already is the chosen repository is adopted as it is, so it gets no setup branch.</summary>
+    private bool EditorNeedsSetupBranch => WorkspaceModal.NeedsSetupBranch(
+        editorWorkspaceRepositoryId, editingWorkspaceRepositoryOriginalId, detectedWorkspaceRepositoryId);
     private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
     private HashSet<int> editorSourceRepositoryIds = new();
     private RestoreWorkspaceModal? _restoreModal;
@@ -405,6 +413,7 @@
             ? "I am aware of the existing features for this workspace. I want to remove this workspace."
             : $"I am aware of the existing features in {featureStorageRootForDelete}. I want to remove this workspace.";
     private HashSet<int> editingWorkspaceRepositoryIds = new();
+    private int? editorRepositoryIdBeforeSave;
     private WorkspaceModel? workspaceToDelete;
     private HashSet<int> selectedRepositoryIds = new();
     private HashSet<int> excludedRepositoryIds = new();
@@ -529,6 +538,8 @@
         editorStoredCodeGraph = null;
         editorWorkspaceRepositoryId = null;
         editingWorkspaceRepositoryOriginalId = null;
+        editorRepositoryIdBeforeSave = null;
+        editorSetupBranch = GrayMoon.Application.Workspaces.WorkspaceSetupBranch.DefaultName;
         editorSourceRepositoryIds = new HashSet<int>();
         editorWorkspaceRepositoryChoices = await LoadWorkspaceRepositoryChoicesAsync(editorSourceRepositoryIds);
         await RefreshConnectorAvailabilityAsync();
@@ -717,6 +728,14 @@
                 await LoadDirectoryInfoAsync();
             }
 
+            // Before anything is created: a bad branch name keeps the dialog open with nothing changed.
+            if (EditorNeedsSetupBranch
+                && GrayMoon.Application.Workspaces.WorkspaceSetupBranch.Validate(editorSetupBranch) is { } setupBranchError)
+            {
+                editorErrorMessage = setupBranchError;
+                return;
+            }
+
             isSaving = true;
             editorErrorMessage = null;
 
@@ -763,6 +782,7 @@
                 await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
                 await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
 
+                editorRepositoryIdBeforeSave = editingWorkspaceRepositoryOriginalId;
                 var editWorkspaceRepositoryError = await ApplyWorkspaceRepositoryChangeAsync(editingWorkspaceId.Value);
                 if (editWorkspaceRepositoryError is not null)
                 {
@@ -772,7 +792,9 @@
                 }
             }
 
-            if (editorShowCodeGraph && editingWorkspaceId is int codeGraphWorkspaceId)
+            // Removing the Workspace repository takes the switch with it; a ticked box is then not an error.
+            if (editorShowCodeGraph && editingWorkspaceId is int codeGraphWorkspaceId
+                && !WorkspaceCodeGraphActivation.RemovedWorkspaceRepository(editorRepositoryIdBeforeSave, editingWorkspaceRepositoryOriginalId))
             {
                 var codeGraphError = await CodeGraphActivation.SaveAsync(
                     codeGraphWorkspaceId,
@@ -1393,18 +1415,26 @@
         {
             if (editingWorkspaceRepositoryOriginalId is not null)
             {
+                var removedId = editingWorkspaceRepositoryOriginalId.Value;
                 var disabled = await WorkspaceRepositoryOperations.DisableWorkspaceRepositoryAsync(workspaceId);
                 editingWorkspaceRepositoryOriginalId = await GetCurrentWorkspaceRepositoryIdAsync(workspaceId);
                 if (!disabled.Success)
                     return disabled.Error ?? "Could not disable the Workspace repository.";
+
+                // The dialog can stay open after this. Saving again must not link the removed repository as a Source repository.
+                editingWorkspaceRepositoryIds.Remove(removedId);
             }
 
             if (editorWorkspaceRepositoryId is { } repositoryId)
             {
-                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId);
+                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(
+                    workspaceId, repositoryId, setupBranchName: EditorNeedsSetupBranch ? editorSetupBranch : null);
                 editingWorkspaceRepositoryOriginalId = await GetCurrentWorkspaceRepositoryIdAsync(workspaceId);
                 if (!enabled.Success)
                     return enabled.Error ?? "Could not enable the Workspace repository.";
+                editingWorkspaceRepositoryIds.Add(repositoryId);
+                if (enabled.HasWarnings)
+                    ToastService.ShowWarning(enabled.WarningSummary ?? string.Join(" ", enabled.Warnings!));
             }
 
             return null;

@@ -1,10 +1,10 @@
 @* Searchable repository picker: one input that shows the selection while closed and becomes the search field while open. *@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-<div class="repository-picker input-group @(Disabled ? "disabled" : "")">
+<div class="repository-picker input-group @(Disabled ? "disabled" : "") @(ShowFetch ? "" : "repository-picker--no-fetch")">
     <div class="repository-picker-field" @ref="_anchor">
         <input type="text"
-               class="form-control repository-picker-input"
+               class="form-control repository-picker-input @(_state.IsOpen ? "" : "repository-picker-input--closed")"
                id="@Id"
                role="combobox"
                autocomplete="off"
@@ -20,6 +20,10 @@
                @oninput="OnFilterChanged"
                @onkeydown="OnKeyDownAsync"
                @onkeydown:stopPropagation="_state.IsOpen" />
+        @if (!_state.IsOpen && SelectedBadge is { } selectedBadge)
+        {
+            <span class="badge bg-secondary repository-picker-selected-badge">@selectedBadge</span>
+        }
         @if (_state.IsOpen && !Disabled)
         {
             var filteredChoices = _state.Filtered(Choices);
@@ -40,22 +44,25 @@
                             aria-selected="@(selected ? "true" : "false")"
                             class="repository-picker-option text-nowrap @(selected ? "active" : "") @(_state.IsChoiceHighlighted(i) ? "highlighted" : "")"
                             @onmousedown="() => SelectAsync(choice.RepositoryId)"
-                            @onmousedown:preventDefault>@choice.DisplayName</button>
+                            @onmousedown:preventDefault>@choice.DisplayName@if (choice.Badge is not null){<span class="badge bg-secondary ms-2">@choice.Badge</span>}</button>
                 }
                 @if (filteredChoices.Count == 0)
                 {
-                    <div class="repository-picker-empty text-nowrap">No matching repositories</div>
+                    <div class="repository-picker-empty text-nowrap">@EmptyText</div>
                 }
             </div>
         }
     </div>
-    <button type="button"
-            class="btn btn-outline-secondary repository-picker-fetch text-nowrap"
-            title="Fetch repositories"
-            disabled="@FetchDisabled"
-            @onclick="OnFetch">
-        Fetch
-    </button>
+    @if (ShowFetch)
+    {
+        <button type="button"
+                class="btn btn-outline-secondary repository-picker-fetch text-nowrap"
+                title="Fetch repositories"
+                disabled="@FetchDisabled"
+                @onclick="OnFetch">
+            Fetch
+        </button>
+    }
 </div>
 
 @code {
@@ -70,12 +77,18 @@
     [Parameter] public string? Id { get; set; }
     [Parameter] public EventCallback OnFetch { get; set; }
     [Parameter] public bool FetchDisabled { get; set; }
+    /// <summary>False hides the Fetch button, for a list that is not the repository catalog (remote branches).</summary>
+    [Parameter] public bool ShowFetch { get; set; } = true;
+    [Parameter] public string EmptyText { get; set; } = "No matching repositories";
 
     private readonly RepositoryPickerState _state = new();
     private ElementReference _anchor;
     private ElementReference _list;
     private bool _listAttached;
     private readonly string _listId = "repository-picker-" + Guid.NewGuid().ToString("N");
+
+    /// <summary>Badge of the selected choice, drawn inside the closed field (an input cannot hold one).</summary>
+    private string? SelectedBadge => Choices.FirstOrDefault(c => c.RepositoryId == SelectedRepositoryId)?.Badge;
 
     private string ListId => string.IsNullOrEmpty(Id) ? _listId : Id + "-list";
 

@@ -2,7 +2,7 @@
 
 Notes for work that is not built, or only partly built. Anything fully shipped is deleted: its behavior belongs in `docs/architecture/`. A note that is partly shipped keeps only what is still open, and says what is built in a short section at the top.
 
-Last checked against the code: 2026-11-13.
+Last checked against the code: 2026-11-14.
 
 ## `defects/` - something is wrong or missing today, and the cause is known
 
@@ -13,6 +13,7 @@ Classification (must / should / optional) and the order of work for all of these
 | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) | Worker `index.lock` retry and timeout tiers (Phase 3 items C, E, F, needs a repro first); run correlation id. The dirty-submodule failure is built. | Data-loss bug fixed; hardening open |
 | [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, folders and pages than the rules name; five silent catches in the Worker are listed as open. | Partly built |
 | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Desktop: move the signing secrets to the `production` environment and run the release workflow from a branch and a stable tag. | Owner action |
+| [removed-repository-folder-locked-by-watchers](defects/removed-repository-folder-locked-by-watchers.md) | After a repository is removed from a Workspace the Worker keeps its file watchers for up to about 10 minutes, so the user cannot delete the folder. Release them when the link is removed. | Not started; needs a repro |
 | [review-fix-test-gaps](defects/review-fix-test-gaps.md) | The tooltip load still lacks a behavioral test that a context change between its two queries stores nothing of the old context. The hub-attach check is in. | Partly built |
 
 ## `ideas/` - proposals and design notes, nothing is committed to

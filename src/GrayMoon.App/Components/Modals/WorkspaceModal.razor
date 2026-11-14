@@ -40,7 +40,7 @@
                         </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link @(_tab == ReposTab ? "active" : "")" type="button" role="tab"
-                                    aria-selected="@(_tab == ReposTab)" @onclick="() => SetTab(ReposTab)">Repos</button>
+                                    aria-selected="@(_tab == ReposTab)" @onclick="() => SetTab(ReposTab)">Repo</button>
                         </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link @(_tab == LockTab ? "active" : "")" type="button" role="tab"
@@ -149,7 +149,22 @@
                                 {
                                     <div class="form-text">@WorkspaceRepositoryDisabledHint</div>
                                 }
+                                @if (SelectedIsSourceRepository)
+                                {
+                                    <div class="gm-callout gm-callout--warning mt-2 mb-0" role="note">@SourceRepositoryHint</div>
+                                }
                             </div>
+                            @if (ShowSetupBranch)
+                            {
+                                <div class="mt-3 mb-0">
+                                    <label class="form-label text-nowrap" for="workspaceSetupBranch">@SetupBranchFieldLabel</label>
+                                    <input id="workspaceSetupBranch" class="form-control"
+                                           value="@SetupBranchName"
+                                           @oninput="OnSetupBranchChanged"
+                                           autocomplete="off" spellcheck="false" />
+                                    <div class="form-text">@SetupBranchHint</div>
+                                </div>
+                            }
                         </div>
 
                         @* Every control on this tab applies at once, so Enter here never saves the dialog. *@
@@ -228,23 +243,55 @@
     [Parameter] public EventCallback OnFetchRepositories { get; set; }
     [Parameter] public bool FetchDisabled { get; set; }
 
+    /// <summary>
+    /// True when saving will turn the chosen repository into the Workspace repository and write its files: the
+    /// dialog then asks for the new branch they are written on.
+    /// </summary>
+    [Parameter] public bool ShowSetupBranch { get; set; }
+    [Parameter] public string SetupBranchName { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> SetupBranchNameChanged { get; set; }
+
     public const string RepositoryFieldLabel = "Workspace Repository";
+
+    public const string SetupBranchFieldLabel = "New Branch";
+
+    public const string SetupBranchHint =
+        "GrayMoon creates this branch from the default branch and writes graymoon.json and .gitignore on it. "
+        + "Nothing is committed or pushed; commit and push it from Changes. "
+        + "No branch is created when the folder already is this repository or the repository has no commits.";
+
+    /// <summary>The setup branch is asked for when a repository is chosen that is not the current one and not the one the folder already holds.</summary>
+    public static bool NeedsSetupBranch(int? selectedRepositoryId, int? currentRepositoryId, int? folderRepositoryId = null) =>
+        selectedRepositoryId is int selected && selected != currentRepositoryId && selected != folderRepositoryId;
+
+    private bool SelectedIsSourceRepository =>
+        WorkspaceRepositoryId is int selected
+        && WorkspaceRepositoryChoices.Any(c => c.RepositoryId == selected && c.Badge == SourceBadge);
+
+    private Task OnSetupBranchChanged(ChangeEventArgs e) =>
+        SetupBranchNameChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty);
 
     public const string CodeGraphCheckingHint = "Waiting for the Worker to report whether CodeGraph is installed.";
 
+    public const string SourceBadge = "Source";
+
+    public const string SourceRepositoryHint =
+        "This repository is a Source repository of this Workspace. Saving makes it the Workspace repository instead: "
+        + "it is checked out again in the Workspace folder itself, and its current folder stays on disk, no longer "
+        + "managed by GrayMoon. Commit and push your work in that folder first.";
+
     /// <summary>
-    /// Imported repositories that can become the Workspace repository: every repository that is not already a
-    /// Source of this Workspace (the Workspace's current Workspace repository is therefore included so an edit
-    /// shows it selected), sorted by display name.
+    /// Imported repositories that can become the Workspace repository, sorted by display name. A Source of this
+    /// Workspace is offered too, marked with <see cref="SourceBadge"/>: choosing it moves it.
     /// </summary>
     public static IReadOnlyList<RepositoryPickerChoice> BuildWorkspaceRepositoryChoices(
         IEnumerable<(int RepositoryId, string RepositoryName, string? OrgName)> repositories,
         IReadOnlySet<int> sourceRepositoryIds) =>
         repositories
-            .Where(r => !sourceRepositoryIds.Contains(r.RepositoryId))
             .Select(r => new RepositoryPickerChoice(
                 r.RepositoryId,
-                string.IsNullOrWhiteSpace(r.OrgName) ? r.RepositoryName : $"{r.OrgName}/{r.RepositoryName}"))
+                string.IsNullOrWhiteSpace(r.OrgName) ? r.RepositoryName : $"{r.OrgName}/{r.RepositoryName}",
+                sourceRepositoryIds.Contains(r.RepositoryId) ? SourceBadge : null))
             .OrderBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(c => c.RepositoryId)
             .ToList();

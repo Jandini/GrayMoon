@@ -180,6 +180,10 @@
                                                                @onchange='() => SelectBranch(branch)' />
                                                         <span class="ms-2 @(branch == currentBranchLocal ? "fw-bold" : "")">
                                                             @branch
+                                                            @if (!string.IsNullOrWhiteSpace(defaultBranch) && string.Equals(branch, defaultBranch, StringComparison.Ordinal))
+                                                            {
+                                                                <span class="badge bg-success ms-2">Default</span>
+                                                            }
                                                             @if (branch == currentBranchLocal)
                                                             {
                                                                 <span class="badge bg-primary ms-2">Current</span>

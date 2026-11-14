@@ -51,6 +51,9 @@
                WorkspaceRepositoryId="@_repositoryId"
                WorkspaceRepositoryIdChanged="OnRepositoryChanged"
                WorkspaceRepositoryChoices="@_choices"
+               ShowSetupBranch="@NeedsSetupBranch"
+               SetupBranchName="@_setupBranch"
+               SetupBranchNameChanged="value => _setupBranch = value"
                IsWorkspaceRepositoryDisabled="@_hasFeatures"
                WorkspaceRepositoryDisabledHint="@(_hasFeatures ? FeaturesExistMessage : null)"
                OnFetchRepositories="FetchRepositoriesAsync"
@@ -113,6 +116,8 @@
     private bool _useGitHubActions = true;
     private int? _repositoryId;
     private int? _originalRepositoryId;
+    private string _setupBranch = WorkspaceSetupBranch.DefaultName;
+    private bool NeedsSetupBranch => WorkspaceModal.NeedsSetupBranch(_repositoryId, _originalRepositoryId);
     private HashSet<int> _sourceRepositoryIds = [];
     private HashSet<int> _repositoryIds = [];
     private IReadOnlyList<RepositoryPickerChoice> _choices = [];
@@ -169,6 +174,7 @@
             _useGitHubActions = workspace.CiProvider == WorkspaceCiProvider.GitHubActions;
             _originalRepositoryId = workspaceRepository?.RepositoryId;
             _repositoryId = workspaceRepository?.RepositoryId;
+            _setupBranch = WorkspaceSetupBranch.DefaultName;
             _sourceRepositoryIds = sourceRepositoryIds;
             _choices = choices;
             _hasConnectors = hasConnectors;
@@ -291,6 +297,13 @@
             return;
         }
 
+        // Before anything is stored: a bad branch name keeps the dialog open with nothing changed.
+        if (NeedsSetupBranch && WorkspaceSetupBranch.Validate(_setupBranch) is { } branchError)
+        {
+            _error = branchError;
+            return;
+        }
+
         var stored = false;
         var closed = false;
         try
@@ -308,6 +321,7 @@
                 _useGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
             stored = true;
 
+            var repositoryIdBeforeSave = _originalRepositoryId;
             var repositoryError = await ApplyRepositoryChangeAsync(workspaceId);
             if (repositoryError is not null)
             {
@@ -324,14 +338,17 @@
 
             await PendingActionsService.RefreshAsync(workspaceId, WorkspaceRepository, WorkspaceProjectRepository);
 
-            if (_showCodeGraph)
+            // Removing the Workspace repository takes the switch with it; a ticked box is then not an error.
+            if (_showCodeGraph && !WorkspaceCodeGraphActivation.RemovedWorkspaceRepository(repositoryIdBeforeSave, _originalRepositoryId))
             {
                 var codeGraphError = await CodeGraphActivation.SaveAsync(
                     workspaceId,
                     _storedCodeGraph,
                     _useCodeGraph,
                     CurrentPath(),
-                    _contextId);
+                    _contextId,
+                    // The repository change above has run: null means the Workspace repository was just removed.
+                    hasWorkspaceRepository: _originalRepositoryId is not null);
                 if (codeGraphError is not null)
                 {
                     _error = codeGraphError;
@@ -376,22 +393,32 @@
         if (_hasFeatures)
             return FeaturesExistMessage;
 
+        // Read before the old repository is disabled: that changes what the field compares against.
+        var setupBranch = NeedsSetupBranch ? _setupBranch : null;
         try
         {
             if (_originalRepositoryId is not null)
             {
+                var removedId = _originalRepositoryId.Value;
                 var disabled = await WorkspaceRepositoryOperations.DisableWorkspaceRepositoryAsync(workspaceId);
                 _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
                 if (!disabled.Success)
                     return disabled.Error ?? "Could not disable the Workspace repository.";
+
+                // The dialog can stay open after this (a later step failed). Saving again must not link the
+                // removed repository as a Source repository.
+                _repositoryIds.Remove(removedId);
             }
 
             if (_repositoryId is { } repositoryId)
             {
-                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId);
+                var enabled = await WorkspaceRepositoryOperations.EnableWorkspaceRepositoryAsync(workspaceId, repositoryId, setupBranchName: setupBranch);
                 _originalRepositoryId = await CurrentRepositoryIdAsync(workspaceId);
                 if (!enabled.Success)
                     return enabled.Error ?? "Could not enable the Workspace repository.";
+                _repositoryIds.Add(repositoryId);
+                if (enabled.HasWarnings)
+                    ToastService.ShowWarning(enabled.WarningSummary ?? string.Join(" ", enabled.Warnings!));
             }
 
             return null;

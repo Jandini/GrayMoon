@@ -65,7 +65,7 @@ public sealed class WorkspaceSettingsDialogGuardTests
 
         Assert.Contains("OpenAsync(WorkspaceId, SelectedContextId)", bar);
         Assert.Contains("ManifestFor(_contextId).SyncDefinitionToDiskAsync(workspaceId)", host);
-        Assert.Matches(@"CurrentPath\(\),\s+_contextId\);", host);
+        Assert.Matches(@"CurrentPath\(\),\s+_contextId[,)]", host);
         // No save path of the dialog goes around the context.
         Assert.DoesNotContain("ManifestService.SyncDefinitionToDiskAsync", host);
         Assert.DoesNotContain("ManifestService.GetCodeGraphSwitchAsync", host);

@@ -31,6 +31,7 @@ public sealed class WorkspaceRepositoryOperations(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IWorkerBridge workerBridge,
     IRemoteWorkspaceManifestReader remoteManifestReader,
+    IRemoteRepositoryBranchReader branchReader,
     IWorkspaceManifestFile manifestFile,
     IWorkspaceManifestService manifestService,
     IWorkspaceOperationLock operationLock,
@@ -54,8 +55,14 @@ public sealed class WorkspaceRepositoryOperations(
         int workspaceId,
         int repositoryId,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? setupBranchName = null)
     {
+        // The name is checked before the lock is taken: a bad name changes nothing.
+        var setupBranch = NormalizeBranch(setupBranchName);
+        if (setupBranch is not null && WorkspaceSetupBranch.Validate(setupBranch) is { } invalidBranch)
+            return OperationResult.Fail(invalidBranch);
+
         var tcs = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = operationLock.TryStartStructural(
             workspaceId,
@@ -68,7 +75,7 @@ public sealed class WorkspaceRepositoryOperations(
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cancellationToken);
                     var report = BindProgress(op, progress);
-                    tcs.TrySetResult(await EnableCoreAsync(workspaceId, repositoryId, report, linked.Token));
+                    tcs.TrySetResult(await EnableCoreAsync(workspaceId, repositoryId, setupBranch, report, linked.Token));
                 }
                 catch (Exception ex)
                 {
@@ -117,11 +124,11 @@ public sealed class WorkspaceRepositoryOperations(
         return OperationResult.Ok();
     }
 
-    public async Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default)
+    public async Task<RestoreWorkspacePreflight> PreflightRestoreAsync(int repositoryId, CancellationToken cancellationToken = default, string? branchName = null)
     {
         try
         {
-            var (plan, error) = await CheckRemoteDefinitionAsync(repositoryId, cancellationToken);
+            var (plan, error) = await CheckRemoteDefinitionAsync(repositoryId, NormalizeBranch(branchName), cancellationToken);
             if (plan is null)
                 return RestoreWorkspacePreflight.Failed(error!);
 
@@ -150,11 +157,12 @@ public sealed class WorkspaceRepositoryOperations(
         int repositoryId,
         string workspaceName,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? branchName = null)
     {
         try
         {
-            return await RestoreCoreAsync(repositoryId, workspaceName, progress, cancellationToken);
+            return await RestoreCoreAsync(repositoryId, workspaceName, NormalizeBranch(branchName), progress, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -166,6 +174,7 @@ public sealed class WorkspaceRepositoryOperations(
     private async Task<OperationResult> EnableCoreAsync(
         int workspaceId,
         int repositoryId,
+        string? setupBranch,
         IProgress<OperationProgress> progress,
         CancellationToken cancellationToken)
     {
@@ -173,6 +182,7 @@ public sealed class WorkspaceRepositoryOperations(
         if (workerBridge.GetUnavailableReason() is { } workerUnavailable)
             return OperationResult.Fail(workerUnavailable);
 
+        int? sourceLinkId;
         await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
         {
             if (!await db.Workspaces.AnyAsync(w => w.WorkspaceId == workspaceId, cancellationToken))
@@ -187,18 +197,31 @@ public sealed class WorkspaceRepositoryOperations(
                     l => l.WorkspaceId == workspaceId && l.Role == WorkspaceRepositoryRole.Workspace, cancellationToken))
                 return OperationResult.Fail("This Workspace already has a Workspace repository.");
 
-            // (d)
-            if (await db.WorkspaceRepositories.AnyAsync(
-                    l => l.WorkspaceId == workspaceId && l.RepositoryId == repositoryId, cancellationToken))
-                return OperationResult.Fail("This repository is already a Source repository of this Workspace.");
+            // (d) A Source repository of this Workspace is moved: its link changes role instead of being refused.
+            sourceLinkId = await db.WorkspaceRepositories
+                .Where(l => l.WorkspaceId == workspaceId && l.RepositoryId == repositoryId)
+                .Select(l => (int?)l.WorkspaceRepositoryId)
+                .FirstOrDefaultAsync(cancellationToken);
 
             if (!await db.Repositories.AnyAsync(r => r.RepositoryId == repositoryId, cancellationToken))
                 return OperationResult.Fail("Repository not found.");
         }
 
+        // The setup branch must be new. The remote is asked before anything is linked or cloned, so a name that
+        // is taken changes nothing. A fresh clone has no other local branches, so the remote list is the whole answer.
+        if (setupBranch is not null)
+        {
+            progress.Report("Checking branches...");
+            var remote = await branchReader.ListAsync(repositoryId, cancellationToken);
+            if (remote.Error is not null)
+                return OperationResult.Fail($"Could not check whether branch '{setupBranch}' already exists: {remote.Error}");
+            if (remote.Branches.Any(b => string.Equals(b, setupBranch, StringComparison.OrdinalIgnoreCase)))
+                return OperationResult.Fail(WorkspaceSetupBranch.ExistsMessage(setupBranch));
+        }
+
         // (e) + (f), with rollback of the link on failure
         progress.Report("Linking Workspace repository...");
-        var attach = await LinkAndAttachAsync(workspaceId, repositoryId, progress, cancellationToken);
+        var attach = await LinkAndAttachAsync(workspaceId, repositoryId, progress, cancellationToken, sourceLinkId: sourceLinkId);
         if (!attach.Success)
             return OperationResult.Fail(attach.Error ?? "Attaching the Workspace repository failed.");
 
@@ -206,6 +229,18 @@ public sealed class WorkspaceRepositoryOperations(
         // would drop version files and repositories that have not been imported yet.
         if (!attach.AdoptedExisting)
         {
+            // A repository with no commits has no default branch to protect, so it gets no setup branch.
+            if (setupBranch is not null && !attach.IsUnborn)
+            {
+                progress.Report($"Creating branch {setupBranch}...");
+                var branchError = await CreateSetupBranchAsync(workspaceId, repositoryId, attach, setupBranch, cancellationToken);
+                if (branchError is not null)
+                {
+                    return OperationResult.Fail(
+                        $"The Workspace repository was attached, but branch '{setupBranch}' could not be created, so graymoon.json and .gitignore were not written: {branchError}");
+                }
+            }
+
             // (g) .gitignore first, then the Workspace definition. The link and the attached repository stay in place on
             // failure: the drift banner offers "Write Workspace definition to disk" to repair the definition later.
             progress.Report("Writing .gitignore...");
@@ -237,7 +272,74 @@ public sealed class WorkspaceRepositoryOperations(
         await RefreshGitChangesAfterEnableAsync(workspaceId, contextId, repositoryId, cancellationToken);
 
         // (h)
-        return OperationResult.Ok();
+        var notes = new List<string>();
+        if (attach.KeptFileCount > 0)
+            notes.Add(KeptFilesMessage(attach.KeptFiles, attach.KeptFileCount));
+        if (sourceLinkId is not null)
+            notes.Add(MovedFromSourceMessage(attach.RepositoryName ?? "The repository"));
+        return notes.Count == 0
+            ? OperationResult.Ok()
+            : OperationResult.Ok() with { Warnings = notes, WarningSummary = string.Join(" ", notes) };
+    }
+
+    private const string CheckedOutIntoFolder = "The repository's files were checked out into the Workspace folder, which is now its working copy.";
+
+    /// <summary>Files already in the Workspace folder that differ from the repository were kept, not overwritten.</summary>
+    public static string KeptFilesMessage(IReadOnlyList<string> files, int count)
+    {
+        var names = string.Join(", ", files);
+        var more = count > files.Count ? $" and {count - files.Count} more" : "";
+        return count == 1
+            ? $"{CheckedOutIntoFolder} 1 file already in the Workspace folder was kept instead of the repository's version: {names}. It shows in Changes."
+            : $"{CheckedOutIntoFolder} {count} files already in the Workspace folder were kept instead of the repository's versions: {names}{more}. They show in Changes.";
+    }
+
+    /// <summary>A Source repository became the Workspace repository; its earlier checkout is left on disk.</summary>
+    public static string MovedFromSourceMessage(string repositoryName) =>
+        $"{repositoryName} is no longer a Source repository of this Workspace. Its folder '{repositoryName}' was left on disk and is no longer managed by GrayMoon.";
+
+    /// <summary>
+    /// Creates <paramref name="setupBranch"/> from the branch the attach checked out and checks it out, so the files
+    /// written next are not on the default branch. Returns the error, or null when HEAD is on the new branch.
+    /// </summary>
+    private async Task<string?> CreateSetupBranchAsync(
+        int workspaceId,
+        int repositoryId,
+        LinkAttachResult attach,
+        string setupBranch,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(attach.Branch) || string.IsNullOrWhiteSpace(attach.RepositoryName))
+            return "The Workspace repository is not on a branch.";
+
+        var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
+        var response = await workerBridge.SendCommandAsync(
+            "CreateBranch",
+            new
+            {
+                workspaceName = args.WorkspaceFolderName,
+                repositoryName = attach.RepositoryName,
+                newBranchName = setupBranch,
+                baseBranchName = attach.Branch,
+                workspaceRoot = args.WorkspaceRoot,
+                workspaceRepositoryName = args.WorkspaceRepositoryName ?? attach.RepositoryName,
+                workspaceId,
+                repositoryId,
+            },
+            cancellationToken);
+
+        if (!response.Success)
+            return response.Error ?? "Creating the branch failed.";
+
+        var data = WorkerResponseJson.DeserializeWorkerResponse<CreateBranchWorkerResponse>(response.Data);
+        if (data is null)
+            return "The Worker returned an unreadable response for the new branch.";
+        if (!data.Success)
+            return data.ErrorMessage ?? "Creating the branch failed.";
+
+        return string.Equals(data.CurrentBranch, setupBranch, StringComparison.Ordinal)
+            ? null
+            : $"The repository is on '{data.CurrentBranch ?? "no branch"}' instead.";
     }
 
     private async Task RefreshGitChangesAfterEnableAsync(
@@ -268,6 +370,7 @@ public sealed class WorkspaceRepositoryOperations(
     private async Task<RestoreWorkspaceResult> RestoreCoreAsync(
         int repositoryId,
         string workspaceName,
+        string? branchName,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -280,7 +383,7 @@ public sealed class WorkspaceRepositoryOperations(
             return RestoreWorkspaceResult.Failed(workerUnavailable);
 
         progress.Report("Checking Workspace definition...");
-        var (checkedDefinition, definitionError) = await CheckRemoteDefinitionAsync(repositoryId, cancellationToken);
+        var (checkedDefinition, definitionError) = await CheckRemoteDefinitionAsync(repositoryId, NormalizeBranch(branchName), cancellationToken);
         if (checkedDefinition is null)
             return RestoreWorkspaceResult.Failed(definitionError!);
 
@@ -307,7 +410,7 @@ public sealed class WorkspaceRepositoryOperations(
         var cloneUrl = checkedDefinition.Context.CloneUrl;
         try
         {
-            var (result, error) = await RestoreIntoWorkspaceAsync(workspaceId, repositoryId, checkedDefinition.Context, progress, cancellationToken);
+            var (result, error) = await RestoreIntoWorkspaceAsync(workspaceId, repositoryId, branchName, checkedDefinition.Context, progress, cancellationToken);
             if (result is not null)
                 return result;
 
@@ -335,12 +438,13 @@ public sealed class WorkspaceRepositoryOperations(
     private async Task<(RestoreWorkspaceResult? Result, string? Error)> RestoreIntoWorkspaceAsync(
         int workspaceId,
         int repositoryId,
+        string? branchName,
         RestoreContext context,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         var attach = await LinkAndAttachAsync(
-            workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true, attachMessage: "Cloning Workspace repository...");
+            workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true, attachMessage: "Cloning Workspace repository...", branchName: branchName);
         if (!attach.Success)
             return (null, attach.Error ?? "Cloning the Workspace repository failed.");
 
@@ -499,13 +603,13 @@ public sealed class WorkspaceRepositoryOperations(
     }
 
     /// <summary>Reads the repository's definition through its connector and evaluates it against this computer.</summary>
-    private async Task<(CheckedDefinition? Definition, string? Error)> CheckRemoteDefinitionAsync(int repositoryId, CancellationToken cancellationToken)
+    private async Task<(CheckedDefinition? Definition, string? Error)> CheckRemoteDefinitionAsync(int repositoryId, string? branchName, CancellationToken cancellationToken)
     {
         var context = await LoadRestoreContextAsync(repositoryId, cancellationToken);
         if (context is null)
             return (null, "Repository not found.");
 
-        var read = await remoteManifestReader.ReadAsync(repositoryId, cancellationToken);
+        var read = await remoteManifestReader.ReadAsync(repositoryId, branchName, cancellationToken);
         if (read.Error is not null)
             return (null, read.Error);
 
@@ -550,10 +654,13 @@ public sealed class WorkspaceRepositoryOperations(
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken,
         bool requireEmptyRoot = false,
-        string attachMessage = "Attaching Workspace repository...")
+        string attachMessage = "Attaching Workspace repository...",
+        string? branchName = null,
+        int? sourceLinkId = null)
     {
         int workspaceRepositoryId;
         string cloneUrl;
+        string repositoryName;
         string? bearerToken;
 
         await using (var db = await dbContextFactory.CreateDbContextAsync(cancellationToken))
@@ -565,17 +672,30 @@ public sealed class WorkspaceRepositoryOperations(
             if (repository is null)
                 return LinkAttachResult.Failed("Repository not found.");
 
-            var link = new WorkspaceRepositoryLink
-            {
-                WorkspaceId = workspaceId,
-                RepositoryId = repositoryId,
-                Role = WorkspaceRepositoryRole.Workspace,
-                SyncStatus = RepoSyncStatus.NeedsSync,
-            };
-            db.WorkspaceRepositories.Add(link);
             try
             {
-                await db.SaveChangesAsync(cancellationToken);
+                if (sourceLinkId is int existingLinkId)
+                {
+                    // A Source repository is moved by changing its link's role. Nothing is deleted until the attach
+                    // has succeeded, so a failed attach puts the role back and the Source keeps all its state.
+                    await db.WorkspaceRepositories
+                        .Where(l => l.WorkspaceRepositoryId == existingLinkId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(l => l.Role, WorkspaceRepositoryRole.Workspace), cancellationToken);
+                    workspaceRepositoryId = existingLinkId;
+                }
+                else
+                {
+                    var link = new WorkspaceRepositoryLink
+                    {
+                        WorkspaceId = workspaceId,
+                        RepositoryId = repositoryId,
+                        Role = WorkspaceRepositoryRole.Workspace,
+                        SyncStatus = RepoSyncStatus.NeedsSync,
+                    };
+                    db.WorkspaceRepositories.Add(link);
+                    await db.SaveChangesAsync(cancellationToken);
+                    workspaceRepositoryId = link.WorkspaceRepositoryId;
+                }
             }
             catch (DbUpdateException ex)
             {
@@ -583,17 +703,17 @@ public sealed class WorkspaceRepositoryOperations(
                 return LinkAttachResult.Failed("This Workspace already has a Workspace repository.");
             }
 
-            workspaceRepositoryId = link.WorkspaceRepositoryId;
             cloneUrl = repository.CloneUrl;
+            repositoryName = repository.RepositoryName;
             bearerToken = ConnectorHelpers.UnprotectToken(repository.Connector?.UserToken);
         }
 
         string? error;
-        var adoptedExisting = false;
+        AttachWorkspaceRepositoryWorkerResponse? attached = null;
         try
         {
             progress.Report(attachMessage);
-            (error, adoptedExisting) = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, cancellationToken);
+            (error, attached) = await AttachAsync(workspaceId, repositoryId, cloneUrl, bearerToken, requireEmptyRoot, branchName, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -602,30 +722,89 @@ public sealed class WorkspaceRepositoryOperations(
         }
         catch (OperationCanceledException)
         {
-            await RemoveLinkAsync(workspaceRepositoryId, repositoryId, workspaceId);
+            await UndoLinkAsync(workspaceRepositoryId, repositoryId, workspaceId, sourceLinkId);
             throw;
         }
 
-        if (error is null)
-            return LinkAttachResult.Ok(adoptedExisting);
+        if (error is null && attached is not null)
+        {
+            if (sourceLinkId is not null)
+                await ReplaceMovedSourceLinkAsync(workspaceRepositoryId, repositoryId, workspaceId);
 
-        await RemoveLinkAsync(workspaceRepositoryId, repositoryId, workspaceId);
-        return LinkAttachResult.Failed(error);
+            return new LinkAttachResult(true, null, attached.AdoptedExisting, repositoryName, attached.Branch, attached.IsUnborn)
+            {
+                KeptFiles = attached.KeptFiles ?? [],
+                KeptFileCount = attached.KeptFileCount,
+            };
+        }
+
+        await UndoLinkAsync(workspaceRepositoryId, repositoryId, workspaceId, sourceLinkId);
+        return LinkAttachResult.Failed(error ?? "Attaching the Workspace repository failed.");
     }
 
-    private sealed record LinkAttachResult(bool Success, string? Error, bool AdoptedExisting)
+    /// <summary>A link this operation added is removed; a Source link it changed gets its role back.</summary>
+    private async Task UndoLinkAsync(int workspaceRepositoryId, int repositoryId, int workspaceId, int? sourceLinkId)
     {
-        public static LinkAttachResult Failed(string error) => new(false, error, false);
+        if (sourceLinkId is null)
+        {
+            await RemoveLinkAsync(workspaceRepositoryId, repositoryId, workspaceId);
+            return;
+        }
 
-        public static LinkAttachResult Ok(bool adoptedExisting) => new(true, null, adoptedExisting);
+        // Must still run when the operation itself was cancelled.
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        await db.WorkspaceRepositories
+            .Where(l => l.WorkspaceRepositoryId == workspaceRepositoryId)
+            .ExecuteUpdateAsync(s => s.SetProperty(l => l.Role, WorkspaceRepositoryRole.Source));
     }
 
-    private async Task<(string? Error, bool AdoptedExisting)> AttachAsync(
+    /// <summary>
+    /// The moved Source link still carries the state of its own checkout (branch, projects, changes, read only).
+    /// Now that the repository is attached to the root, that state is removed and the link starts as a new
+    /// Workspace-role link, exactly like one that was never a Source.
+    /// </summary>
+    private async Task ReplaceMovedSourceLinkAsync(int workspaceRepositoryId, int repositoryId, int workspaceId)
+    {
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(db, [workspaceRepositoryId], [repositoryId], workspaceId);
+        await db.WorkspaceRepositories
+            .Where(l => l.WorkspaceRepositoryId == workspaceRepositoryId)
+            .ExecuteDeleteAsync();
+        db.WorkspaceRepositories.Add(new WorkspaceRepositoryLink
+        {
+            WorkspaceId = workspaceId,
+            RepositoryId = repositoryId,
+            Role = WorkspaceRepositoryRole.Workspace,
+            SyncStatus = RepoSyncStatus.NeedsSync,
+        });
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+    }
+
+    /// <summary><paramref name="Branch"/> is the branch the attach left checked out; <paramref name="IsUnborn"/> means the repository has no commits.</summary>
+    private sealed record LinkAttachResult(
+        bool Success,
+        string? Error,
+        bool AdoptedExisting,
+        string? RepositoryName = null,
+        string? Branch = null,
+        bool IsUnborn = false)
+    {
+        /// <summary>Files already in the folder that were kept instead of the repository's version (first few names).</summary>
+        public IReadOnlyList<string> KeptFiles { get; init; } = [];
+        public int KeptFileCount { get; init; }
+
+        public static LinkAttachResult Failed(string error) => new(false, error, false);
+    }
+
+    private async Task<(string? Error, AttachWorkspaceRepositoryWorkerResponse? Attached)> AttachAsync(
         int workspaceId,
         int repositoryId,
         string cloneUrl,
         string? bearerToken,
         bool requireEmptyRoot,
+        string? branchName,
         CancellationToken cancellationToken)
     {
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
@@ -641,20 +820,25 @@ public sealed class WorkspaceRepositoryOperations(
                 workspaceId,
                 repositoryId,
                 requireEmptyRoot,
+                branchName,
             },
             cancellationToken);
 
         if (!response.Success)
-            return (response.Error ?? "Attaching the Workspace repository failed.", false);
+            return (response.Error ?? "Attaching the Workspace repository failed.", null);
 
         var data = WorkerResponseJson.DeserializeWorkerResponse<AttachWorkspaceRepositoryWorkerResponse>(response.Data);
         if (data is null)
-            return ("The Worker returned an unreadable response for the attach.", false);
+            return ("The Worker returned an unreadable response for the attach.", null);
         if (!data.Success)
-            return (data.ErrorMessage ?? "Attaching the Workspace repository failed.", false);
+            return (data.ErrorMessage ?? "Attaching the Workspace repository failed.", null);
 
-        return (null, data.AdoptedExisting);
+        return (null, data);
     }
+
+    /// <summary>A blank branch means "the default branch" (null). The name is otherwise kept exactly as the provider spelled it.</summary>
+    private static string? NormalizeBranch(string? branchName) =>
+        string.IsNullOrWhiteSpace(branchName) ? null : branchName.Trim();
 
     private async Task RemoveLinkAsync(int workspaceRepositoryId, int repositoryId, int workspaceId)
     {
@@ -741,6 +925,24 @@ public sealed class WorkspaceRepositoryOperations(
 
         [System.Text.Json.Serialization.JsonPropertyName("adoptedExisting")]
         public bool AdoptedExisting { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("keptFiles")]
+        public List<string>? KeptFiles { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("keptFileCount")]
+        public int KeptFileCount { get; set; }
+    }
+
+    private sealed class CreateBranchWorkerResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("success")]
+        public bool Success { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("errorMessage")]
+        public string? ErrorMessage { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("currentBranch")]
+        public string? CurrentBranch { get; set; }
     }
 
     private sealed class DiscardWorkspaceRootWorkerResponse

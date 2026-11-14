@@ -408,7 +408,7 @@ public class WorkspaceRepositoryGridLayoutTests
     }
 
     [Fact]
-    public void Workspace_repository_choices_exclude_sources_and_sort_by_display_name()
+    public void Workspace_repository_choices_mark_sources_and_sort_by_display_name()
     {
         var repositories = new (int RepositoryId, string RepositoryName, string? OrgName)[]
         {
@@ -420,14 +420,16 @@ public class WorkspaceRepositoryGridLayoutTests
 
         var choices = WorkspaceModal.BuildWorkspaceRepositoryChoices(repositories, new HashSet<int> { 4 });
 
-        Assert.Equal(["acme/alpha", "acme/zeta", "solo"], choices.Select(c => c.DisplayName));
-        Assert.Equal([2, 1, 3], choices.Select(c => c.RepositoryId));
+        // A Source can be chosen too (saving moves it), so it is listed and marked instead of hidden.
+        Assert.Equal(["acme/alpha", "acme/source-repo", "acme/zeta", "solo"], choices.Select(c => c.DisplayName));
+        Assert.Equal([2, 4, 1, 3], choices.Select(c => c.RepositoryId));
+        Assert.Equal([null, WorkspaceModal.SourceBadge, null, null], choices.Select(c => c.Badge));
     }
 
     [Fact]
     public void Workspace_repository_choices_keep_the_current_workspace_repository()
     {
-        // The current Workspace repository is not a Source, so it stays in the list and an edit shows it selected.
+        // The current Workspace repository is not a Source, so it carries no badge and an edit shows it selected.
         var repositories = new (int RepositoryId, string RepositoryName, string? OrgName)[]
         {
             (7, "ws-repo", "acme"),
@@ -436,6 +438,7 @@ public class WorkspaceRepositoryGridLayoutTests
 
         var choices = WorkspaceModal.BuildWorkspaceRepositoryChoices(repositories, new HashSet<int> { 8 });
 
-        Assert.Equal([7], choices.Select(c => c.RepositoryId));
+        Assert.Null(choices.Single(c => c.RepositoryId == 7).Badge);
+        Assert.Equal(WorkspaceModal.SourceBadge, choices.Single(c => c.RepositoryId == 8).Badge);
     }
 }

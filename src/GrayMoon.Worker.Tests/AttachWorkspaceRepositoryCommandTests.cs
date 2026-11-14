@@ -175,42 +175,70 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Checkout_collision_returns_git_message_and_keeps_dot_git()
+    public async Task A_file_already_in_the_folder_is_kept_and_reported_instead_of_stopping_the_attach()
     {
         var remote = CreateRemote(withCommit: true);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "README.md"), "local content that differs\n");
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+
+        var response = await _command.ExecuteAsync(NewRequest(remote));
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.False(response.AdoptedExisting);
+        Assert.Equal("main", response.Branch);
+        Assert.False(response.IsUnborn);
+        Assert.Equal(["README.md"], response.KeptFiles);
+        Assert.Equal(1, response.KeptFileCount);
+        // Nothing in the folder was overwritten, and the file shows as a change against the repository's version.
+        Assert.Equal("local content that differs\n", File.ReadAllText(Path.Combine(RootPath, "README.md")));
+        Assert.Equal("keep me\n", File.ReadAllText(Path.Combine(RootPath, "notes.txt")));
+        Assert.Equal(RunGit(remote, "rev-parse", "main").Stdout.Trim(), RunGit(RootPath, "rev-parse", "HEAD").Stdout.Trim());
+        Assert.Equal("origin/main", RunGit(RootPath, "rev-parse", "--abbrev-ref", "main@{upstream}").Stdout.Trim());
+        var status = RunGit(RootPath, "status", "--porcelain").Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains(" M README.md", status);
+        Assert.Contains("?? notes.txt", status);
+        Assert.Equal(2, status.Length);
+    }
+
+    [Fact]
+    public async Task Files_the_folder_does_not_have_are_written_next_to_the_kept_ones()
+    {
+        var remote = CreateRemote(withCommit: true);
+        AddRemoteFile(remote, "docs/guide.md", "guide\n");
         Directory.CreateDirectory(RootPath);
         File.WriteAllText(Path.Combine(RootPath, "README.md"), "local content that differs\n");
 
         var response = await _command.ExecuteAsync(NewRequest(remote));
 
-        Assert.False(response.Success);
-        Assert.False(string.IsNullOrWhiteSpace(response.ErrorMessage));
-        Assert.Contains("README.md", response.ErrorMessage);
-        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
-        Assert.Equal("local content that differs\n", File.ReadAllText(Path.Combine(RootPath, "README.md")));
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(["README.md"], response.KeptFiles);
+        Assert.Equal("guide\n", File.ReadAllText(Path.Combine(RootPath, "docs", "guide.md")).Replace("\r\n", "\n"));
+        Assert.Equal("", RunGit(RootPath, "ls-files", "--deleted").Stdout.Trim());
     }
 
     [Fact]
-    public async Task Reattach_after_collision_checks_out_default_when_head_is_unborn()
+    public async Task An_attach_that_stopped_before_its_checkout_is_finished_as_a_fresh_attach()
     {
         var remote = CreateRemote(withCommit: true);
         Directory.CreateDirectory(RootPath);
         var readme = Path.Combine(RootPath, "README.md");
         File.WriteAllText(readme, "local content that differs\n");
-
-        var first = await _command.ExecuteAsync(NewRequest(remote));
-        Assert.False(first.Success);
+        // What an older Worker left behind after a checkout collision: .git with the origin and no commit checked out.
+        Assert.Equal(0, RunGit(RootPath, "init").ExitCode);
+        Assert.Equal(0, RunGit(RootPath, "remote", "add", "origin", remote).ExitCode);
         Assert.NotEqual(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
 
-        File.Delete(readme);
-        var second = await _command.ExecuteAsync(NewRequest(remote));
+        var response = await _command.ExecuteAsync(NewRequest(remote));
 
-        Assert.True(second.Success, second.ErrorMessage);
-        Assert.Equal("main", second.Branch);
-        Assert.False(second.IsUnborn);
-        Assert.Equal(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
+        Assert.True(response.Success, response.ErrorMessage);
+        // Not "adopted": the App still has to write graymoon.json and .gitignore.
+        Assert.False(response.AdoptedExisting);
+        Assert.Equal("main", response.Branch);
+        Assert.False(response.IsUnborn);
+        Assert.Equal(["README.md"], response.KeptFiles);
         Assert.Equal("origin/main", RunGit(RootPath, "rev-parse", "--abbrev-ref", "main@{upstream}").Stdout.Trim());
-        Assert.Equal("from remote\n", File.ReadAllText(readme).Replace("\r\n", "\n"));
+        Assert.Equal("local content that differs\n", File.ReadAllText(readme));
     }
 
     [Fact]
@@ -225,27 +253,11 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         var second = await _command.ExecuteAsync(NewRequest(remote));
 
         Assert.True(second.Success, second.ErrorMessage);
+        Assert.True(second.AdoptedExisting);
         Assert.Equal("main", second.Branch);
         Assert.True(second.IsUnborn);
         Assert.NotEqual(0, RunGit(RootPath, "rev-parse", "--verify", "HEAD").ExitCode);
     }
-
-    [Fact]
-    public async Task Reattach_collision_again_returns_git_message()
-    {
-        var remote = CreateRemote(withCommit: true);
-        Directory.CreateDirectory(RootPath);
-        File.WriteAllText(Path.Combine(RootPath, "README.md"), "local content that differs\n");
-        Assert.False((await _command.ExecuteAsync(NewRequest(remote))).Success);
-
-        var second = await _command.ExecuteAsync(NewRequest(remote));
-
-        Assert.False(second.Success);
-        Assert.Contains("README.md", second.ErrorMessage);
-        Assert.True(Directory.Exists(Path.Combine(RootPath, ".git")));
-        Assert.Equal("local content that differs\n", File.ReadAllText(Path.Combine(RootPath, "README.md")));
-    }
-
     [Fact]
     public async Task Require_empty_root_fails_when_folder_has_files()
     {
@@ -298,6 +310,68 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
         Assert.False(second.IsUnborn);
     }
 
+    [Fact]
+    public async Task A_clone_is_checked_out_on_the_requested_remote_branch()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Assert.Equal(0, RunGit(remote, "branch", "graymoon/workspace-setup", "main").ExitCode);
+        var request = NewRequest(remote);
+        request.BranchName = "graymoon/workspace-setup";
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("graymoon/workspace-setup", response.Branch);
+        Assert.Equal("graymoon/workspace-setup", RunGit(RootPath, "rev-parse", "--abbrev-ref", "HEAD").Stdout.Trim());
+    }
+
+    [Fact]
+    public async Task A_missing_requested_branch_fails_instead_of_falling_back_to_the_default()
+    {
+        var remote = CreateRemote(withCommit: true);
+        var request = NewRequest(remote);
+        request.BranchName = "deleted-branch";
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.False(response.Success);
+        Assert.Contains("deleted-branch", response.ErrorMessage);
+        Assert.Contains("not found", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task A_non_empty_root_is_initialized_on_the_requested_branch()
+    {
+        var remote = CreateRemote(withCommit: true);
+        Assert.Equal(0, RunGit(remote, "branch", "setup", "main").ExitCode);
+        Directory.CreateDirectory(RootPath);
+        File.WriteAllText(Path.Combine(RootPath, "notes.txt"), "keep me\n");
+        var request = NewRequest(remote);
+        request.BranchName = "setup";
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal("setup", response.Branch);
+    }
+
+    [Theory]
+    [InlineData("--upload-pack=x")]
+    [InlineData("a b")]
+    [InlineData("a..b")]
+    [InlineData("x\"y")]
+    public async Task An_unsafe_requested_branch_name_is_refused(string branch)
+    {
+        var remote = CreateRemote(withCommit: true);
+        var request = NewRequest(remote);
+        request.BranchName = branch;
+
+        var response = await _command.ExecuteAsync(request);
+
+        Assert.False(response.Success);
+        Assert.Contains("not a valid branch name", response.ErrorMessage);
+    }
+
     private string RootPath => Path.Combine(_workspaceRoot, "ws");
 
     private AttachWorkspaceRepositoryRequest NewRequest(string cloneUrl) => new()
@@ -311,6 +385,19 @@ public sealed class AttachWorkspaceRepositoryCommandTests : IDisposable
 
     /// <summary>Creates a bare repository (HEAD on main) and, optionally, pushes one commit with README.md to it.</summary>
     private string CreateRemote(bool withCommit) => GitScenarios.BareRemote(_baseDir, withCommit);
+
+    /// <summary>Commits one more file to the remote's main branch through a throwaway clone.</summary>
+    private void AddRemoteFile(string remote, string relativePath, string content)
+    {
+        var clone = Path.Combine(_baseDir, "seed-" + Guid.NewGuid().ToString("N"));
+        Assert.Equal(0, RunGit(_baseDir, "clone", remote, clone).ExitCode);
+        var file = Path.Combine(clone, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, content);
+        Assert.Equal(0, RunGit(clone, "add", "-A").ExitCode);
+        Assert.Equal(0, RunGit(clone, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "add file").ExitCode);
+        Assert.Equal(0, RunGit(clone, "push", "origin", "HEAD:main").ExitCode);
+    }
 
     private static (int ExitCode, string Stdout, string Stderr) RunGit(string workingDirectory, params string[] args)
     {
