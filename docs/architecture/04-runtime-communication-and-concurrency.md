@@ -333,6 +333,7 @@ WorkspaceFeatureReconciler apply phase
 Git Changes audits and line-stats passes (each scan is already bounded)
 single-reader queues                         WorkspaceGitChangesWriteQueue, WorkerSyncNotificationQueue
 sync barrier                                 IWorkerSyncNotificationBarrier (implemented by WorkerSyncNotificationQueue): DependencyUpdateOrchestrator.RunAsync awaits it before reading stored state, so hook syncs already received are applied before a run plans or selects push levels
+stale hook snapshot guard                    RepositoryStateFreshness (singleton, in memory): see "Stale hook snapshots" under the hook flow
 FeatureRemovalQueue                          fixed at MaxConcurrentRemovals = 4 workers, FIFO
 Worker DotnetRestoreCommand                  shared obj/ and NuGet cache
 ```
@@ -487,6 +488,19 @@ Hook notification failure must not break the Git operation that triggered the ho
 Hook scripts are context-agnostic and never embed capabilities. Hook-driven Worker commands resolve the Workspace profile through `IWorkspaceCapabilityProvider`: a per-Workspace cache warmed by inbound App commands, then `GET /workspaces/{workspaceId}/capabilities` with the Worker secret, else full enrichment (that fallback is never cached and hook sync never fails for it). A profile save does not invalidate the cache; the next App command re-warms it.
 
 GrayMoon's own commits and pulls run with `skipHooks` (`-c core.hooksPath=` empty), so they bypass team pre-commit hooks deliberately.
+
+Remove Feature and Feature rollback send `skipHooks` on `DeleteBranch` (local `git branch -d` / `-D` and the remote lease push). Those deletes run in the main checkouts and the App removes the persisted branch rows itself; with hooks on, every delete queued a sync notification for a checkout it had not changed. A branch delete from Switch Branch still runs with hooks. The fetch that precedes a lease delete is not covered by `skipHooks`.
+
+### Stale hook snapshots
+
+`WorkerSyncNotificationQueue` is serial, and a full snapshot costs a dependency recompute, so a burst of hooks can hold a snapshot for minutes. Nothing in the snapshot says when it was captured. The App therefore compares two readings of its own monotonic clock (`RepositoryStateFreshness.Now`):
+
+- the queue stamps each notification when it arrives (`Enqueue`);
+- Pull (`WorkspaceCommitSyncHandler`), Sync (`WorkspaceGitService.SyncAsync`, the fan-out start) and the single-repository version refresh pass the time read before their Worker command was sent as `RepositoryStateWriteOptions.OperationStartedAt`. After the write, `WorkspaceRepositoryStateWriter` records that time per context, repository and probed group.
+
+A notification that arrived before such an operation began was captured before the operation read the checkout, so `SyncCommandHandler` removes the groups the operation wrote (`WithoutSupersededGroups`). A superseded identity takes version, commit counts, upstream and projects with it, because they describe the checkout; branch lists are judged on their own. When nothing is left the notification is dropped: no write, no recompute, no broadcast, one Information log line. A notification that arrived after the operation began is always applied.
+
+Limits: the record is in memory (the queue does not survive a restart either); operations that do not pass `OperationStartedAt` are not protected; a snapshot the Worker captured before a pull but delivered after the pull began is still applied.
 
 ### Context attribution
 

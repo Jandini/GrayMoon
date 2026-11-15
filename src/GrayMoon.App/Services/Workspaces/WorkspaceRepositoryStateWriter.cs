@@ -41,6 +41,13 @@ public sealed class RepositoryStateWriteOptions
 
     /// <summary>Reconcile the persisted pull request against the branch that is now checked out.</summary>
     public bool ReconcilePullRequest { get; init; }
+
+    /// <summary>
+    /// <see cref="RepositoryStateFreshness.Now"/> read before the Worker command that produced the snapshot was
+    /// sent. When set, a hook snapshot the App received before that moment can no longer overwrite the groups
+    /// this write probed. Null for writes that are not the result of an operation.
+    /// </summary>
+    public long? OperationStartedAt { get; init; }
 }
 
 /// <summary>
@@ -65,7 +72,8 @@ public sealed class WorkspaceRepositoryStateWriter(
     WorkspacePullRequestService pullRequestService,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
-    ILogger<WorkspaceRepositoryStateWriter> logger)
+    ILogger<WorkspaceRepositoryStateWriter> logger,
+    RepositoryStateFreshness? freshness = null)
 {
     /// <summary>
     /// Applies <paramref name="snapshot"/> to the special Workspace context (and mirrors onto the link).
@@ -146,6 +154,9 @@ public sealed class WorkspaceRepositoryStateWriter(
                 snapshot.Tags,
                 cancellationToken);
         }
+
+        if (options.OperationStartedAt is { } operationStartedAt)
+            freshness?.RecordOperationWrite(contextId, repositoryId, snapshot, operationStartedAt);
 
         // Some Worker paths return projects without being asked (return-to-default, the hook fallback
         // when capabilities cannot be resolved); a workspace that does not discover projects keeps none.
@@ -591,6 +602,15 @@ public sealed class WorkspaceRepositoryStateWriter(
         else
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (freshness is not null && options.OperationStartedAt is { } operationStartedAt)
+        {
+            foreach (var (repositoryId, snapshot) in items)
+            {
+                if (linkByRepo.ContainsKey(repositoryId))
+                    freshness.RecordOperationWrite(contextId, repositoryId, snapshot, operationStartedAt);
+            }
         }
 
         if (options.ReconcilePullRequest)

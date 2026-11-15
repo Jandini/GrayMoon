@@ -35,6 +35,30 @@ public sealed class DeleteBranchCommandTests
         Assert.Equal("connector-token", remoteDelete.BearerToken);
         Assert.Equal("feature/matt", remoteDelete.BranchName);
         Assert.False(remoteDelete.Force);
+        Assert.False(remoteDelete.SkipHooks);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_PassesSkipHooks_ToTheDelete(bool isRemote)
+    {
+        using var workspace = new TempWorkspaceRoot("ws", "repo");
+        var git = new RecordingGitService();
+        var command = new DeleteBranchCommand(git);
+
+        var response = await command.ExecuteAsync(new DeleteBranchRequest
+        {
+            WorkspaceRoot = workspace.Path,
+            WorkspaceName = "ws",
+            RepositoryName = "repo",
+            BranchName = "feature/matt",
+            IsRemote = isRemote,
+            SkipHooks = true,
+        });
+
+        Assert.True(response.Success);
+        Assert.True(Assert.Single(git.DeleteCalls).SkipHooks);
     }
 
     /// <summary>Minimal IGitService stub that records DeleteBranchAsync calls.</summary>

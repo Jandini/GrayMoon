@@ -92,6 +92,52 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
         Assert.DoesNotContain("should-not-appear", delete, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LocalDelete_WithSkipHooks_RunsWithHooksOff(bool force)
+    {
+        // Remove Feature deletes the Feature branch in every main checkout. With hooks on, each delete queued a
+        // sync notification for a checkout whose state it had not changed.
+        _repo.CommitInitial();
+        _repo.RunGit("branch", "feature/quiet");
+
+        var (success, error) = await _git.DeleteBranchAsync(
+            _repo.RepositoryPath,
+            "feature/quiet",
+            isRemote: false,
+            force: force,
+            CancellationToken.None,
+            skipHooks: true);
+
+        Assert.True(success, error);
+        var delete = Assert.Single(_recorder.StringArgumentCalls, c => c.Contains("branch -d", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("core.hooksPath=", delete, StringComparison.Ordinal);
+        Assert.Contains("GrayMoon-empty-hooks", delete, StringComparison.Ordinal);
+        Assert.EndsWith(force ? "branch -D feature/quiet" : "branch -d feature/quiet", delete, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RemoteDelete_WithExpectedSha_AndSkipHooks_RunsTheLeasePushWithHooksOff()
+    {
+        _repo.CommitInitial();
+
+        var (success, error) = await _git.DeleteBranchAsync(
+            _repo.RepositoryPath,
+            "feature/lease-quiet",
+            isRemote: true,
+            force: false,
+            CancellationToken.None,
+            skipHooks: true,
+            bearerToken: "lease-token",
+            expectedSha: "abc123def456");
+
+        Assert.True(success, error);
+        var push = Assert.Single(_recorder.StringArgumentCalls, c => c.Contains("--force-with-lease=", StringComparison.Ordinal));
+        Assert.Contains("core.hooksPath=", push, StringComparison.Ordinal);
+        Assert.Contains("GrayMoon-empty-hooks", push, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RemoteDelete_WithExpectedSha_UsesForceWithLease_AfterFetch()
     {

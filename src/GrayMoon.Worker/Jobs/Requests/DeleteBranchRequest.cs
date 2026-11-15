@@ -30,5 +30,12 @@ public sealed class DeleteBranchRequest : WorkspaceCommandRequest
     /// </summary>
     [JsonPropertyName("expectedSha")]
     public string? ExpectedSha { get; set; }
+
+    /// <summary>
+    /// When true the delete runs with hooks off, so it sends the App no sync notification. For callers that
+    /// update the persisted branch rows themselves (Remove Feature, Feature rollback).
+    /// </summary>
+    [JsonPropertyName("skipHooks")]
+    public bool SkipHooks { get; set; }
 }
 

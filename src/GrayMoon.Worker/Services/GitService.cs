@@ -695,7 +695,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 {
                     var trackingRef = $"refs/remotes/origin/{name}";
                     if (await reader.RefExistsAsync(repoPath, trackingRef, ct))
-                        await runner.RunAsync("git", $"update-ref -d {trackingRef}", repoPath, ct);
+                        await runner.RunAsync("git", $"{hooksPrefix}update-ref -d {trackingRef}", repoPath, ct);
                     logger.LogInformation("Git remote branch already absent on origin for {RepoPath}. Branch={Branch}; pruned stale tracking ref.", repoPath, name);
                     return (true, null);
                 }
@@ -780,9 +780,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             return (false, "Cannot delete the current branch. Check out another branch first.");
         }
 
+        // The reference-transaction hook reports the branch lists to the App. A caller that updates them itself skips it.
+        var localHooksPrefix = GetHooksConfigPrefix(skipHooks);
+
         if (force)
         {
-            var (exitForce, stdoutForce, stderrForce) = await runner.RunAsync("git", $"branch -D {localName}", repoPath, ct);
+            var (exitForce, stdoutForce, stderrForce) = await runner.RunAsync("git", $"{localHooksPrefix}branch -D {localName}", repoPath, ct);
             if (exitForce != 0)
             {
                 logger.LogWarning("Git branch force delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, localName, exitForce);
@@ -814,7 +817,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 return (false, $"error: The branch '{localName}' is not fully merged.");
             }
 
-            var (exitMerged, stdoutMerged, stderrMerged) = await runner.RunAsync("git", $"branch -D {localName}", repoPath, ct);
+            var (exitMerged, stdoutMerged, stderrMerged) = await runner.RunAsync("git", $"{localHooksPrefix}branch -D {localName}", repoPath, ct);
             if (exitMerged != 0)
             {
                 logger.LogWarning("Git branch delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, localName, exitMerged);
@@ -824,7 +827,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             return (true, null);
         }
 
-        var (exitCodeLocal, stdoutLocal, stderrLocal) = await runner.RunAsync("git", $"branch -d {localName}", repoPath, ct);
+        var (exitCodeLocal, stdoutLocal, stderrLocal) = await runner.RunAsync("git", $"{localHooksPrefix}branch -d {localName}", repoPath, ct);
         if (exitCodeLocal != 0)
         {
             logger.LogWarning("Git branch delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, localName, exitCodeLocal);

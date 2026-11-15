@@ -102,6 +102,8 @@ public sealed class WorkspaceCommitSyncHandler(
                 pullOnly
             };
 
+            // Read before the command is sent: a hook snapshot the App received earlier is older than this pull's result.
+            var startedAt = RepositoryStateFreshness.Now();
             var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
 
             if (!response.Success)
@@ -115,7 +117,7 @@ public sealed class WorkspaceCommitSyncHandler(
             }
 
             var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
-            await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+            await ApplyResultToDbAsync(stateWriter, contextId, workspaceId, repositoryId, result, startedAt, cancellationToken);
             if (pullOnly)
                 await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
@@ -230,6 +232,8 @@ public sealed class WorkspaceCommitSyncHandler(
                     pullOnly = pullOnlyIds.Contains(repositoryId)
                 };
 
+                // Read before the command is sent: a hook snapshot the App received earlier is older than this pull's result.
+                var startedAt = RepositoryStateFreshness.Now();
                 var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
 
                 if (!response.Success)
@@ -243,7 +247,7 @@ public sealed class WorkspaceCommitSyncHandler(
                 }
 
                 var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
-                await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+                await ApplyResultToDbAsync(scopedStateWriter, contextId, workspaceId, repositoryId, result, startedAt, cancellationToken);
                 if (pullOnlyIds.Contains(repositoryId))
                     await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
@@ -299,12 +303,12 @@ public sealed class WorkspaceCommitSyncHandler(
     }
 
     private static async Task ApplyResultToDbAsync(
-        AppDbContext db,
         WorkspaceRepositoryStateWriter stateWriter,
         WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
         CommitSyncResponse? result,
+        long startedAt,
         CancellationToken ct)
     {
         if (result == null)
@@ -316,7 +320,8 @@ public sealed class WorkspaceCommitSyncHandler(
         var statusWrite = result.Success && !result.MergeConflict ? SyncStatusWrite.InSync : SyncStatusWrite.Error;
         await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
         {
-            SyncStatus = statusWrite
+            SyncStatus = statusWrite,
+            OperationStartedAt = startedAt,
         }, ct);
     }
 

@@ -145,6 +145,8 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<WorkspacePullRequestService>();
         services.AddScoped<RepositoryBranchWriter>();
         services.AddScoped<WorkspaceRepositoryStateWriter>();
+        // Process-wide, not per circuit: the sync queue and every operation scope must see the same record.
+        services.AddSingleton<RepositoryStateFreshness>();
         services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceImportGuard>();
