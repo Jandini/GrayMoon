@@ -1101,8 +1101,21 @@ rerun
 rerun failed
 abort/cancel
 bulk run/re-run
+run/re-run one dependency level or the Workspace repository
 open logs
 ```
+
+In a .NET Dependency Workspace the grid is grouped like the Repositories grid: the Workspace repository first (when it has a connector), then `Level N` from the highest level down, then `No dependencies`. A Feature uses its own levels. Inside a group the order is unchanged (errors, failed, aborted, running, success, then name), so a running workflow moves to the top of its own level and never leaves it; each header appears once. A group whose rows are all hidden by the status chips or the search is not rendered, header included. A Basic Workspace keeps the flat list with no headers.
+
+Each group header shows, right after its title, how many workflows of the group failed or are running (there is no dependency-graph link here), and ends with "N repositories" (all repositories of the group, hidden or not). Hovering it opens a menu:
+
+- **Run** starts every workflow of the group that supports `workflow_dispatch` and is not already running, on the repository's current branch. It is disabled when there is none.
+- **Re-run** is listed only when the group has failed workflows, and re-runs each of them.
+- **Abort** cancels every running workflow of the group on GitHub. It is disabled when nothing in the group is running. Read only and tag-pinned repositories are included, as with Abort on a single row; the overlay then waits until the runs stop showing as running.
+
+All three ignore the status chips and the search and respect the AI toggle. Run and Re-run leave out read only and tag-pinned repositories (`RepositoryOperationPolicy`, bulk scope). All workflows of the group start at once; GrayMoon does not wait for one level before the next. The menu is disabled during a refresh or another bulk action. "Re-run Failed Jobs Only" and "Run again" stay on the page header button and act on the whole grid.
+
+Every bulk action (page header or group menu) has two phases under the loading overlay. First the workflows are started ("Starting 3 of 8"). Then the overlay waits for GitHub to list the runs ("Waiting for actions to start...", or "Waiting for actions to stop..." after Abort, then "Waiting for 3 of 8" once 3 of the 8 are listed), refreshing only the started repositories, for up to about 30 seconds, so the grid shows them running and the live monitoring is on when the overlay closes. Abort ends only this wait: nothing that was started is cancelled, and GrayMoon keeps looking for the missing runs out of sight. The action ends with one toast, for example "Started 7 of 8 workflows in Level 2. Failed: Api.", with "GitHub does not show N of them yet." added when the wait ran out. A workflow that could not be started shows `error` with GitHub's message on its repository row; the others still start.
 
 Last Run shows when that workflow last updated ("2 min ago", or the date and time after a week), and the wall-clock length of the run in a smaller gray font aligned to the right of the cell (for example "4m 12s"). When the column is too narrow for both, the relative time ellipsizes and the length stays visible. GitHub's run list has no duration field. The length is `updated_at` minus `run_started_at` once the run has finished, and now minus `run_started_at` while it is still running. A run that has not started yet shows only the relative time. Billable runner time is not requested.
 

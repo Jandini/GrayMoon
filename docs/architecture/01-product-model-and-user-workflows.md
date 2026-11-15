@@ -755,10 +755,13 @@ rerun
 rerun failed
 abort/cancel where supported
 bulk operations
+grouping by dependency level with run/re-run per level
 view logs
 adaptive polling
 targeted refresh after repository synchronization
 ```
+
+In a .NET Dependency Workspace the grid is grouped under the same headers as the Repositories grid (Workspace repository, levels from the highest down, No dependencies), and each header menu runs or re-runs the workflows of that group only. See `05-user-capability-reference.md`.
 
 Workspace setting `ExcludeAiWorkflows` controls whether AI-driven workflows are included in the operational grid/status accounting.
 

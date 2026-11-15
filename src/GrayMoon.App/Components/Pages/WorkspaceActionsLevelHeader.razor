@@ -1,0 +1,95 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@* Group header of the Actions grid: same row and "N repositories" menu as WorkspaceRepositoriesLevelHeader
+   (styles in wwwroot/css/dependency-level-header.css), without the dependency-graph link; the failed and
+   running counts follow the title, and the menu has Run, Re-run and Abort for the workflows of the group. *@
+<tr class="dependency-level-header">
+    <td colspan="6" class="dependency-level-header-cell">
+        <div class="dependency-level-header-start">
+            <span class="dependency-level-title @(IsLevelHeader && LevelKey == null ? "dependency-level-no-projects" : "") @(IsLevelHeader ? "" : "text-nowrap")">@Title</span>
+            @if (FailedCount > 0)
+            {
+                <span class="badge action-badge action-badge-failed" title="@($"{FailedCount} failed {(FailedCount == 1 ? "workflow" : "workflows")} in {Title}")">@FailedCount failed</span>
+            }
+            @if (RunningCount > 0)
+            {
+                <span class="badge action-badge action-badge-running" title="@($"{RunningCount} running {(RunningCount == 1 ? "workflow" : "workflows")} in {Title}")">@RunningCount running</span>
+            }
+        </div>
+        <div class="dependency-level-header-end">
+            <span class="dependency-level-count gm-menu-trigger"
+                  tabindex="0"
+                  aria-haspopup="true"
+                  aria-label="Level actions">
+                <span class="dependency-level-count-num">@RepositoryCount</span> @(RepositoryCount == 1 ? "repository" : "repositories")<i class="bi bi-chevron-down dependency-level-count-caret" aria-hidden="true"></i>
+                <div class="gm-menu-panel level-actions-menu">
+                    <div class="gm-menu-title">@Title</div>
+                    <div class="gm-menu-items @(Disabled || RunCount == 0 ? "gm-menu-items--disabled" : "")">
+                        <div class="gm-menu-item" role="button" tabindex="0" title="@RunTitle" @onclick="HandleRun" @onclick:stopPropagation>
+                            <i class="bi bi-play-fill" aria-hidden="true"></i><span>Run</span>
+                        </div>
+                    </div>
+                    @if (RerunCount > 0)
+                    {
+                        <div class="gm-menu-items @(Disabled ? "gm-menu-items--disabled" : "")">
+                            <div class="gm-menu-item gm-menu-item--highlight" role="button" tabindex="0" title="@RerunTitle" @onclick="HandleRerun" @onclick:stopPropagation>
+                                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Re-run</span>
+                            </div>
+                        </div>
+                    }
+                    <div class="gm-menu-items @(Disabled || AbortCount == 0 ? "gm-menu-items--disabled" : "")">
+                        <div class="gm-menu-item" role="button" tabindex="0" title="@AbortTitle" @onclick="HandleAbort" @onclick:stopPropagation>
+                            <i class="bi bi-x-circle" aria-hidden="true"></i><span>Abort</span>
+                        </div>
+                    </div>
+                </div>
+            </span>
+        </div>
+    </td>
+</tr>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public int? LevelKey { get; set; }
+    /// <summary>False for the Workspace header: no "No dependencies" styling.</summary>
+    [Parameter] public bool IsLevelHeader { get; set; } = true;
+    /// <summary>Repositories in the group, whether or not the status chips and search show them.</summary>
+    [Parameter] public int RepositoryCount { get; set; }
+    [Parameter] public int FailedCount { get; set; }
+    [Parameter] public int RunningCount { get; set; }
+    /// <summary>Workflows Run would start. Run is disabled at zero.</summary>
+    [Parameter] public int RunCount { get; set; }
+    /// <summary>Failed workflows Re-run would start again. Re-run is shown only above zero.</summary>
+    [Parameter] public int RerunCount { get; set; }
+    /// <summary>Running workflows Abort would cancel. Abort is disabled at zero.</summary>
+    [Parameter] public int AbortCount { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback OnRun { get; set; }
+    [Parameter] public EventCallback OnRerun { get; set; }
+    [Parameter] public EventCallback OnAbort { get; set; }
+
+    private string RunTitle => RunCount == 0
+        ? "No workflow to run"
+        : $"Run {RunCount} {(RunCount == 1 ? "workflow" : "workflows")}";
+
+    private string RerunTitle => $"Re-run {RerunCount} failed {(RerunCount == 1 ? "workflow" : "workflows")}";
+
+    private async Task HandleRun()
+    {
+        if (!Disabled && RunCount > 0) await OnRun.InvokeAsync();
+    }
+
+    private string AbortTitle => AbortCount == 0
+        ? "No running workflow"
+        : $"Abort {AbortCount} running {(AbortCount == 1 ? "workflow" : "workflows")}";
+
+    private async Task HandleAbort()
+    {
+        if (!Disabled && AbortCount > 0) await OnAbort.InvokeAsync();
+    }
+
+    private async Task HandleRerun()
+    {
+        if (!Disabled && RerunCount > 0) await OnRerun.InvokeAsync();
+    }
+}

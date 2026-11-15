@@ -25,6 +25,12 @@ public sealed partial class WorkspaceActions
         public required WorkspaceRepositoryLink Link { get; set; }
         public required GitHubRepositoryEntry Repo { get; init; }
 
+        /// <summary>Dependency level in the selected context (see <see cref="ResolveDependencyLevel"/>); null is "No dependencies".</summary>
+        public int? DependencyLevel { get; set; }
+
+        /// <summary>True for the Workspace repository, which has its own group above the levels.</summary>
+        public bool IsWorkspaceRepository { get; set; }
+
         public List<WorkflowActionLine> WorkflowLines { get; set; } = [];
 
         public bool IsVerified { get; set; }
@@ -48,6 +54,12 @@ public sealed partial class WorkspaceActions
 
     /// <summary>Verb shown in <see cref="RerunAllOverlayMessage"/> for whichever bulk operation is in flight ("Re-running" vs "Starting").</summary>
     private string _bulkOperationVerb = "Re-running";
+
+    /// <summary>True in the second phase of a bulk action: the workflows are started and the overlay waits for GitHub to list the runs.</summary>
+    private bool _bulkWaiting;
+
+    /// <summary>Cancelled by the overlay's Abort to end the wait for GitHub; null outside that wait.</summary>
+    private CancellationTokenSource? _bulkWaitCts;
     private CancellationTokenSource _cts = new();
     private HubConnection? _hubConnection;
     private CancellationTokenSource? _syncDebounceCts;
@@ -144,7 +156,9 @@ public sealed partial class WorkspaceActions
         string.IsNullOrWhiteSpace(row.ErrorMessage) && IsAiWorkflow(line.Action)));
 
     internal string RerunAllOverlayMessage =>
-        _rerunCompleted == 0
+        _bulkWaiting
+            ? (_rerunCompleted == 0 ? (_bulkOperationVerb == "Aborting" ? "Waiting for actions to stop..." : "Waiting for actions to start...") : $"Waiting for {_rerunCompleted} of {_rerunTotal}")
+            : _rerunCompleted == 0
             ? $"{_bulkOperationVerb} actions..."
             : $"{_bulkOperationVerb} {_rerunCompleted} of {_rerunTotal}";
 

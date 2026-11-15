@@ -29,23 +29,26 @@ public sealed partial class WorkspaceActions
                 return;
             }
 
+            _groupByDependencyLevel = (await CapabilitiesResolver.GetAsync(WorkspaceId)).UsesDependencyGraph;
+
             var persistedActions = await _ciProvider.GetPersistedStatusesAsync(WorkspaceId, FeatureContextIdForCi);
 
-            // For a Feature context, the checked-out branch lives on WorkspaceRepositoryContextState, not on
-            // the special Workspace's link - overlay it per repository so Actions polls/displays the Feature's
-            // own branch instead of silently showing the Workspace's (§18/§2.2).
-            var branchByRepositoryId = _isFeatureContext
+            // For a Feature context, the checked-out branch and the dependency level live on
+            // WorkspaceRepositoryContextState, not on the special Workspace's link - overlay them per repository so
+            // Actions polls/displays the Feature's own branch and level instead of silently showing the Workspace's (§18/§2.2).
+            var contextStateByRepositoryId = _isFeatureContext
                 ? (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
-                    .ToDictionary(dto => dto.RepositoryId, dto => dto.BranchName)
-                : new Dictionary<int, string?>();
+                    .ToDictionary(dto => dto.RepositoryId)
+                : [];
 
             rows = workspace.Repositories
                 .Where(link => link.Repository != null && link.Repository.Connector != null)
                 .OrderBy(link => link.Repository!.RepositoryName)
                 .Select(link =>
                 {
+                    var contextState = contextStateByRepositoryId.GetValueOrDefault(link.RepositoryId);
                     var effectiveLink = _isFeatureContext
-                        ? link.WithBranchOverride(branchByRepositoryId.GetValueOrDefault(link.RepositoryId))
+                        ? link.WithBranchOverride(contextState?.BranchName)
                         : link;
 
                     var hasPersisted = persistedActions.TryGetValue(effectiveLink.RepositoryId, out var persisted);
@@ -75,6 +78,8 @@ public sealed partial class WorkspaceActions
                                 Archived = link.Repository.Archived,
                             CloneUrl = link.Repository.CloneUrl
                         },
+                        DependencyLevel = ResolveDependencyLevel(link, _isFeatureContext, contextState?.DependencyLevel),
+                        IsWorkspaceRepository = link.Role == WorkspaceRepositoryRole.Workspace,
                         WorkflowLines = workflowLines,
                         IsVerified = branchMatches && hasPersisted
                     };
@@ -157,25 +162,30 @@ public sealed partial class WorkspaceActions
 
         workspace = freshWorkspace;
 
-        IReadOnlyDictionary<int, string?> branchByRepositoryId = new Dictionary<int, string?>();
+        Dictionary<int, GrayMoon.App.Services.Queries.WorkspaceRepositoryLinkListItemDto> contextStateByRepositoryId = [];
         if (_isFeatureContext)
         {
             var linkListQuery = scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Queries.IWorkspaceRepositoryLinkListQueryService>();
-            branchByRepositoryId = (await linkListQuery.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
-                .ToDictionary(dto => dto.RepositoryId, dto => dto.BranchName);
+            contextStateByRepositoryId = (await linkListQuery.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
+                .ToDictionary(dto => dto.RepositoryId);
         }
 
         var freshLinks = freshWorkspace.Repositories
             .Where(l => l.Repository != null && l.Repository.Connector != null)
-            .ToDictionary(l => l.RepositoryId, l => _isFeatureContext ? l.WithBranchOverride(branchByRepositoryId.GetValueOrDefault(l.RepositoryId)) : l);
+            .ToDictionary(l => l.RepositoryId);
 
         foreach (var row in rows)
         {
-            if (!freshLinks.TryGetValue(row.Repo.RepositoryId, out var freshLink))
+            if (!freshLinks.TryGetValue(row.Repo.RepositoryId, out var sharedLink))
                 continue;
+
+            var contextState = contextStateByRepositoryId.GetValueOrDefault(row.Repo.RepositoryId);
+            var freshLink = _isFeatureContext ? sharedLink.WithBranchOverride(contextState?.BranchName) : sharedLink;
 
             var branchChanged = !string.Equals(row.Link.BranchName, freshLink.BranchName, StringComparison.OrdinalIgnoreCase);
             row.Link = freshLink;
+            row.DependencyLevel = ResolveDependencyLevel(sharedLink, _isFeatureContext, contextState?.DependencyLevel);
+            row.IsWorkspaceRepository = sharedLink.Role == WorkspaceRepositoryRole.Workspace;
 
             if (branchChanged)
             {
