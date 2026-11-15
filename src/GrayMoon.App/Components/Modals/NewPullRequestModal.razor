@@ -178,7 +178,7 @@
                                 </button>
                             </div>
                             <div id="new-pr-branch"
-                                 class="new-pr-branch-panel new-pr-branch-panel--scroll @(_openTargetMenuRepoId.HasValue ? "new-pr-branch-panel--menu-open" : null)"
+                                 class="new-pr-branch-panel new-pr-branch-panel--scroll"
                                  role="group"
                                  aria-label="Pull request branches">
                                 @foreach (var target in Targets)
@@ -222,18 +222,32 @@
                                                 <span class="new-pr-branch-chevron" aria-hidden="true"></span>
                                                 @if (menuOpen)
                                                 {
-                                                    <div class="new-pr-branch-menu-backdrop" @onclick="CloseTargetMenu"></div>
                                                     <ul class="new-pr-branch-menu"
+                                                        popover="manual"
                                                         role="listbox"
                                                         aria-labelledby="@($"new-pr-target-{target.RepositoryId}")">
                                                         @foreach (var branch in state.Candidates)
                                                         {
                                                             var selected = string.Equals(branch, state.SelectedBase, StringComparison.Ordinal);
-                                                            <li role="option"
-                                                                aria-selected="@selected"
-                                                                class="new-pr-branch-menu-item @(selected ? "new-pr-branch-menu-item--selected" : null)"
-                                                                @onclick="() => SelectTargetBranch(target.RepositoryId, branch)">
-                                                                <span class="text-truncate" title="@branch">@branch</span>
+                                                            <li class="new-pr-branch-menu-item @(selected ? "new-pr-branch-menu-item--selected" : null)">
+                                                                <button type="button"
+                                                                        role="option"
+                                                                        aria-selected="@selected"
+                                                                        class="new-pr-branch-menu-pick"
+                                                                        title="@branch"
+                                                                        disabled="@IsBusy"
+                                                                        @onclick="() => SelectTargetBranch(target.RepositoryId, branch)">
+                                                                    <span class="text-truncate">@branch</span>
+                                                                </button>
+                                                                <button type="button"
+                                                                        class="new-pr-branch-menu-apply"
+                                                                        title="@($"Use {branch} as the target for every repository that has it")"
+                                                                        aria-label="@($"Apply {branch} to every repository that has it")"
+                                                                        disabled="@IsBusy"
+                                                                        @onclick="() => ApplyTargetBranchToAll(branch)"
+                                                                        @onclick:stopPropagation="true">
+                                                                    Apply all
+                                                                </button>
                                                             </li>
                                                         }
                                                     </ul>
@@ -458,6 +472,19 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (IsVisible && _openTargetMenuRepoId is not null)
+        {
+            try
+            {
+                _dotNetRef ??= DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("newPullRequestModal.placeOpenTargetMenu", _dotNetRef);
+            }
+            catch
+            {
+                // The circuit can disconnect while the dialog is open.
+            }
+        }
+
         if (IsVisible && _focusTitleOnNextRender)
         {
             _focusTitleOnNextRender = false;
@@ -534,9 +561,43 @@
 
     private void CloseTargetMenu() => _openTargetMenuRepoId = null;
 
+    /// <summary>The open row scrolled out of the list, so the menu is no longer next to it.</summary>
+    [JSInvokable]
+    public void CloseOpenTargetMenu()
+    {
+        if (_openTargetMenuRepoId is null)
+            return;
+        _openTargetMenuRepoId = null;
+        StateHasChanged();
+    }
+
     private void SelectTargetBranch(int repositoryId, string branch)
     {
         OnTargetBaseChanged(repositoryId, branch);
+        _openTargetMenuRepoId = null;
+    }
+
+    /// <summary>
+    /// Sets <paramref name="branch"/> on every repository that has it and is not using it as the head.
+    /// Repositories without that branch keep their current target.
+    /// </summary>
+    private void ApplyTargetBranchToAll(string branch)
+    {
+        if (IsBusy || string.IsNullOrWhiteSpace(branch))
+            return;
+
+        foreach (var target in Targets)
+        {
+            if (!_branchByRepoId.TryGetValue(target.RepositoryId, out var state) || state.IsLoading)
+                continue;
+
+            var match = NewPullRequestTargetBranch.BaseToApply(branch, target.HeadBranch, state.Candidates);
+            if (match is null || string.Equals(state.SelectedBase, match, StringComparison.Ordinal))
+                continue;
+
+            _branchByRepoId[target.RepositoryId] = state with { SelectedBase = match };
+        }
+
         _openTargetMenuRepoId = null;
     }
 

@@ -88,6 +88,34 @@ public sealed class NewPullRequestBranchLoadingTests
         Assert.Equal("main", r.SelectedBase);
     }
 
+    [Fact]
+    public void BaseToApply_uses_the_repositorys_own_spelling()
+    {
+        var applied = NewPullRequestTargetBranch.BaseToApply("Main", "feature/foo", ["main", "develop"]);
+
+        Assert.Equal("main", applied);
+    }
+
+    [Fact]
+    public void BaseToApply_skips_the_head_branch()
+    {
+        Assert.Null(NewPullRequestTargetBranch.BaseToApply("picture-video", "picture-video", ["main", "picture-video"]));
+    }
+
+    [Fact]
+    public void BaseToApply_skips_a_branch_the_repository_does_not_have()
+    {
+        Assert.Null(NewPullRequestTargetBranch.BaseToApply("exchange-backup", "picture-video", ["main", "develop"]));
+    }
+
+    [Fact]
+    public void BaseToApply_skips_blank_or_empty_candidates()
+    {
+        Assert.Null(NewPullRequestTargetBranch.BaseToApply("  ", "feature/foo", ["main"]));
+        Assert.Null(NewPullRequestTargetBranch.BaseToApply("main", "feature/foo", []));
+        Assert.Null(NewPullRequestTargetBranch.BaseToApply("main", "feature/foo", null));
+    }
+
     // ---- Bulk persisted read ----------------------------------------------------------------------
 
     [Fact]

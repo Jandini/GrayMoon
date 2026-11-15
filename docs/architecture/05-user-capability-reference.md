@@ -1040,7 +1040,7 @@ Feature
 
 ### Dialog
 
-`NewPullRequestModal` uses one layout for one or many repositories: tabs **Details** (title, description, **Draft pull request**), **Branch** (one row per repository: head branch and target picker, plus a **Refresh** link) and **Review** (optional reviewers with a filter), with **Create** and **Push & Create**. The AI provider selector sits at the right of the tab bar (section 34) and writes one title and one Markdown description shared by every PR in the dialog.
+`NewPullRequestModal` uses one layout for one or many repositories: tabs **Details** (title, description, **Draft pull request**), **Branch** (one row per repository: head branch and target picker, plus a **Refresh** link) and **Review** (optional reviewers with a filter), with **Create** and **Push & Create**. Each row of a target menu has **Apply all**, which sets that branch on every repository whose candidates include it and whose head is not that branch; the others keep their target. The open menu is a top-layer popover placed on the target cell (`newPullRequestModal.placeOpenTargetMenu`), so the repository list keeps its own scroll and the dialog does not grow to fit the menu. The AI provider selector sits at the right of the tab bar (section 34) and writes one title and one Markdown description shared by every PR in the dialog.
 
 ### Loading behavior
 
@@ -1053,6 +1053,8 @@ default target   NewPullRequestTargetBranch.Resolve: the Feature parent branch i
 background       repositories with no persisted remote branches are refreshed in the background
 Refresh link     fetches every target's branches (RefreshBranches, one WorkspaceSynced per repository)
                  and keeps selections that are still valid
+Apply all        NewPullRequestTargetBranch.BaseToApply: the clicked branch, in that repository's own
+                 spelling, when it is a candidate and not the head; otherwise the row is left unchanged
 reviewers        loaded only when the Review tab is first opened; PullRequestService.GetReviewerCandidatesAsync
                  asks each distinct GitHub repository once and caches for 5 minutes (failures not cached)
 ```

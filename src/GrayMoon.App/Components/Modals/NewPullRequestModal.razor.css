@@ -211,11 +211,6 @@
     background-color: #8a8a8a;
 }
 
-/* Allow target menus to paint outside the scroll clip while open. */
-.new-pr-branch-panel--scroll.new-pr-branch-panel--menu-open {
-    overflow: visible;
-}
-
 .new-pr-branch-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -380,42 +375,96 @@
     background-color: color-mix(in srgb, var(--new-pr-branch-target-bg) 80%, #000 20%);
 }
 
-.new-pr-branch-menu-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1060;
-    background: transparent;
-}
-
+/* Top-layer popover. placeOpenTargetMenu sets top, left and width from the open target
+   cell, so the repository list keeps its own scroll and the dialog does not grow. */
 .new-pr-branch-menu {
-    position: absolute;
-    top: calc(100% + 2px);
-    left: -1px;
-    right: -1px;
+    position: fixed;
+    inset: auto;
     z-index: 1061;
     margin: 0;
     padding: 0.25rem 0;
     list-style: none;
+    height: auto;
     max-height: 14rem;
     overflow-y: auto;
     border: 1px solid color-mix(in srgb, var(--border-color, #3e3e42) 70%, #000 30%);
     border-radius: 0.25rem;
     background-color: var(--bg-primary, #1e1e1e);
+    color: var(--text-primary);
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.45);
     scrollbar-color: rgba(148, 152, 158, 0.45) transparent;
+}
+
+.new-pr-branch-menu:not(.new-pr-branch-menu--placed) {
+    visibility: hidden;
 }
 
 .new-pr-branch-menu-item {
     display: flex;
     align-items: center;
     min-height: 2.35rem;
-    padding: 0.4rem 0.75rem;
+    padding: 0;
     margin: 0;
-    cursor: pointer;
     color: var(--text-primary);
     font-size: 0.9375rem;
     font-weight: 600;
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.new-pr-branch-menu-pick {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 2.35rem;
+    margin: 0;
+    padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.new-pr-branch-menu-pick > span {
+    display: block;
+    min-width: 0;
+}
+
+.new-pr-branch-menu-pick:focus-visible,
+.new-pr-branch-menu-apply:focus-visible {
+    outline: 1px solid var(--border-light);
+    outline-offset: -1px;
+}
+
+.new-pr-branch-menu-apply {
+    flex: 0 0 auto;
+    margin: 0.2rem 0.45rem 0.2rem 0;
+    padding: 0.12rem 0.45rem;
+    border: 1px solid var(--border-light);
+    border-radius: 0.25rem;
+    background-color: transparent;
+    color: var(--text-secondary);
+    font-family: var(--bs-body-font-family, system-ui, sans-serif);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.new-pr-branch-menu-apply:hover:not(:disabled),
+.new-pr-branch-menu-apply:focus-visible {
+    color: #f0f0f0;
+    border-color: var(--border-light);
+}
+
+.new-pr-branch-menu-apply:disabled,
+.new-pr-branch-menu-pick:disabled {
+    opacity: 0.65;
+    cursor: default;
 }
 
 .new-pr-branch-menu-item:hover {
