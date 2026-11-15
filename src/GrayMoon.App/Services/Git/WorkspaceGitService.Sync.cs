@@ -148,7 +148,8 @@ public sealed partial class WorkspaceGitService
             await ImportVersionFilesFromDefinitionAsync(workspaceId, cancellationToken);
 
         var persistStart = Stopwatch.GetTimestamp();
-        await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken);
+        // The fan-out start is before every SyncRepository command, so it is a safe "began at" for all of them.
+        await PersistVersionsAsync(workspaceId, contextId, results, persistDependencyLevel: !skipDependencyLevelPersistence, cancellationToken, operationStartedAt: fanOutStart);
         _logger.LogDebug(
             "Sync persist settled WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryCount={RepositoryCount} Stage={Stage} ElapsedMs={ElapsedMs}",
             workspaceId, contextId.Value, totalCount, "persist",
@@ -299,6 +300,7 @@ public sealed partial class WorkspaceGitService
         var divergenceByRepoId = await GetDivergenceBaseBranchesByRepositoryIdAsync(contextId, cancellationToken);
         divergenceByRepoId.TryGetValue(repo.RepositoryId, out var divergenceBaseBranch);
         var capabilities = await ResolveRepositoryOperationCapabilitiesAsync(workspaceId, cancellationToken);
+        var startedAt = RepositoryStateFreshness.Now();
         var response = await _workerBridge.SendCommandAsync("RefreshRepositoryVersion", new
         {
             workspaceName = workspaceFolderName,
@@ -318,7 +320,7 @@ public sealed partial class WorkspaceGitService
 
         var info = ParseRefreshRepositoryVersionResponse(response);
 
-        await PersistVersionsAsync(workspaceId, contextId, [(repo.RepositoryId, info)], true, cancellationToken);
+        await PersistVersionsAsync(workspaceId, contextId, [(repo.RepositoryId, info)], true, cancellationToken, operationStartedAt: startedAt);
 
         var allLinks = await _dbContext.WorkspaceRepositories
             .Where(wr => wr.WorkspaceId == workspaceId)
@@ -427,7 +429,8 @@ public sealed partial class WorkspaceGitService
         WorkspaceFeatureContextId contextId,
         IEnumerable<(int RepoId, RepoGitVersionInfo info)> results,
         bool persistDependencyLevel = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long? operationStartedAt = null)
     {
         var resultList = results.ToList();
         if (resultList.Count == 0) return;
@@ -443,6 +446,7 @@ public sealed partial class WorkspaceGitService
             {
                 SyncStatus = SyncStatusWrite.Derive,
                 ReconcilePullRequest = true,
+                OperationStartedAt = operationStartedAt,
             },
             cancellationToken);
 

@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Repositories.Policy;
+using GrayMoon.Application.Workspaces;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -18,6 +19,11 @@ namespace GrayMoon.App.Services.Orchestration;
 /// Calls the worker directly so CommandOutput streams to TerminalSinkContext when invoked inside a background job.
 /// Stateless; all UI state is provided by the caller via callbacks.
 /// </summary>
+/// <remarks>
+/// A pull runs with hooks off, so no merge hook reports what it brought in. The Worker returns the projects with
+/// the pull result, and each pull job finishes with one recompute of the context's dependency and version-file
+/// state (<see cref="CompletePullAsync"/>), whether it pulled one repository or many.
+/// </remarks>
 public sealed class WorkspaceCommitSyncHandler(
     IWorkerBridge workerBridge,
     WorkspaceRepository workspaceRepository,
@@ -30,6 +36,7 @@ public sealed class WorkspaceCommitSyncHandler(
     IWorkspaceContextPathResolver pathResolver,
     IWorkspaceRepositoryOperationPolicy operationPolicy,
     ReferenceRevisionRecorder revisionRecorder,
+    IWorkspaceCapabilitiesResolver capabilitiesResolver,
     ILogger<WorkspaceCommitSyncHandler> logger)
 {
     public async Task CommitSyncAsync(
@@ -89,6 +96,7 @@ public sealed class WorkspaceCommitSyncHandler(
             // A read-only repository only takes incoming commits by fast-forward and is never pushed.
             var subjects = await operationPolicy.GetSubjectsAsync(workspaceId, contextId, cancellationToken: cancellationToken);
             var pullOnly = subjects.TryGetValue(repositoryId, out var subject) && subject is { IsReference: true, IsWorkspaceRepository: false };
+            var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             var args = new
             {
                 workspaceName = workspaceFolderName,
@@ -99,9 +107,12 @@ public sealed class WorkspaceCommitSyncHandler(
                 workspaceRoot,
                 workspaceRepositoryName,
                 divergenceBaseBranch,
-                pullOnly
+                pullOnly,
+                capabilities
             };
 
+            // Read before the command is sent: a hook snapshot the App received earlier is older than this pull's result.
+            var startedAt = RepositoryStateFreshness.Now();
             var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
 
             if (!response.Success)
@@ -115,9 +126,11 @@ public sealed class WorkspaceCommitSyncHandler(
             }
 
             var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
-            await ApplyResultToDbAsync(dbContext, stateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+            await ApplyResultToDbAsync(stateWriter, contextId, workspaceId, repositoryId, result, startedAt, deferProjects: false, cancellationToken);
             if (pullOnly)
                 await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
+            if (result != null)
+                await CompletePullAsync(workspaceId, contextId, [], setPageError, cancellationToken);
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
             if (result != null && !string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -195,6 +208,12 @@ public sealed class WorkspaceCommitSyncHandler(
             .Where(pair => pair.Value is { IsReference: true, IsWorkspaceRepository: false })
             .Select(pair => pair.Key)
             .ToHashSet();
+        var capabilities = (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
+
+        // The repositories are pulled at the same time. Each writes its own row as it finishes; their projects are
+        // held back and written as one projection after all of them, followed by one recompute for the whole pull.
+        var pulled = new System.Collections.Concurrent.ConcurrentBag<(int RepositoryId, RepositoryStateSnapshot Snapshot)>();
+        var anyResult = 0;
 
         var tasks = repositoryIds.Select(async repositoryId =>
         {
@@ -204,7 +223,6 @@ public sealed class WorkspaceCommitSyncHandler(
                 await using var scope = serviceScopeFactory.CreateAsyncScope();
                 var scopedRepoRepository = scope.ServiceProvider.GetRequiredService<GitHubRepositoryRepository>();
                 var scopedConnectorHealth = scope.ServiceProvider.GetRequiredService<ConnectorHealthService>();
-                var scopedDbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var scopedStateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
 
                 var repo = await scopedRepoRepository.GetByIdAsync(repositoryId, cancellationToken);
@@ -227,9 +245,12 @@ public sealed class WorkspaceCommitSyncHandler(
                     workspaceRoot,
                     workspaceRepositoryName,
                     divergenceBaseBranch,
-                    pullOnly = pullOnlyIds.Contains(repositoryId)
+                    pullOnly = pullOnlyIds.Contains(repositoryId),
+                    capabilities
                 };
 
+                // Read before the command is sent: a hook snapshot the App received earlier is older than this pull's result.
+                var startedAt = RepositoryStateFreshness.Now();
                 var response = await workerBridge.SendCommandAsync("CommitSyncRepository", args, cancellationToken);
 
                 if (!response.Success)
@@ -243,7 +264,13 @@ public sealed class WorkspaceCommitSyncHandler(
                 }
 
                 var result = WorkerResponseJson.DeserializeWorkerResponse<CommitSyncResponse>(response.Data);
-                await ApplyResultToDbAsync(scopedDbContext, scopedStateWriter, contextId, workspaceId, repositoryId, result, cancellationToken);
+                await ApplyResultToDbAsync(scopedStateWriter, contextId, workspaceId, repositoryId, result, startedAt, deferProjects: true, cancellationToken);
+                if (result != null)
+                {
+                    Interlocked.Exchange(ref anyResult, 1);
+                    if (result.State is { ProjectsProbed: true } state)
+                        pulled.Add((repositoryId, state));
+                }
                 if (pullOnlyIds.Contains(repositoryId))
                     await RecordReferenceRevisionAsync(workspaceId, contextId, repositoryId, result, cancellationToken);
                 await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
@@ -276,7 +303,53 @@ public sealed class WorkspaceCommitSyncHandler(
             // Caller handles reload on cancel.
         }
 
+        if (anyResult == 1 && !cancellationToken.IsCancellationRequested)
+        {
+            await CompletePullAsync(workspaceId, contextId, pulled.ToList(), setPageError, cancellationToken);
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+        }
+
         return eligibility.Skipped;
+    }
+
+    /// <summary>
+    /// The end of a pull job: writes the projects that were held back (<paramref name="deferredProjects"/>, empty
+    /// when the state write already stored them), then recomputes the context's dependency and version-file state
+    /// once and tells the pages of that context to reload. Runs in a scope of its own, so it shares no DbContext
+    /// with the per-repository writes. A failure here does not undo the pull: it is logged and reported on the
+    /// page, and the next Sync recomputes the same state.
+    /// </summary>
+    private async Task CompletePullAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<(int RepositoryId, RepositoryStateSnapshot Snapshot)> deferredProjects,
+        Action<string?> setPageError,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+            if (deferredProjects.Count > 0)
+            {
+                await scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>()
+                    .ApplyProjectsAsync(contextId, workspaceId, deferredProjects, cancellationToken);
+            }
+
+            var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
+            // A hook sync of the same context may be recomputing right now: share the run instead of racing it.
+            var coalescer = scope.ServiceProvider.GetService<SyncRecomputeCoalescer>();
+            if (coalescer is null)
+                await recomputeScope.RecomputeAsync(workspaceId, contextId, cancellationToken);
+            else
+                await coalescer.RunAsync($"{workspaceId}:{contextId.Value}", () => recomputeScope.RecomputeAsync(workspaceId, contextId, cancellationToken));
+
+            await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Dependency refresh after pull failed for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
+            setPageError("The pull finished, but the dependency state could not be refreshed. Run Sync to refresh it.");
+        }
     }
 
     /// <summary>
@@ -299,12 +372,13 @@ public sealed class WorkspaceCommitSyncHandler(
     }
 
     private static async Task ApplyResultToDbAsync(
-        AppDbContext db,
         WorkspaceRepositoryStateWriter stateWriter,
         WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
         CommitSyncResponse? result,
+        long startedAt,
+        bool deferProjects,
         CancellationToken ct)
     {
         if (result == null)
@@ -316,7 +390,9 @@ public sealed class WorkspaceCommitSyncHandler(
         var statusWrite = result.Success && !result.MergeConflict ? SyncStatusWrite.InSync : SyncStatusWrite.Error;
         await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
         {
-            SyncStatus = statusWrite
+            SyncStatus = statusWrite,
+            OperationStartedAt = startedAt,
+            DeferProjects = deferProjects,
         }, ct);
     }
 

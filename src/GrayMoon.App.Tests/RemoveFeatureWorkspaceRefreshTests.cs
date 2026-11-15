@@ -424,6 +424,35 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
+    public async Task Remove_deletes_the_Feature_branches_with_hooks_off()
+    {
+        // The deletes run in the main checkouts. With hooks on, each one queued a sync notification carrying the main
+        // checkout's state, and that backlog later overwrote the result of a pull the user ran in the Workspace.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureWithTwoReposAsync(ctx);
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.RemoveFeatureAsync(
+            featureContextId,
+            new RemoveFeatureOptions
+            {
+                AllowDiscardUncommitted = true,
+                AllowForceDeleteLocalBranches = true,
+            });
+
+        Assert.True(result.Success, result.Error);
+        var deletes = ctx.WorkerBridge.Calls.Where(c => c.Command == "DeleteBranch").ToList();
+        Assert.NotEmpty(deletes);
+        Assert.All(deletes, delete =>
+            Assert.True(JsonSerializer.SerializeToElement(delete.Args).GetProperty("skipHooks").GetBoolean()));
+    }
+
+    [Fact]
     public async Task Remove_partial_worktree_failure_still_cleans_successful_repos_and_keeps_Feature()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();

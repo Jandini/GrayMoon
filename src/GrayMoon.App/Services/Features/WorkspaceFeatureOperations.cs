@@ -988,7 +988,10 @@ public sealed class WorkspaceFeatureOperations(
                                 branchName,
                                 isRemote = false,
                                 force = forceLocal,
-                                workspaceRoot
+                                workspaceRoot,
+                                // The branch row is removed below. A hook here would queue a sync of the main
+                                // checkout for every repository, for state this removal did not change.
+                                skipHooks = true
                             },
                             cancellationToken);
                         if (deleteLocal.Success)
@@ -1064,7 +1067,9 @@ public sealed class WorkspaceFeatureOperations(
                                             force = false,
                                             bearerToken,
                                             expectedSha,
-                                            workspaceRoot
+                                            workspaceRoot,
+                                            // Without this the pre-push hook sends a full snapshot of the main checkout.
+                                            skipHooks = true
                                         },
                                         cancellationToken);
                                     if (deleteRemote.Success)
@@ -2289,7 +2294,8 @@ public sealed class WorkspaceFeatureOperations(
                             branchName,
                             isRemote = false,
                             force = false,
-                            workspaceRoot
+                            workspaceRoot,
+                            skipHooks = true
                         },
                         cancellationToken);
                     if (!deleteLocal.Success)

@@ -19,7 +19,12 @@ public sealed class SyncCommandHandler(
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<SyncCommandHandler> logger)
 {
-    public async Task HandleAsync(RepositorySyncNotification n)
+    /// <param name="n">The notification the Worker sent.</param>
+    /// <param name="receivedAt">
+    /// <see cref="RepositoryStateFreshness.Now"/> read when the notification reached the App, before it waited in the
+    /// sync queue. Null means it is applied as it stands.
+    /// </param>
+    public async Task HandleAsync(RepositorySyncNotification n, long? receivedAt = null)
     {
         var totalSw = Stopwatch.StartNew();
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -75,6 +80,29 @@ public sealed class SyncCommandHandler(
 
         var stateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
         var snapshot = n.State ?? BuildSnapshotFromFlatNotification(n);
+
+        // The queue is serial and a burst of hooks can hold a snapshot for minutes. A pull or sync that began after
+        // the snapshot arrived has read the checkout since, so the groups it wrote are newer than the snapshot's.
+        if (receivedAt is { } received
+            && scope.ServiceProvider.GetService<RepositoryStateFreshness>() is { } freshness)
+        {
+            var current = freshness.WithoutSupersededGroups(contextId.Value, n.RepositoryId, snapshot, received);
+            if (current is null)
+            {
+                logger.LogInformation(
+                    "SyncCommand: dropped a snapshot that a later operation superseded: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}, branch={Branch}",
+                    n.WorkspaceId, contextId.Value.Value, n.RepositoryId, n.Version, n.Branch);
+                return;
+            }
+
+            if (!ReferenceEquals(current, snapshot))
+            {
+                logger.LogInformation(
+                    "SyncCommand: applying only the groups a later operation did not supersede: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}",
+                    n.WorkspaceId, contextId.Value.Value, n.RepositoryId);
+                snapshot = current;
+            }
+        }
 
         // A branch created or deleted outside GrayMoon reports the branch lists and nothing else. It is not a completed
         // sync: it must not derive sync status, look up pull requests or recompute dependencies for a checkout it never read.

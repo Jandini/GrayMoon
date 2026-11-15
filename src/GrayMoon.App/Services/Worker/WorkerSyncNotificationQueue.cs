@@ -16,8 +16,8 @@ public sealed class WorkerSyncNotificationQueue(
     private readonly Dictionary<int, int> _pendingByWorkspace = new();
     private readonly Dictionary<int, List<TaskCompletionSource>> _waitersByWorkspace = new();
 
-    private readonly Channel<RepositorySyncNotification> _channel =
-        Channel.CreateUnbounded<RepositorySyncNotification>(new UnboundedChannelOptions
+    private readonly Channel<(RepositorySyncNotification Notification, long ReceivedAt)> _channel =
+        Channel.CreateUnbounded<(RepositorySyncNotification Notification, long ReceivedAt)>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = false
@@ -28,7 +28,8 @@ public sealed class WorkerSyncNotificationQueue(
     {
         // Counted before the write so a barrier can never observe the notification as neither pending nor applied.
         MarkPending(notification.WorkspaceId);
-        if (_channel.Writer.TryWrite(notification))
+        // Stamped on arrival: the handler compares it with operations that began while the notification waited here.
+        if (_channel.Writer.TryWrite((notification, RepositoryStateFreshness.Now())))
             return true;
 
         MarkApplied(notification.WorkspaceId);
@@ -102,13 +103,13 @@ public sealed class WorkerSyncNotificationQueue(
         // Single worker: serializes processing so concurrent SyncCommands for the same workspace
         // don't race on DB writes. CheckAndPersistFileVersionStatusAsync already coalesces
         // concurrent callers per workspace, so burst hooks still result in only one worker round-trip.
-        await foreach (var notification in _channel.Reader.ReadAllAsync(stoppingToken))
+        await foreach (var (notification, receivedAt) in _channel.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();
-                await handler.HandleAsync(notification);
+                await handler.HandleAsync(notification, receivedAt);
             }
             catch (OperationCanceledException)
             {

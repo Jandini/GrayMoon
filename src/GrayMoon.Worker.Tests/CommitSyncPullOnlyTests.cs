@@ -205,9 +205,63 @@ public sealed class CommitSyncPullOnlyTests : IDisposable
         Assert.Equal(1, response.IncomingCommits);
     }
 
-    private Task<CommitSyncRepositoryResponse> PullAsync(bool pullOnly)
+    [Fact]
+    public async Task A_pull_reports_the_projects_it_left_on_disk()
     {
-        var projectScanner = new CountingCsProjFileService();
+        // The pull runs with hooks off, so no merge hook reports them: the App would keep the pre-pull references.
+        GitScenarios.CloneBehindRemote(_root);
+        var scanner = new CountingCsProjFileService();
+
+        var response = await PullAsync(
+            pullOnly: true,
+            RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: true),
+            scanner);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(1, scanner.FindCalls);
+        Assert.NotNull(response.State);
+        Assert.True(response.State.ProjectsProbed);
+        Assert.NotNull(response.State.Projects);
+    }
+
+    [Fact]
+    public async Task A_pull_in_a_workspace_that_does_not_discover_projects_scans_none()
+    {
+        GitScenarios.CloneBehindRemote(_root);
+        var scanner = new CountingCsProjFileService();
+
+        var response = await PullAsync(pullOnly: true, BasicWithoutVersioning, scanner);
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.Equal(0, scanner.FindCalls);
+        Assert.False(response.State!.ProjectsProbed);
+    }
+
+    [Fact]
+    public async Task A_refused_pull_scans_no_projects()
+    {
+        var repo = GitScenarios.CloneBehindRemote(_root);
+        File.WriteAllText(Path.Combine(repo, "README.md"), "my edit\n");
+        var scanner = new CountingCsProjFileService();
+
+        var response = await PullAsync(
+            pullOnly: true,
+            RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: true),
+            scanner);
+
+        Assert.False(response.Success);
+        Assert.Equal(0, scanner.FindCalls);
+        Assert.False(response.State!.ProjectsProbed);
+    }
+
+    private Task<CommitSyncRepositoryResponse> PullAsync(bool pullOnly) =>
+        PullAsync(pullOnly, BasicWithoutVersioning, new CountingCsProjFileService());
+
+    private Task<CommitSyncRepositoryResponse> PullAsync(
+        bool pullOnly,
+        RepositoryOperationCapabilities capabilities,
+        CountingCsProjFileService projectScanner)
+    {
         var versionProviders = CapabilityTestDoubles.RealFactory(_git);
         var command = new CommitSyncRepositoryCommand(
             _git,
@@ -221,7 +275,7 @@ public sealed class CommitSyncPullOnlyTests : IDisposable
             RepositoryName = "repo",
             WorkspaceId = 1,
             RepositoryId = 2,
-            Capabilities = BasicWithoutVersioning,
+            Capabilities = capabilities,
             PullOnly = pullOnly,
         });
     }

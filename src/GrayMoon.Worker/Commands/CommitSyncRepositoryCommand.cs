@@ -90,6 +90,8 @@ public sealed class CommitSyncRepositoryCommand(
     /// Reports the state the repository is left in. A pull moves the branch, so it changes the comparison
     /// against the default branch just as much as the one against the upstream; reporting only outgoing and
     /// incoming left the ahead/behind badge showing pre-pull numbers until something else refreshed it.
+    /// A successful pull also changes the project files, and it runs with hooks off, so no merge hook reports
+    /// them: the projects are scanned here (when the Workspace discovers projects) for the App's dependency state.
     /// </summary>
     private async Task<CommitSyncRepositoryResponse> BuildStateResponseAsync(
         string repoPath,
@@ -103,6 +105,7 @@ public sealed class CommitSyncRepositoryCommand(
         var (state, _) = await stateProbe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
         {
             IncludeGitVersion = true,
+            IncludeProjects = success,
             BranchNameOverride = branch,
             ErrorMessage = errorMessage,
             Capabilities = request.Capabilities
