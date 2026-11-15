@@ -48,6 +48,12 @@ public sealed class RepositoryStateWriteOptions
     /// this write probed. Null for writes that are not the result of an operation.
     /// </summary>
     public long? OperationStartedAt { get; init; }
+
+    /// <summary>
+    /// Leave the snapshot's projects unwritten. For a caller that writes several repositories at the same time and
+    /// reconciles all their projects afterwards in one <see cref="WorkspaceRepositoryStateWriter.ApplyProjectsAsync"/> call.
+    /// </summary>
+    public bool DeferProjects { get; init; }
 }
 
 /// <summary>
@@ -161,6 +167,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         // Some Worker paths return projects without being asked (return-to-default, the hook fallback
         // when capabilities cannot be resolved); a workspace that does not discover projects keeps none.
         if (snapshot.ProjectsProbed
+            && !options.DeferProjects
             && (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects)
             await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
 
@@ -401,6 +408,76 @@ public sealed class WorkspaceRepositoryStateWriter(
             workspaceId,
             contextId.Value,
             [ProjectScanOutcome.Scanned(repositoryId, projects)],
+            mergeEdges: true,
+            persistDependencyLevel: false,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes the projects of several repositories of one context as a single projection: project rows, project
+    /// counts and dependency edges commit together. For snapshots whose state was written with
+    /// <see cref="RepositoryStateWriteOptions.DeferProjects"/>. Snapshots that did not probe projects and
+    /// repositories that are not linked are left out; a workspace that does not discover projects writes nothing.
+    /// </summary>
+    public async Task ApplyProjectsAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceId,
+        IReadOnlyList<(int RepositoryId, RepositoryStateSnapshot Snapshot)> items,
+        CancellationToken cancellationToken = default)
+    {
+        var probed = items.Where(i => i.Snapshot.ProjectsProbed).ToList();
+        if (probed.Count == 0
+            || !(await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects)
+            return;
+
+        var context = await dbContext.WorkspaceFeatureContexts
+            .FirstOrDefaultAsync(c => c.WorkspaceFeatureContextId == contextId.Value, cancellationToken);
+        if (context is null || context.WorkspaceId != workspaceId)
+        {
+            logger.LogWarning(
+                "Project write skipped: context {ContextId} missing or not in workspace {WorkspaceId}",
+                contextId.Value, workspaceId);
+            return;
+        }
+
+        var repoIds = probed.Select(i => i.RepositoryId).Distinct().ToList();
+        var links = await dbContext.WorkspaceRepositories
+            .Where(x => x.WorkspaceId == workspaceId && repoIds.Contains(x.RepositoryId))
+            .ToListAsync(cancellationToken);
+        var linkByRepo = links.ToDictionary(l => l.RepositoryId);
+        var wrlIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
+        var stateByWrl = (await dbContext.WorkspaceRepositoryContextStates
+                .Where(s => s.WorkspaceFeatureContextId == contextId.Value && wrlIds.Contains(s.WorkspaceRepositoryId))
+                .ToListAsync(cancellationToken))
+            .ToDictionary(s => s.WorkspaceRepositoryId);
+        var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
+
+        var outcomes = new List<ProjectScanOutcome>();
+        foreach (var (repositoryId, snapshot) in probed)
+        {
+            if (!linkByRepo.TryGetValue(repositoryId, out var wr)
+                || !stateByWrl.TryGetValue(wr.WorkspaceRepositoryId, out var state))
+                continue;
+
+            var projects = ToSyncProjects(snapshot.Projects);
+            state.Projects = projects.Count;
+            state.RepositoryType = ComputeRepositoryType(projects);
+            if (isSpecialWorkspace)
+            {
+                wr.Projects = state.Projects;
+                wr.RepositoryType = state.RepositoryType;
+            }
+
+            outcomes.Add(ProjectScanOutcome.Scanned(repositoryId, projects));
+        }
+
+        if (outcomes.Count == 0)
+            return;
+
+        await workspaceProjectRepository.ReconcileProjectSnapshotAsync(
+            workspaceId,
+            contextId.Value,
+            outcomes,
             mergeEdges: true,
             persistDependencyLevel: false,
             cancellationToken);

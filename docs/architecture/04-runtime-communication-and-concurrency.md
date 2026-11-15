@@ -209,6 +209,8 @@ A change of the read only state is structural, so it and any other operation of 
 
 A pull of a read only repository is sent with `pullOnly` (`CommitSyncRepositoryRequest`): the Worker runs `git pull --ff-only`, refuses a branch with local commits before pulling, reports `localChangesBlockPull` when local changes are in the way, never pushes, and returns the commit it arrived at.
 
+A pull runs with hooks off, so no merge hook reports what it brought in. `CommitSyncRepository` therefore carries the Workspace capabilities and, after a successful pull in a Workspace that discovers projects, returns the scanned projects in its state snapshot (a refused or failed pull scans none; a failed scan is "not probed", never an empty list). `WorkspaceCommitSyncHandler` ends every pull job with one `CompletePullAsync`: the single pull stores its projects with the state write; the bulk pull, whose repositories run at the same time, writes each row with `RepositoryStateWriteOptions.DeferProjects` and then stores all the projects as one projection (`WorkspaceRepositoryStateWriter.ApplyProjectsAsync`). After that it runs one recompute of the context (version-file check and dependency stats, shared with hook syncs through `SyncRecomputeCoalescer`) and broadcasts `ContextSynced`. A failure in that step does not fail the pull: it is logged and shown as a page error, and the next Sync recomputes the same state. A cancelled bulk pull skips the step.
+
 `ArchivedRepositoryVerifier` is not an operation and takes no lock: for repositories marked archived it asks the provider once per opened Repositories page and before a push plan or a push, and clears the mark when the provider says the repository is no longer archived.
 
 ### 3A. Lock-free Feature background work
