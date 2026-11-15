@@ -114,6 +114,25 @@ public sealed class CommitSyncPullOnlyTests : IDisposable
     }
 
     [Fact]
+    public async Task A_commit_on_a_detached_HEAD_is_not_pushed_and_the_error_says_the_repository_is_on_no_branch()
+    {
+        var repo = GitScenarios.ClonedRepository(_root, push: true);
+        GitConfigTestSupport.Git(repo, "checkout -q --detach");
+        File.WriteAllText(Path.Combine(repo, "local.txt"), "mine\n");
+        GitConfigTestSupport.Git(repo, "add -A");
+        GitConfigTestSupport.Git(repo, "commit -q -m detached");
+        var remoteBefore = RemoteHead();
+
+        var response = await PullAsync(pullOnly: false);
+
+        Assert.False(response.Success);
+        Assert.Equal(GitRemoteIntegrateService.NotOnBranchMessage, response.ErrorMessage);
+        Assert.Contains("detached HEAD", response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Contains("Create a branch", response.ErrorMessage, StringComparison.Ordinal);
+        Assert.Equal(remoteBefore, RemoteHead());
+    }
+
+    [Fact]
     public async Task Local_changes_that_do_not_touch_the_incoming_files_do_not_block_the_pull()
     {
         var repo = GitScenarios.CloneBehindRemote(_root);

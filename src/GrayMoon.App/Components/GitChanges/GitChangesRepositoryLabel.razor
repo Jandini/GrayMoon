@@ -1,10 +1,14 @@
 @using GrayMoon.App.Services.GitChanges
-@* The label of a repository row in the Git Changes tree: name, padlock when read only, branch and count.
+@* The label of a repository row in the Git Changes tree: name, padlock when read only or on a tag, branch and count.
    It is its own component so it can be rendered without the virtualized list around it. *@
 <span class="git-changes-tree__repo-name">@Row.Label</span>
 @if (Row.IsReference)
 {
     <ReferenceLockIcon AdditionalClass="git-changes-tree__reference-lock" Title="@RepositoryBadgeTitles.ReferenceInGitChanges" />
+}
+else if (Row.IsOnTag)
+{
+    <ReferenceLockIcon AdditionalClass="git-changes-tree__reference-lock" Title="@RepositoryBadgeTitles.OnTagInGitChanges" />
 }
 @if (!string.IsNullOrEmpty(Row.BranchName))
 {

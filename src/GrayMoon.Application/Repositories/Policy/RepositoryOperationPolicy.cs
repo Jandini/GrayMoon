@@ -14,6 +14,9 @@ public static class RepositoryOperationPolicy
     /// <summary>The message for a push of a repository that is on a tag.</summary>
     public const string OnTagPushMessage = "Repository is pinned to a tag. Checkout a branch before pushing.";
 
+    /// <summary>The message for a Git Changes commit in a repository that is on a tag.</summary>
+    public const string OnTagCommitMessage = "Repository is on a tag. Checkout a branch before committing.";
+
     /// <summary>The message for an operation that a reference (read-only) repository does not take part in.</summary>
     public const string ReferenceMessage = "Repository is read only.";
 
@@ -70,9 +73,10 @@ public static class RepositoryOperationPolicy
         [RepositoryOperation.UpdateDependencies] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
         [RepositoryOperation.UpdateVersionFiles] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
         [RepositoryOperation.Commit] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
-        // A commit the user makes in Git Changes. A tag checkout has always allowed it; the commit GrayMoon makes after
-        // a dependency or version file update is the row above.
-        [RepositoryOperation.CommitGitChanges] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        // A commit the user makes in Git Changes; the commit GrayMoon makes after a dependency or version file update
+        // is the row above. A tag checkout has no branch: a commit there leaves the tag behind on a detached HEAD
+        // that no push can send, and the repository then no longer counts as on a tag.
+        [RepositoryOperation.CommitGitChanges] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden, OnTagCommitMessage),
         // The provider rejects a push to an archived repository, so GrayMoon does not start one. Local commits stay
         // where they are; the user reverts them or un-archives the repository.
         [RepositoryOperation.Push] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden, OnTagPushMessage) { AllowedWhenArchived = false },

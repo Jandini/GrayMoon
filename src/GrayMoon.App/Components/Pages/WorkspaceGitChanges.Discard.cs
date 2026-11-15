@@ -264,7 +264,7 @@ public sealed partial class WorkspaceGitChanges
             return;
         }
 
-        // Undo across all repositories never touches a read-only one; its own Undo action still does.
+        // Undo across all repositories never touches one that is read only or on a tag; its own Undo action still does.
         var plan = WorkspaceDiscardTargetPlanner.PlanAll(_view?.Repositories ?? []);
         var leftOut = plan.LeftOut;
         var targets = plan.Targets.ToList();
@@ -277,7 +277,7 @@ public sealed partial class WorkspaceGitChanges
         {
             if (leftOut.Count > 0)
             {
-                ToastService.Show("Nothing to undo: the repositories with changes are read only. Use Undo on the repository itself.");
+                ToastService.Show($"Nothing to undo: the repositories with changes are {WorkspaceCommitTargetPlanner.DescribeLocked(leftOut)}. Use Undo on the repository itself.");
             }
 
             return;
@@ -293,7 +293,8 @@ public sealed partial class WorkspaceGitChanges
         };
         if (leftOut.Count > 0)
         {
-            details.Add(new("Read only, left as they are", leftOut
+            var lockedText = WorkspaceCommitTargetPlanner.DescribeLocked(leftOut);
+            details.Add(new($"{char.ToUpperInvariant(lockedText[0])}{lockedText[1..]}, left as they are", leftOut
                 .Select(r => new ConfirmDetailItem(r.RepositoryName, FileCountLabel(r.ChangedCount)))
                 .ToList()));
         }

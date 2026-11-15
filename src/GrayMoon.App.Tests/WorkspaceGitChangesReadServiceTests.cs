@@ -3,6 +3,7 @@ using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.GitChanges;
 using GrayMoon.Application.Features;
 using GrayMoon.Common.Git;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GrayMoon.App.Tests;
@@ -156,6 +157,40 @@ public class WorkspaceGitChangesReadServiceTests
         Assert.False(await readService.HasAnyChangesAsync(ctx.WorkspaceId + 1, contextId, CancellationToken.None));
         Assert.False(await readService.HasAnyChangesAsync(
             ctx.WorkspaceId, new WorkspaceFeatureContextId(contextId.Value + 1), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_repository_on_a_tag_is_marked_so_the_page_treats_it_like_a_read_only_one()
+    {
+        await using var ctx = await GitChangesTestDbContext.CreateAsync();
+        var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
+        await PersistSnapshotAsync(ctx, factory, 1,
+            new GitChangeEntry { Path = "file.txt", WorktreeChange = GitChangeKind.Modified });
+        var contextId = await SpecialContextIdAsync(ctx, factory);
+        var readService = new WorkspaceGitChangesReadService(factory);
+
+        var onBranch = Assert.Single((await readService.GetContextAsync(ctx.WorkspaceId, contextId, CancellationToken.None)).Repositories);
+        Assert.False(onBranch.IsOnTag);
+        Assert.False(onBranch.IsLocked);
+
+        await using (var db = factory.CreateDbContext())
+        {
+            var link = await db.WorkspaceRepositories.SingleAsync(wr => wr.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId);
+            link.CheckedOutTag = "v1.0.0";
+            await db.SaveChangesAsync();
+        }
+
+        var full = Assert.Single((await readService.GetContextAsync(ctx.WorkspaceId, contextId, CancellationToken.None)).Repositories);
+        var summary = Assert.Single((await readService.GetContextSummariesAsync(ctx.WorkspaceId, contextId, CancellationToken.None)).Repositories);
+        var one = await readService.GetRepositoryAsync(ctx.WorkspaceId, contextId, ctx.RepositoryId, CancellationToken.None);
+        var oneSummary = await readService.GetRepositorySummaryAsync(ctx.WorkspaceId, contextId, ctx.RepositoryId, CancellationToken.None);
+
+        Assert.True(full.IsOnTag);
+        Assert.True(full.IsLocked);
+        Assert.False(full.IsReference);
+        Assert.True(summary.IsOnTag);
+        Assert.True(one!.IsOnTag);
+        Assert.True(oneSummary!.IsOnTag);
     }
 
     private static Task<WorkspaceFeatureContextId> SpecialContextIdAsync(

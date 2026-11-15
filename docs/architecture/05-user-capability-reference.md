@@ -487,7 +487,7 @@ Delete remote branch / forced delete   yes        no          no
 Update Branch from Default             no         no          no
 Update dependencies, version files     no         no          no
 Commit by GrayMoon (after an update)   no         no          no
-Commit in Changes                      yes        no          no
+Commit in Changes                      no         no          no
 Push                                   no         no          no     (also no for a repository archived on the provider)
 Set upstream                           yes        no          no
 Undo push                              no         no          no
@@ -499,9 +499,11 @@ Create Feature branch                  no (detached at the tag)   no (snapshot) 
 
 The Workspace repository is never read only: the read only columns do not apply to it. The archived rule does.
 
+Changes treats a repository on a tag like a read only one. A tag checkout has no branch, so a commit there would leave the tag behind on a detached HEAD that no push can send. Commit is refused ("Repository is on a tag. Checkout a branch before committing."), and Commit, Stage All, Unstage All and Undo across all repositories leave the repository out and name it; staging, unstaging and discarding that one repository still work. The page reads the tag state from the policy (`WorkspaceGitChangesRepositoryView.IsOnTag`, `IsLocked` for read only or on a tag).
+
 The buttons of a row ask the same table. In a Feature the commits badge of a read only snapshot is off, because a snapshot allows neither pull nor push; a repository on a tag has it off for the same reason. A branch without an upstream can become read only when its commit is on the remote.
 
-Messages: "Repository is on a tag; checkout a branch first.", "Repository is pinned to a tag. Checkout a branch before pushing.", "Repository is read only.", "Repository is a read only snapshot in this Feature.", "Repository is archived on the provider. Pushes are rejected.". A bulk action reports its skips in one sentence built by `RepositorySkipSummary` (read only, tag and archived repositories counted apart); skips are shown as information and never in place of an error or a warning. The REST responses carry them in `Skipped` with the reason by name.
+Messages: "Repository is on a tag; checkout a branch first.", "Repository is pinned to a tag. Checkout a branch before pushing.", "Repository is on a tag. Checkout a branch before committing.", "Repository is read only.", "Repository is a read only snapshot in this Feature.", "Repository is archived on the provider. Pushes are rejected.". A bulk action reports its skips in one sentence built by `RepositorySkipSummary` (read only, tag and archived repositories counted apart); skips are shown as information and never in place of an error or a warning. The REST responses carry them in `Skipped` with the reason by name.
 
 Read only is set in Edit Workspace's Lock tab ("Repository Lock": Lock All, Unlock All, "New repositories are locked as read only") and with Lock / Unlock in the Switch Branch dialog; both call `IWorkspaceReferenceOperations` (`SetAllAsync`, `SetRepositoryAsync`, `SetDefaultAsync`). Lock All and Unlock All apply immediately and are not part of Save. Enter in the Workspace dialog does not save while a lock confirmation is open. Turning it on is refused, for every selected repository, when one of them has unpushed commits or an unreadable upstream state in the Workspace checkout or in a Feature worktree; uncommitted changes are a warning. The search box takes `ro:yes` and `ro:no`; the Workspaces list shows None, Some or All; the definition banner names repositories whose read only state differs from `graymoon.json`; the Restore Workspace preview has a Read only row.
 

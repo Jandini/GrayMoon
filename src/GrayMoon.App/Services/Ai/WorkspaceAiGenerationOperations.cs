@@ -89,8 +89,8 @@ public sealed class WorkspaceAiGenerationOperations(
         if (scope.Repositories.Count == 0)
             return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, "There is nothing to commit.");
 
-        // The message describes what will be committed. A read-only repository is never committed, so its changes
-        // are not read, whatever the caller listed.
+        // The message describes what will be committed. A repository that is read only or on a tag is never
+        // committed, so its changes are not read, whatever the caller listed.
         var eligibility = await operationPolicy.PartitionAsync(
             scope.WorkspaceId,
             scope.ContextId,
@@ -100,7 +100,12 @@ public sealed class WorkspaceAiGenerationOperations(
         var leftOut = eligibility.Skipped.Select(skip => skip.RepositoryId).ToHashSet();
         var described = scope.Repositories.Where(r => !leftOut.Contains(r.RepositoryId)).ToList();
         if (described.Count == 0)
-            return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, "There is nothing to commit: the repositories with changes are read only.");
+        {
+            var onTag = eligibility.Skipped.Any(skip => skip.Reason == RepositoryOperationReason.OnTag);
+            var readOnly = eligibility.Skipped.Any(skip => skip.Reason != RepositoryOperationReason.OnTag);
+            var why = onTag && readOnly ? "read only or on a tag" : onTag ? "on a tag" : "read only";
+            return AiGenerationResult<GeneratedCommitMessage>.Fail(providerId, AiGenerationErrorKind.NothingToDescribe, $"There is nothing to commit: the repositories with changes are {why}.");
+        }
 
         var repositories = described
             .Select(r => new GitEvidenceRepositoryScope { RepositoryId = r.RepositoryId })

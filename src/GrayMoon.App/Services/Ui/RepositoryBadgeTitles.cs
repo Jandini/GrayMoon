@@ -14,4 +14,7 @@ public static class RepositoryBadgeTitles
 
     public const string ReferenceInGitChanges =
         "Read only in this Workspace. GrayMoon does not commit or push it, and actions on all repositories leave it out.";
+
+    public const string OnTagInGitChanges =
+        "On a tag. GrayMoon does not commit or push it, and actions on all repositories leave it out. Checkout a branch to commit.";
 }

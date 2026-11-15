@@ -45,10 +45,10 @@ public static class WorkspaceCommitModeHelper
             : stagedCount > 0 || changedCount > 0;
 
     /// <summary>
-    /// Whether the repository is committed by a workspace commit in the given mode. A read-only repository never is,
-    /// whatever it has staged or changed.
+    /// Whether the repository is committed by a workspace commit in the given mode. A repository that is read only
+    /// or on a tag never is, whatever it has staged or changed.
     /// </summary>
     public static bool IsRepositoryTarget(WorkspaceCommitMode mode, WorkspaceGitChangesRepositoryView repository) =>
-        !repository.IsReference && IsRepositoryTarget(mode, repository.StagedCount, repository.ChangedCount);
+        !repository.IsLocked && IsRepositoryTarget(mode, repository.StagedCount, repository.ChangedCount);
 }
 

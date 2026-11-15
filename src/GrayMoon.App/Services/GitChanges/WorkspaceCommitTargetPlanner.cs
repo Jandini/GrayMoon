@@ -19,6 +19,20 @@ public static class WorkspaceCommitTargetPlanner
     /// <summary>The reason reported for a read-only repository that has changes the commit leaves alone.</summary>
     public const string ReferenceReason = "it is read only";
 
+    /// <summary>The reason reported for a repository on a tag that has changes the commit leaves alone.</summary>
+    public const string OnTagReason = "it is on a tag; checkout a branch to commit";
+
+    /// <summary>
+    /// Why the given repositories are left out, for a sentence: "read only", "on a tag" or "read only or on a tag".
+    /// Every repository passed is <see cref="WorkspaceGitChangesRepositoryView.IsLocked"/>.
+    /// </summary>
+    public static string DescribeLocked(IReadOnlyCollection<WorkspaceGitChangesRepositoryView> locked)
+    {
+        var reference = locked.Any(repository => repository.IsReference);
+        var onTag = locked.Any(repository => !repository.IsReference && repository.IsOnTag);
+        return reference && onTag ? "read only or on a tag" : onTag ? "on a tag" : "read only";
+    }
+
     public static bool IsOnDefaultBranch(WorkspaceGitChangesRepositoryView repository) =>
         !string.IsNullOrWhiteSpace(repository.DefaultBranchName)
         && string.Equals(repository.BranchName, repository.DefaultBranchName, StringComparison.Ordinal);
@@ -51,6 +65,13 @@ public static class WorkspaceCommitTargetPlanner
             if (repository.IsReference)
             {
                 leftOut.Add((repository, ReferenceReason));
+                continue;
+            }
+
+            // Neither is a repository on a tag: there is no branch, and the commit would leave the tag behind.
+            if (repository.IsOnTag)
+            {
+                leftOut.Add((repository, OnTagReason));
                 continue;
             }
 

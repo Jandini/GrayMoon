@@ -12,18 +12,41 @@ public sealed record WorkspaceOperationOutcome(
 {
     public bool HasErrors => RepositoryErrors.Count > 0 || LevelErrors.Count > 0;
 
-    /// <summary>Text for the page-level banner: the level errors lowest level first, then a repository count.</summary>
-    public string Describe()
+    /// <summary>How many failed repositories the banner names with their error before it only counts the rest.</summary>
+    public const int NamedRepositoryLimit = 3;
+
+    /// <summary>
+    /// Text for the page-level banner: the level errors lowest level first, then the failed repositories. A repository
+    /// whose name <paramref name="repositoryName"/> knows is named with the first line of its error, so the banner
+    /// says why the run stopped; the others are counted.
+    /// </summary>
+    public string Describe(Func<int, string?>? repositoryName = null)
     {
         var lines = new List<string>();
         foreach (var (level, message) in LevelErrors.OrderBy(kv => kv.Key))
             lines.Add(level > 0 ? $"Level {level}: {message}" : message);
 
-        if (RepositoryErrors.Count > 0)
-            lines.Add(RepositoryErrors.Count == 1 ? "1 repository reported an error." : $"{RepositoryErrors.Count} repositories reported errors.");
+        var named = RepositoryErrors
+            .Select(kv => (Name: repositoryName?.Invoke(kv.Key), Error: FirstLine(kv.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(NamedRepositoryLimit)
+            .ToList();
+        foreach (var (name, error) in named)
+            lines.Add($"{name}: {error}");
+
+        var counted = RepositoryErrors.Count - named.Count;
+        if (counted > 0)
+        {
+            var more = named.Count > 0 ? "more " : string.Empty;
+            lines.Add(counted == 1 ? $"1 {more}repository reported an error." : $"{counted} {more}repositories reported errors.");
+        }
 
         return $"{Operation} stopped. " + string.Join("\n", lines);
     }
+
+    private static string FirstLine(string message) =>
+        message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? message;
 }
 
 /// <summary>
