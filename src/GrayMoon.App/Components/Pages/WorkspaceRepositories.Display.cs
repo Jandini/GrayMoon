@@ -200,7 +200,9 @@ public sealed partial class WorkspaceRepositories
 
     /// <summary>Banner text for a grouped grid; a flat grid already shows its level errors in one callout.</summary>
     private string? OperationOutcomeBanner =>
-        _presentation.GroupByDependencyLevel ? StoredOperationOutcome?.Describe() : null;
+        _presentation.GroupByDependencyLevel
+            ? StoredOperationOutcome?.Describe(repositoryId => TryGetLink(repositoryId)?.Repository?.RepositoryName)
+            : null;
 
     /// <summary>Shows the stored failure in the row and level callouts, as if the page had been present when it happened.</summary>
     private void ApplyStoredOperationOutcome()

@@ -40,6 +40,9 @@ public sealed record GitChangesTreeRow
     /// <summary>True on the Repository row of a read-only repository.</summary>
     public bool IsReference { get; init; }
 
+    /// <summary>True on the Repository row of a repository that is on a tag.</summary>
+    public bool IsOnTag { get; init; }
+
     /// <summary>Current branch name. Set only on Repository rows.</summary>
     public string? BranchName { get; init; }
 
@@ -140,6 +143,7 @@ public static class GitChangesTreeBuilder
                 RepositoryId = s.RepositoryId,
                 RepositoryName = s.RepositoryName,
                 IsReference = s.IsReference,
+                IsOnTag = s.IsOnTag,
                 BranchName = s.BranchName,
                 DefaultBranchName = s.DefaultBranchName,
                 HeadCommit = s.HeadCommit,
@@ -230,6 +234,7 @@ public static class GitChangesTreeBuilder
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
                 IsReference = repo.IsReference,
+                IsOnTag = repo.IsOnTag,
                 BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,
@@ -387,6 +392,7 @@ public static class GitChangesTreeBuilder
                 WorkspaceRepositoryId = repo.WorkspaceRepositoryId,
                 RepositoryName = repo.RepositoryName,
                 IsReference = repo.IsReference,
+                IsOnTag = repo.IsOnTag,
                 BranchName = repo.BranchName,
                 HasChildren = true,
                 IsExpanded = repoExpanded,

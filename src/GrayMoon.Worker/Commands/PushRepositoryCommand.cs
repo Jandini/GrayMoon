@@ -73,7 +73,7 @@ public sealed class PushRepositoryCommand(
             return new PushRepositoryResponse
             {
                 Success = false,
-                ErrorMessage = "Could not determine branch name"
+                ErrorMessage = GitRemoteIntegrateService.NotOnBranchMessage
             };
         }
 

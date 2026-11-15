@@ -20,6 +20,18 @@ public sealed record WorkspaceGitChangesRepositoryView
     /// </summary>
     public bool IsReference { get; init; }
 
+    /// <summary>
+    /// True when the checkout of this context is on a tag. There is no branch to commit to, so the repository is
+    /// treated like a read-only one.
+    /// </summary>
+    public bool IsOnTag { get; init; }
+
+    /// <summary>
+    /// True when the repository is read only or on a tag: it is not committed, and the actions that span several
+    /// repositories leave it out. An action on the repository itself (stage, unstage, undo) still works.
+    /// </summary>
+    public bool IsLocked => IsReference || IsOnTag;
+
     public string? BranchName { get; init; }
     public string? DefaultBranchName { get; init; }
     public string? HeadCommit { get; init; }

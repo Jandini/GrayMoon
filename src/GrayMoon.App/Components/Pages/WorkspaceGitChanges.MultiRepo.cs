@@ -52,8 +52,8 @@ public sealed partial class WorkspaceGitChanges
         }
     }
 
-    /// <summary>Repositories a Commit Staged would commit. A read-only repository's staged files do not count.</summary>
-    private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 && !r.IsReference) ?? 0;
+    /// <summary>Repositories a Commit Staged would commit. Staged files of a repository that is read only or on a tag do not count.</summary>
+    private int StagedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 && !r.IsLocked) ?? 0;
     private int ChangedRepositoryCount => _view?.Repositories.Count(r => r.StagedCount > 0 || r.ChangedCount > 0) ?? 0;
 
     private static readonly IReadOnlySet<string> EmptyPushPackageIds = new HashSet<string>();
@@ -144,14 +144,16 @@ public sealed partial class WorkspaceGitChanges
 
         if (targets.Count == 0)
         {
-            // Only read-only repositories have something to commit: say why nothing happens.
-            var referenceCount = (_view?.Repositories ?? [])
-                .Count(r => r.IsReference && WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount));
-            if (referenceCount > 0)
+            // Only repositories that are read only or on a tag have something to commit: say why nothing happens.
+            var locked = (_view?.Repositories ?? [])
+                .Where(r => r.IsLocked && WorkspaceCommitModeHelper.IsRepositoryTarget(mode, r.StagedCount, r.ChangedCount))
+                .ToList();
+            if (locked.Count > 0)
             {
-                ToastService.Show(referenceCount == 1
-                    ? "Nothing to commit: the repository with changes is read only."
-                    : $"Nothing to commit: the {referenceCount} repositories with changes are read only.");
+                var lockedText = WorkspaceCommitTargetPlanner.DescribeLocked(locked);
+                ToastService.Show(locked.Count == 1
+                    ? $"Nothing to commit: the repository with changes is {lockedText}."
+                    : $"Nothing to commit: the {locked.Count} repositories with changes are {lockedText}.");
             }
 
             return;
@@ -446,9 +448,9 @@ public sealed partial class WorkspaceGitChanges
             .Where(r => unstageStagedSection ? r.StagedCount > 0 : r.ChangedCount > 0)
             .ToList();
 
-        // Across several repositories a read-only one is left out. Alone in the section it is the repository the
-        // user means, and its own stage/unstage action does the same.
-        var leftOut = inSection.Count > 1 ? inSection.Where(r => r.IsReference).ToList() : [];
+        // Across several repositories one that is read only or on a tag is left out. Alone in the section it is the
+        // repository the user means, and its own stage/unstage action does the same.
+        var leftOut = inSection.Count > 1 ? inSection.Where(r => r.IsLocked).ToList() : [];
         var targets = inSection.Except(leftOut).ToList();
 
         if (IsJobRunning)
@@ -458,9 +460,10 @@ public sealed partial class WorkspaceGitChanges
 
         if (leftOut.Count > 0)
         {
+            var lockedText = WorkspaceCommitTargetPlanner.DescribeLocked(leftOut);
             ToastService.Show(leftOut.Count == 1
-                ? $"{leftOut[0].RepositoryName} is read only and was left out."
-                : $"{leftOut.Count} read only repositories were left out.");
+                ? $"{leftOut[0].RepositoryName} is {lockedText} and was left out."
+                : $"{leftOut.Count} repositories that are {lockedText} were left out.");
         }
 
         if (targets.Count == 0)

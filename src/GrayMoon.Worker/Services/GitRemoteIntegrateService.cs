@@ -29,6 +29,14 @@ public sealed class GitRemoteIntegrateService(IGitService git, IGitRepositoryRea
     public const string LocalChangesBlockPullMessage =
         "Local changes block the pull. Nothing was changed. Discard the changes in this repository, then pull again.";
 
+    /// <summary>
+    /// HEAD is detached: a tag or commit checkout, or commits made on top of one. GrayMoon does not repair this;
+    /// the message says what the state is and what the user can do.
+    /// </summary>
+    public const string NotOnBranchMessage =
+        "Not on a branch (detached HEAD): commits made here belong to no branch and cannot be pushed. "
+        + "Create a branch from the current commit, or checkout a branch, then try again.";
+
     public static string LocalCommitsMessage(int outgoing) =>
         outgoing == 1
             ? "The repository is read only and its branch has 1 local commit that is not on the remote. Nothing was pulled."
@@ -49,7 +57,7 @@ public sealed class GitRemoteIntegrateService(IGitService git, IGitRepositoryRea
 
         var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(branch))
-            return new GitRemoteIntegrateResult(false, null, null, null, null, false, false, "Could not determine branch name");
+            return new GitRemoteIntegrateResult(false, null, null, null, null, false, false, NotOnBranchMessage);
 
         var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);
 
@@ -109,7 +117,7 @@ public sealed class GitRemoteIntegrateService(IGitService git, IGitRepositoryRea
                 Incoming: null,
                 HasUpstream: false,
                 MergeConflict: false,
-                ErrorMessage: "Could not determine branch name");
+                ErrorMessage: NotOnBranchMessage);
         }
 
         var (outgoing, incoming, hasUpstream) = await reader.GetCommitCountsAsync(repoPath, branch, null, cancellationToken);

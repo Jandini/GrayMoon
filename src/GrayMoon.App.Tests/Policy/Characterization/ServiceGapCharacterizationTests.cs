@@ -109,16 +109,20 @@ public sealed class ServiceGapCharacterizationTests
     }
 
     [Fact]
-    public async Task Git_changes_commit_is_allowed_on_a_tag()
+    public async Task Git_changes_commit_on_a_tag_is_refused_before_the_Worker()
     {
+        // It was allowed until 2026-11-15. The commit left the tag behind on a detached HEAD, the repository no
+        // longer counted as on a tag, and the next push failed with "Could not determine branch name".
         await using var ctx = await PinnedAsync();
         var special = await ctx.GetSpecialContextIdAsync();
 
         await using var scope = ctx.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<IWorkspaceGitChangesOperations>()
+        var refused = await scope.ServiceProvider.GetRequiredService<IWorkspaceGitChangesOperations>()
             .CommitAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "message", stageAllFirst: true, CancellationToken.None);
 
-        Assert.Equal([ProducerName], RepositoryNames(ctx, "CommitGitChanges"));
+        Assert.False(refused.Success);
+        Assert.Equal(RepositoryOperationPolicy.OnTagCommitMessage, refused.ErrorMessage);
+        Assert.Empty(RepositoryNames(ctx, "CommitGitChanges"));
     }
 
     [Fact]

@@ -44,7 +44,7 @@ public sealed class UndoPushCommand(
         {
             branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
             if (string.IsNullOrWhiteSpace(branch))
-                return new UndoPushResponse { Success = false, ErrorMessage = "Could not determine branch name" };
+                return new UndoPushResponse { Success = false, ErrorMessage = GitRemoteIntegrateService.NotOnBranchMessage };
         }
 
         var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, request.BearerToken, cancellationToken);

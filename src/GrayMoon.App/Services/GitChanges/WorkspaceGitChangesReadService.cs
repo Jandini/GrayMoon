@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Common.Git;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -110,21 +112,38 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
     private readonly IOptions<GitChangesOptions> _gitChangesOptions;
     private readonly ILogger<WorkspaceGitChangesReadService> _logger;
+    private readonly IWorkspaceRepositoryOperationPolicy _operationPolicy;
 
     public WorkspaceGitChangesReadService(IDbContextFactory<AppDbContext> dbContextFactory)
-        : this(dbContextFactory, Options.Create(new GitChangesOptions()), NullLogger<WorkspaceGitChangesReadService>.Instance)
+        : this(
+            dbContextFactory,
+            Options.Create(new GitChangesOptions()),
+            NullLogger<WorkspaceGitChangesReadService>.Instance,
+            new WorkspaceRepositoryOperationPolicyService(dbContextFactory, NullLogger<WorkspaceRepositoryOperationPolicyService>.Instance))
     {
     }
 
     public WorkspaceGitChangesReadService(
         IDbContextFactory<AppDbContext> dbContextFactory,
         IOptions<GitChangesOptions> gitChangesOptions,
-        ILogger<WorkspaceGitChangesReadService> logger)
+        ILogger<WorkspaceGitChangesReadService> logger,
+        IWorkspaceRepositoryOperationPolicy operationPolicy)
     {
         _dbContextFactory = dbContextFactory;
         _gitChangesOptions = gitChangesOptions;
         _logger = logger;
+        _operationPolicy = operationPolicy;
     }
+
+    /// <summary>
+    /// Ids of the repositories whose checkout in this context is on a tag. The policy answers, so the page shows
+    /// the same repositories as locked that a Git Changes commit refuses.
+    /// </summary>
+    private async Task<HashSet<int>> LoadOnTagRepositoryIdsAsync(int workspaceId, int contextId, CancellationToken cancellationToken) =>
+        (await _operationPolicy.GetSubjectsAsync(workspaceId, new WorkspaceFeatureContextId(contextId), cancellationToken: cancellationToken))
+            .Where(pair => pair.Value.IsOnTag)
+            .Select(pair => pair.Key)
+            .ToHashSet();
 
     public async Task<WorkspaceGitChangesView> GetWorkspaceAsync(int workspaceId, CancellationToken cancellationToken)
     {
@@ -196,6 +215,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             .ToDictionaryAsync(r => r.WorkspaceRepositoryId, cancellationToken);
 
         var kindCountsByRepo = await LoadChangedKindCountsAsync(db, contextId.Value, workspaceRepositoryIds, cancellationToken);
+        var onTagRepositoryIds = await LoadOnTagRepositoryIdsAsync(workspaceId, contextId.Value, cancellationToken);
 
         var repositories = statuses
             .Where(s => repoInfoById.ContainsKey(s.WorkspaceRepositoryId))
@@ -210,6 +230,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                     RepositoryId = info.RepositoryId,
                     RepositoryName = info.RepositoryName,
                     IsReference = info.IsReference,
+                    IsOnTag = onTagRepositoryIds.Contains(info.RepositoryId),
                     BranchName = s.BranchName,
                     DefaultBranchName = info.DefaultBranchName,
                     HeadCommit = s.HeadCommit,
@@ -282,7 +303,8 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                         && e.WorkspaceRepositoryId == link.WorkspaceRepositoryId)
             .ToListAsync(cancellationToken);
 
-        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, link.IsReference, entries);
+        var onTag = (await LoadOnTagRepositoryIdsAsync(workspaceId, contextId.Value, cancellationToken)).Contains(link.RepositoryId);
+        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, link.IsReference, onTag, entries);
     }
 
     public async Task<WorkspaceGitChangesRepositoryView?> GetRepositorySummaryAsync(
@@ -320,7 +342,8 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         var kindCounts = await LoadChangedKindCountsAsync(
             db, contextId.Value, [link.WorkspaceRepositoryId], cancellationToken);
 
-        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, link.IsReference, [])
+        var onTag = (await LoadOnTagRepositoryIdsAsync(workspaceId, contextId.Value, cancellationToken)).Contains(link.RepositoryId);
+        return MapRepository(status, link.RepositoryId, link.RepositoryName, link.DefaultBranchName, link.IsReference, onTag, [])
             with
             {
                 ChangedKindCounts = kindCounts.GetValueOrDefault(link.WorkspaceRepositoryId)
@@ -865,7 +888,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             select s).AnyAsync(cancellationToken);
     }
 
-    private static async Task<WorkspaceGitChangesView> LoadContextAsync(
+    private async Task<WorkspaceGitChangesView> LoadContextAsync(
         AppDbContext db,
         int workspaceId,
         int contextId,
@@ -904,6 +927,8 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             .GroupBy(e => e.WorkspaceRepositoryId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+        var onTagRepositoryIds = await LoadOnTagRepositoryIdsAsync(workspaceId, contextId, cancellationToken);
+
         var repositories = statuses
             .Where(s => repoInfoById.ContainsKey(s.WorkspaceRepositoryId))
             .Select(s =>
@@ -912,7 +937,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
                 var list = entriesByRepo.TryGetValue(s.WorkspaceRepositoryId, out var entries)
                     ? entries
                     : [];
-                return MapRepository(s, info.RepositoryId, info.RepositoryName, info.DefaultBranchName, info.IsReference, list);
+                return MapRepository(s, info.RepositoryId, info.RepositoryName, info.DefaultBranchName, info.IsReference, onTagRepositoryIds.Contains(info.RepositoryId), list);
             })
             .OrderBy(r => r.RepositoryName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -926,6 +951,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
         string repositoryName,
         string? defaultBranchName,
         bool isReference,
+        bool isOnTag,
         IReadOnlyList<WorkspaceGitContextChangeEntry> entries) =>
         new()
         {
@@ -933,6 +959,7 @@ public sealed class WorkspaceGitChangesReadService : IWorkspaceGitChangesReadSer
             RepositoryId = repositoryId,
             RepositoryName = repositoryName,
             IsReference = isReference,
+            IsOnTag = isOnTag,
             BranchName = s.BranchName,
             DefaultBranchName = defaultBranchName,
             HeadCommit = s.HeadCommit,

@@ -263,6 +263,8 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
         if (_selectedRow is not { Kind: GitChangesTreeRowKind.File } row)
             return;
 
+        // LoadDiffAsync takes the next request version before its first await.
+        var requestVersion = _diffRequestVersion + 1;
         await LoadDiffAsync(row);
 
         if (_disposed)
@@ -270,7 +272,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         // Diff failed (worker offline, path gone after an external commit, etc.) - drop auto-selection
         // so the page stays on the empty "Select a file" placeholder instead of a stuck error pane.
-        if (_diffError != null || _selectedDiff == null)
+        // Not when the user picked another file meanwhile: this request then ended without a document
+        // because it was superseded, and the user's file may still be loading.
+        var superseded = requestVersion != _diffRequestVersion || _selectedRow?.Key != row.Key;
+        if (GitChangesRestoredSelection.ShouldDrop(superseded, _diffError != null || _selectedDiff == null))
             await ClearSelectionQuietlyAsync(clearMemory: true);
     }
 

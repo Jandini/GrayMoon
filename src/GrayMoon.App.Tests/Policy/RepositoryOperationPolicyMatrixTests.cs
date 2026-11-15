@@ -23,6 +23,7 @@ public sealed class RepositoryOperationPolicyMatrixTests
         RepositoryOperation.UpdateDependencies,
         RepositoryOperation.UpdateVersionFiles,
         RepositoryOperation.Commit,
+        RepositoryOperation.CommitGitChanges,
         RepositoryOperation.Push,
         RepositoryOperation.UndoPush,
         RepositoryOperation.CreatePullRequest,

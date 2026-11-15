@@ -20,6 +20,39 @@ public sealed class WorkspaceOperationOutcomeStoreTests
     }
 
     [Fact]
+    public void Describe_names_the_failed_repositories_with_their_error_instead_of_only_counting_them()
+    {
+        var store = new WorkspaceOperationOutcomeStore();
+        var recorder = store.Begin(1, Context, "Update and Push");
+        recorder.Level(1, "Push stopped after repository failure(s).");
+        recorder.Repository(27, "The repository is not on a branch (detached HEAD).\nsecond line");
+        recorder.Repository(26, "The repository is not on a branch (detached HEAD).");
+        var names = new Dictionary<int, string> { [26] = "Partition", [27] = "Metrics" };
+
+        var text = store.Get(1, Context)!.Describe(id => names.GetValueOrDefault(id));
+
+        Assert.Equal(
+            "Update and Push stopped. Level 1: Push stopped after repository failure(s).\n"
+            + "Metrics: The repository is not on a branch (detached HEAD).\n"
+            + "Partition: The repository is not on a branch (detached HEAD).",
+            text);
+    }
+
+    [Fact]
+    public void Describe_counts_the_repositories_it_cannot_name_or_has_no_room_for()
+    {
+        var store = new WorkspaceOperationOutcomeStore();
+        var recorder = store.Begin(1, Context, "Push");
+        for (var id = 1; id <= 5; id++)
+            recorder.Repository(id, "failed");
+
+        var outcome = store.Get(1, Context)!;
+
+        Assert.Equal("Push stopped. 5 repositories reported errors.", outcome.Describe());
+        Assert.EndsWith("repo-3: failed\n2 more repositories reported errors.", outcome.Describe(id => "repo-" + id), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Begin_forgets_the_previous_outcome()
     {
         var store = new WorkspaceOperationOutcomeStore();

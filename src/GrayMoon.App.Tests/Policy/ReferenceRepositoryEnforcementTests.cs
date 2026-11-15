@@ -347,6 +347,31 @@ public sealed class ReferenceRepositoryEnforcementTests
         Assert.True(WorkspaceCommitModeHelper.IsRepositoryTarget(WorkspaceCommitMode.All, writable));
     }
 
+    [Fact]
+    public void A_workspace_commit_and_Undo_All_leave_a_repository_on_a_tag_alone_like_a_read_only_one()
+    {
+        var writable = View(1, changed: 2);
+        var onTag = View(2, changed: 3) with { IsOnTag = true, BranchName = null };
+        var reference = View(3, changed: 1) with { IsReference = true };
+
+        // Clicked while it was still on a branch: the plan is made when the commit starts.
+        var plan = WorkspaceCommitTargetPlanner.Plan(WorkspaceCommitMode.All, [writable, onTag], [writable, onTag]);
+
+        Assert.Equal([1], plan.Targets.Select(target => target.WorkspaceRepositoryId));
+        var (repository, reason) = Assert.Single(plan.LeftOut);
+        Assert.Equal(2, repository.WorkspaceRepositoryId);
+        Assert.Equal(WorkspaceCommitTargetPlanner.OnTagReason, reason);
+        Assert.False(WorkspaceCommitModeHelper.IsRepositoryTarget(WorkspaceCommitMode.All, onTag));
+
+        var discard = WorkspaceDiscardTargetPlanner.PlanAll([writable, onTag, reference]);
+        Assert.Equal([1], discard.Targets.Select(target => target.WorkspaceRepositoryId));
+        Assert.Equal([2, 3], discard.LeftOut.Select(target => target.WorkspaceRepositoryId));
+
+        Assert.Equal("on a tag", WorkspaceCommitTargetPlanner.DescribeLocked([onTag]));
+        Assert.Equal("read only", WorkspaceCommitTargetPlanner.DescribeLocked([reference]));
+        Assert.Equal("read only or on a tag", WorkspaceCommitTargetPlanner.DescribeLocked([onTag, reference]));
+    }
+
     private static WorkspaceGitChangesRepositoryView View(int id, int changed) =>
         new()
         {
