@@ -157,7 +157,7 @@ public sealed partial class WorkspaceActions
 
     internal string RerunAllOverlayMessage =>
         _bulkWaiting
-            ? $"Waiting for GitHub to start workflows: {_rerunCompleted} of {_rerunTotal}"
+            ? (_rerunCompleted == 0 ? (_bulkOperationVerb == "Aborting" ? "Waiting for actions to stop..." : "Waiting for actions to start...") : $"Waiting for {_rerunCompleted} of {_rerunTotal}")
             : _rerunCompleted == 0
             ? $"{_bulkOperationVerb} actions..."
             : $"{_bulkOperationVerb} {_rerunCompleted} of {_rerunTotal}";

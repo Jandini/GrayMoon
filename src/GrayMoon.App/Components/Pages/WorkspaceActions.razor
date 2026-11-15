@@ -280,9 +280,11 @@
                                                                          RunningCount="groupSummary.RunningCount"
                                                                          RunCount="groupSummary.RunCount"
                                                                          RerunCount="groupSummary.RerunCount"
+                                                                         AbortCount="groupSummary.AbortCount"
                                                                          Disabled="BulkActionsDisabled"
                                                                          OnRun="() => RunLevelAsync(levelGroup)"
-                                                                         OnRerun="() => RerunLevelAsync(levelGroup)" />
+                                                                         OnRerun="() => RerunLevelAsync(levelGroup)"
+                                                                         OnAbort="() => AbortLevelAsync(levelGroup)" />
                                         }
                                         @foreach (var row in group.Rows)
                                         {

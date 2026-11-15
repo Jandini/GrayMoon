@@ -182,6 +182,39 @@ public sealed class WorkspaceActionsLevelActionsTests
     }
 
     [Fact]
+    public void Abort_takes_every_running_workflow_that_has_a_run_including_a_read_only_repository()
+    {
+        var beingAborted = Line("running", workflowId: 4, runId: 40);
+        beingAborted.AbortInProgress = true;
+        var row = CreateRow("widgets", level: 1,
+            Line("running", workflowId: 1, runId: 10),
+            Line("running", workflowId: 2, runId: null),
+            Line("failed", workflowId: 3, runId: 30),
+            beingAborted,
+            Line("running", workflowId: 5, runId: 50, workflowName: "Copilot Code Review"));
+        var readOnly = CreateRow("read-only", level: 1, Line("running", workflowId: 6, runId: 60));
+        readOnly.Link.IsReference = true;
+
+        var selected = WorkspaceActions.SelectAbortable([row, readOnly], includeAiWorkflows: false);
+
+        Assert.Equal([1L, 6L], selected.Select(pair => pair.Line.Action!.WorkflowId!.Value));
+        Assert.Empty(WorkspaceActions.SelectAbortable([CreateRow("idle", level: 1, Line("success", workflowId: 7, runId: 70))], includeAiWorkflows: true));
+    }
+
+    [Fact]
+    public void An_aborted_run_is_stopped_once_the_row_no_longer_shows_it_running()
+    {
+        var line = Line("running", workflowId: 1, runId: 10);
+        var row = CreateRow("widgets", level: 1, line);
+        var aborted = WorkspaceActions.StartedRun.From(row, line);
+
+        Assert.False(WorkspaceActions.IsRunStopped(aborted));
+
+        row.WorkflowLines = [Line("aborted", workflowId: 1, runId: 10)];
+        Assert.True(WorkspaceActions.IsRunStopped(aborted));
+    }
+
+    [Fact]
     public void A_group_header_shows_only_for_a_grouped_grid_with_a_visible_row()
     {
         var visible = CreateRow("visible", level: 1);

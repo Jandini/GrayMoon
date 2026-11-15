@@ -2,7 +2,7 @@
 
 @* Group header of the Actions grid: same row and "N repositories" menu as WorkspaceRepositoriesLevelHeader
    (styles in wwwroot/css/dependency-level-header.css), without the dependency-graph link; the failed and
-   running counts follow the title, and the menu has Run and Re-run for the workflows of the group. *@
+   running counts follow the title, and the menu has Run, Re-run and Abort for the workflows of the group. *@
 <tr class="dependency-level-header">
     <td colspan="6" class="dependency-level-header-cell">
         <div class="dependency-level-header-start">
@@ -37,6 +37,11 @@
                             </div>
                         </div>
                     }
+                    <div class="gm-menu-items @(Disabled || AbortCount == 0 ? "gm-menu-items--disabled" : "")">
+                        <div class="gm-menu-item" role="button" tabindex="0" title="@AbortTitle" @onclick="HandleAbort" @onclick:stopPropagation>
+                            <i class="bi bi-x-circle" aria-hidden="true"></i><span>Abort</span>
+                        </div>
+                    </div>
                 </div>
             </span>
         </div>
@@ -56,9 +61,12 @@
     [Parameter] public int RunCount { get; set; }
     /// <summary>Failed workflows Re-run would start again. Re-run is shown only above zero.</summary>
     [Parameter] public int RerunCount { get; set; }
+    /// <summary>Running workflows Abort would cancel. Abort is disabled at zero.</summary>
+    [Parameter] public int AbortCount { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public EventCallback OnRun { get; set; }
     [Parameter] public EventCallback OnRerun { get; set; }
+    [Parameter] public EventCallback OnAbort { get; set; }
 
     private string RunTitle => RunCount == 0
         ? "No workflow to run"
@@ -69,6 +77,15 @@
     private async Task HandleRun()
     {
         if (!Disabled && RunCount > 0) await OnRun.InvokeAsync();
+    }
+
+    private string AbortTitle => AbortCount == 0
+        ? "No running workflow"
+        : $"Abort {AbortCount} running {(AbortCount == 1 ? "workflow" : "workflows")}";
+
+    private async Task HandleAbort()
+    {
+        if (!Disabled && AbortCount > 0) await OnAbort.InvokeAsync();
     }
 
     private async Task HandleRerun()

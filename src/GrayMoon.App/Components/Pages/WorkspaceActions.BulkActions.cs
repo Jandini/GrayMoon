@@ -106,7 +106,8 @@ public sealed partial class WorkspaceActions
         string logName,
         string doneVerb,
         string? scope,
-        Func<GitHubActionEntry, Task> invoke)
+        Func<GitHubActionEntry, Task> invoke,
+        bool waitUntilStopped = false)
     {
         if (pairs.Count == 0 || isRerunningAll) return;
 
@@ -192,7 +193,7 @@ public sealed partial class WorkspaceActions
                     await InvokeAsync(StateHasChanged);
                     try
                     {
-                        notListed = await WaitForStartedRunsAsync(started, waitCts.Token);
+                        notListed = await WaitForStartedRunsAsync(started, waitUntilStopped ? IsRunStopped : IsRunPickedUp, waitCts.Token);
                         waitAborted = waitCts.IsCancellationRequested;
                     }
                     finally
@@ -201,7 +202,9 @@ public sealed partial class WorkspaceActions
                     }
 
                     if (!_disposed)
-                        FollowUpStartedRuns(started);
+                        FollowUpStartedRuns(started, waitUntilStopped);
+                    if (waitUntilStopped)
+                        notListed = 0; // a run that is still stopping stays visible as running in the grid
                 }
             }
         }
@@ -265,12 +268,21 @@ public sealed partial class WorkspaceActions
         return IsLineRunningForBranch(row, line!) || action.RunId != started.RunId || action.UpdatedAt != started.UpdatedAt;
     }
 
+    /// <summary>True when the row no longer shows the run a bulk Abort cancelled as running.</summary>
+    internal static bool IsRunStopped(StartedRun started)
+    {
+        var row = started.Row;
+        var line = row.WorkflowLines.FirstOrDefault(l => l.Action?.RunId == started.RunId)
+            ?? (started.WorkflowId > 0 ? row.WorkflowLines.FirstOrDefault(l => l.Action?.WorkflowId == started.WorkflowId) : null);
+        return line == null || !IsLineRunningForBranch(row, line);
+    }
+
     /// <summary>
     /// Refreshes the started rows until each run is listed, the wait is aborted, or the attempts run out. A refresh
     /// that finds a running workflow starts the auto-poll, so the rows keep updating after the overlay closes.
     /// Returns how many runs are still not listed.
     /// </summary>
-    private async Task<int> WaitForStartedRunsAsync(IReadOnlyList<StartedRun> started, CancellationToken cancellationToken)
+    private async Task<int> WaitForStartedRunsAsync(IReadOnlyList<StartedRun> started, Func<StartedRun, bool> isSettled, CancellationToken cancellationToken)
     {
         using var semaphore = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
         for (var attempt = 1; attempt <= RunWorkflowVisibilityMaxAttempts; attempt++)
@@ -284,11 +296,11 @@ public sealed partial class WorkspaceActions
                 break;
             }
 
-            var pendingRows = started.Where(run => !IsRunPickedUp(run)).Select(run => run.Row).Distinct().ToList();
+            var pendingRows = started.Where(run => !isSettled(run)).Select(run => run.Row).Distinct().ToList();
             await Task.WhenAll(pendingRows.Select(row => RefreshRowThrottledAsync(row, semaphore, cancellationToken)));
 
             if (_disposed) break;
-            _rerunCompleted = started.Count(IsRunPickedUp);
+            _rerunCompleted = started.Count(isSettled);
             await InvokeAsync(StateHasChanged);
             if (_rerunCompleted == started.Count || cancellationToken.IsCancellationRequested) break;
         }
@@ -297,15 +309,18 @@ public sealed partial class WorkspaceActions
         foreach (var row in started.Select(run => run.Row).Distinct())
             row.IsRefreshing = false;
 
-        return started.Count(run => !IsRunPickedUp(run));
+        return started.Count(run => !isSettled(run));
     }
 
     /// <summary>After an aborted or exhausted wait: keep looking, out of sight, for the runs GitHub has not listed yet.</summary>
-    private void FollowUpStartedRuns(IReadOnlyList<StartedRun> started)
+    private void FollowUpStartedRuns(IReadOnlyList<StartedRun> started, bool waitUntilStopped)
     {
         var token = _cts.Token;
-        foreach (var row in started.Where(run => !IsRunPickedUp(run)).Select(run => run.Row).Distinct())
-            _ = TryRefreshUntilAnyWorkflowRunningAsync(row, token);
+        if (!waitUntilStopped)
+        {
+            foreach (var row in started.Where(run => !IsRunPickedUp(run)).Select(run => run.Row).Distinct())
+                _ = TryRefreshUntilAnyWorkflowRunningAsync(row, token);
+        }
 
         if (rows.Any(row => row.WorkflowLines.Any(line => IsLineRunningForBranch(row, line))))
             EnsureAutoPollRunning();

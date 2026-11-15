@@ -57,7 +57,7 @@ public sealed partial class WorkspaceActions
     }
 
     /// <summary>What a group header shows: how many repositories the group has, and what its menu would act on.</summary>
-    internal sealed record ActionGroupSummary(int RepositoryCount, int FailedCount, int RunningCount, int RunCount, int RerunCount);
+    internal sealed record ActionGroupSummary(int RepositoryCount, int FailedCount, int RunningCount, int RunCount, int RerunCount, int AbortCount);
 
     internal const string WorkspaceGroupTitle = "Workspace";
 
@@ -100,6 +100,17 @@ public sealed partial class WorkspaceActions
         IEnumerable<WorkspaceActionRow> rows, bool isFeatureContext, bool includeAiWorkflows) =>
         SelectLines(rows, isFeatureContext, includeAiWorkflows, CanRunAgain);
 
+    /// <summary>
+    /// Runs that Abort cancels: every running workflow that has a run id. Cancelling a run changes nothing in the
+    /// repository, so read only and tag-pinned repositories are included, as with Abort on a single row.
+    /// </summary>
+    internal static List<(WorkspaceActionRow Row, WorkflowActionLine Line)> SelectAbortable(
+        IEnumerable<WorkspaceActionRow> rows, bool includeAiWorkflows) =>
+        rows.SelectMany(row => row.WorkflowLines
+                .Where(line => IsLineIncludedWhenAiFiltered(line, includeAiWorkflows) && CanAbort(row, line) && !line.AbortInProgress)
+                .Select(line => (row, line)))
+            .ToList();
+
     private static List<(WorkspaceActionRow Row, WorkflowActionLine Line)> SelectLines(
         IEnumerable<WorkspaceActionRow> rows,
         bool isFeatureContext,
@@ -116,7 +127,8 @@ public sealed partial class WorkspaceActions
         group.Rows.Sum(row => row.WorkflowLines.Count(line => CountsTowardStatus(row, line) && IsLineFailedForBranch(row, line))),
         group.Rows.Sum(row => row.WorkflowLines.Count(line => CountsTowardStatus(row, line) && IsLineRunningForBranch(row, line))),
         SelectRunnable(group.Rows, _isFeatureContext, IncludeAiWorkflows).Count,
-        SelectRerunnable(group.Rows, _isFeatureContext, IncludeAiWorkflows).Count);
+        SelectRerunnable(group.Rows, _isFeatureContext, IncludeAiWorkflows).Count,
+        SelectAbortable(group.Rows, IncludeAiWorkflows).Count);
 
     private bool BulkActionsDisabled => isRerunningAll || isRefreshing || isLoading;
 
@@ -137,4 +149,14 @@ public sealed partial class WorkspaceActions
                 SelectRerunnable(group.Rows, _isFeatureContext, IncludeAiWorkflows),
                 "Re-running", "Re-run level", "Re-ran", GroupTitle(group),
                 entry => GitHubActionsService.RerunWorkflowAsync(entry));
+
+    /// <summary>Cancels every running workflow of the group on GitHub.</summary>
+    internal Task AbortLevelAsync(ActionRowGroup group) =>
+        BulkActionsDisabled
+            ? Task.CompletedTask
+            : RunBulkAsync(
+                SelectAbortable(group.Rows, IncludeAiWorkflows),
+                "Aborting", "Abort level", "Aborted", GroupTitle(group),
+                entry => GitHubActionsService.CancelWorkflowRunAsync(entry),
+                waitUntilStopped: true);
 }
