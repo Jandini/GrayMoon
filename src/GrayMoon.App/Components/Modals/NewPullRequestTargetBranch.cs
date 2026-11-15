@@ -71,6 +71,24 @@ public static class NewPullRequestTargetBranch
 
         return new NewPrBranchResolution(candidates, selected, NeedsRefresh: snapshot.RemoteBranches.Count == 0);
     }
+
+    /// <summary>
+    /// The candidate to select when <paramref name="branch"/> is applied as the base, using that repository's own
+    /// spelling. Null when it is missing, blank, or the head branch (a pull request cannot target its own head).
+    /// </summary>
+    public static string? BaseToApply(string? branch, string? headBranch, IReadOnlyList<string>? candidates)
+    {
+        if (string.IsNullOrWhiteSpace(branch) || candidates is null || candidates.Count == 0)
+            return null;
+
+        var wanted = branch.Trim();
+        var match = candidates.FirstOrDefault(c => string.Equals(c, wanted, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(match))
+            return null;
+        if (string.Equals(match, headBranch, StringComparison.OrdinalIgnoreCase))
+            return null;
+        return match;
+    }
 }
 
 /// <summary>Result of <see cref="NewPullRequestTargetBranch.Resolve"/>.</summary>

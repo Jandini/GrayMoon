@@ -712,7 +712,7 @@ PR state is reconciled when branch state changes.
 
 PR state comes from GitHub by head branch name, so a PR created or merged from any machine or tool is recognized. The PR's base branch is not compared with where the branch started.
 
-In New Pull Request the default target is the Feature's parent branch (the branch the Workspace was on when the Feature was created) when it still exists remotely, otherwise the repository default branch, never the head branch (`NewPullRequestTargetBranch`). A plain branch in the special Workspace defaults to the default branch.
+In New Pull Request the default target is the Feature's parent branch (the branch the Workspace was on when the Feature was created) when it still exists remotely, otherwise the repository default branch, never the head branch (`NewPullRequestTargetBranch`). A plain branch in the special Workspace defaults to the default branch. **Apply all** on a target-menu row sets that branch on every repository that has it and is not using it as the head.
 
 ---
 
