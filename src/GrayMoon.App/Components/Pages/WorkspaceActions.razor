@@ -264,7 +264,27 @@
                                     else
                                     {
                                         var groupIndex = 0;
-                                        @foreach (var row in rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase))
+                                        var orderedRows = rows.OrderBy(GetStatusSortOrder).ThenBy(r => r.Repo.RepositoryName, System.StringComparer.OrdinalIgnoreCase);
+                                        @foreach (var group in BuildGroups(orderedRows, _groupByDependencyLevel))
+                                        {
+                                        @if (ShowsGroupHeader(group, row => LinesForTable(row).Any()))
+                                        {
+                                            var levelGroup = group;
+                                            var groupSummary = SummarizeGroup(levelGroup);
+                                            <WorkspaceActionsLevelHeader @key="@($"level-header-{levelGroup.Kind}-{levelGroup.LevelKey}")"
+                                                                         Title="@GroupTitle(levelGroup)"
+                                                                         LevelKey="levelGroup.LevelKey"
+                                                                         IsLevelHeader="@(levelGroup.Kind == ActionGroupKind.Level)"
+                                                                         RepositoryCount="groupSummary.RepositoryCount"
+                                                                         FailedCount="groupSummary.FailedCount"
+                                                                         RunningCount="groupSummary.RunningCount"
+                                                                         RunCount="groupSummary.RunCount"
+                                                                         RerunCount="groupSummary.RerunCount"
+                                                                         Disabled="BulkActionsDisabled"
+                                                                         OnRun="() => RunLevelAsync(levelGroup)"
+                                                                         OnRerun="() => RerunLevelAsync(levelGroup)" />
+                                        }
+                                        @foreach (var row in group.Rows)
                                         {
                                             var displayLines = LinesForTable(row).ToList();
                                             if (displayLines.Count == 0)
@@ -495,6 +515,7 @@
 
                                             groupIndex++;
                                         }
+                                        }
                                     }
                                 </tbody>
                             </table>
@@ -505,7 +526,9 @@
         }
     </div>
 
-    <LoadingOverlay IsVisible="@isRerunningAll" Message="@RerunAllOverlayMessage" />
+    <LoadingOverlay IsVisible="@isRerunningAll"
+                    Message="@RerunAllOverlayMessage"
+                    OnAbort="@(_bulkWaiting ? EventCallback.Factory.Create(this, AbortBulkWait) : default(EventCallback))" />
 
     <GhaLogsModal IsVisible="@_logsModalVisible"
                   ConnectorName="@(_logsConnectorName ?? "")"

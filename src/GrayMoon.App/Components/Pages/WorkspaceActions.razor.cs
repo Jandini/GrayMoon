@@ -31,7 +31,9 @@ public sealed partial class WorkspaceActions : IDisposable
 
     [Inject] private IWorkspacePageAccessResolver PageAccess { get; set; } = null!;
     [Inject] private IWorkspaceCiProviderResolver CiProviderResolver { get; set; } = null!;
+    [Inject] private GrayMoon.Application.Workspaces.IWorkspaceCapabilitiesResolver CapabilitiesResolver { get; set; } = null!;
     [Inject] private GitHubActionsService GitHubActionsService { get; set; } = null!;
+    [Inject] private IToastService ToastService { get; set; } = null!;
     [Inject] private WorkspaceRepository WorkspaceRepository { get; set; } = null!;
     [Inject] private IOptions<WorkspaceOptions> WorkspaceOptions { get; set; } = null!;
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = null!;
