@@ -91,6 +91,8 @@ function ensureMermaidLoaded() {
         const script = document.createElement('script');
         // Root-absolute so Blazor routes like /workspaces/1/changes do not resolve to
         // /workspaces/1/mermaid/... (base href="/" also helps; absolute is unambiguous).
+        // The vendored bundle carries one local patch (label wrapping on fractional display
+        // scaling); see MermaidBundleWrapPatchTests before replacing the file.
         script.src = '/mermaid/mermaid.min.js';
         script.async = true;
         script.dataset.graymoonMermaid = '1';
