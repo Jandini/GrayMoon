@@ -72,6 +72,9 @@ public sealed partial class WorkspaceGitChanges
         await SyncDiffReviewEscListenerAsync();
     }
 
+    private Task ZoomMarkdownPreviewAsync(string action)
+        => _markdownViewerRef?.ZoomAsync(action) ?? Task.CompletedTask;
+
     private async Task ToggleDiffReviewExpandedAsync()
         => await SetDiffReviewExpandedAsync(!_diffReviewExpanded);
 

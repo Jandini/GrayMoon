@@ -6,13 +6,14 @@ const viewers = new Map();
 let mermaidReadyPromise = null;
 
 // Document zoom: Ctrl+wheel (and Ctrl +/-/0 with focus in the preview) scales only the rendered
-// document, not the page. One level for every preview in this browser tab. It lives only in this
-// module, so it survives in-app navigation and is back at 100% after a page reload (F5).
+// document, not the page. One level for every preview in this browser tab, kept in sessionStorage
+// so it survives a page reload (F5); the reset icon in the preview chrome and Ctrl+0 go back to 100%.
+const PREVIEW_ZOOM_STORAGE_KEY = 'graymoon.git-changes.md-preview-zoom';
 const PREVIEW_ZOOM_MIN = 0.5;
 const PREVIEW_ZOOM_MAX = 3;
 const PREVIEW_ZOOM_STEP = 1.1;
 const MERMAID_REFIT_EVENT = 'gm-mermaid-refit';
-let previewZoom = 1;
+let previewZoom = null;
 
 function clampPreviewZoom(value) {
     if (!Number.isFinite(value) || value <= 0) {
@@ -25,6 +26,18 @@ function clampPreviewZoom(value) {
 }
 
 function getPreviewZoom() {
+    if (previewZoom === null) {
+        previewZoom = 1;
+        try {
+            const stored = parseFloat(window.sessionStorage.getItem(PREVIEW_ZOOM_STORAGE_KEY) || '');
+            if (Number.isFinite(stored)) {
+                previewZoom = clampPreviewZoom(stored);
+            }
+        } catch {
+            /* storage unavailable - zoom still works, it is just not remembered */
+        }
+    }
+
     return previewZoom;
 }
 
@@ -48,6 +61,12 @@ function setPreviewZoom(value) {
     }
 
     previewZoom = next;
+    try {
+        window.sessionStorage.setItem(PREVIEW_ZOOM_STORAGE_KEY, String(next));
+    } catch {
+        /* ignore - see getPreviewZoom */
+    }
+
     for (const entry of viewers.values()) {
         applyPreviewZoom(entry);
     }
@@ -1341,6 +1360,14 @@ export async function init(elementId) {
     ensureFindWidget(entry);
     ensureFindKeyListener();
     return true;
+}
+
+/** Zoom icons in the page chrome: same steps as Ctrl+wheel; anything but in / out is back to 100%. */
+export function zoomPreview(action) {
+    const zoom = getPreviewZoom();
+    setPreviewZoom(action === 'in' ? zoom * PREVIEW_ZOOM_STEP
+        : action === 'out' ? zoom / PREVIEW_ZOOM_STEP
+        : 1);
 }
 
 export async function setHtml(elementId, html) {

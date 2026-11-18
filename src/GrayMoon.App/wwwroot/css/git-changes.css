@@ -886,7 +886,16 @@
     white-space: nowrap;
 }
 
-/* Shared miniature frameless expand / shrink control. */
+/* Right-hand icons of the chrome: document zoom (Preview only) and the expand control. */
+.git-diff-chrome__actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+}
+
+/* Shared miniature frameless icon control (expand / shrink, document zoom). */
 .git-diff-expand-btn {
     width: 1.35rem;
     height: 1.35rem;
@@ -1364,10 +1373,33 @@ a .markdown-img-fallback {
     height: 100%;
 }
 
+/* Lightbox: frameless gray icons on the X's line, directly left of it (X is 2rem wide at 0.65rem). */
 .mermaid-panzoom--lightbox .mermaid-panzoom-controls {
     display: flex;
-    top: 2.75rem;
-    right: 0.75rem;
+    align-items: center;
+    top: 0.65rem;
+    right: 2.75rem;
+    gap: 0.1rem;
+    z-index: 4;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom-btn {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-secondary, #aaa);
+    width: 1.7rem;
+    height: 2rem;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom-btn .bi {
+    font-size: 1rem;
+}
+
+.mermaid-panzoom--lightbox .mermaid-panzoom-btn:hover {
+    border: none;
+    background: transparent;
+    color: var(--text-primary, #fff);
 }
 
 body.gm-mermaid-lightbox-open {
@@ -1392,7 +1424,8 @@ body.gm-mermaid-lightbox-open {
     position: absolute;
     top: 0.85rem;
     left: 1rem;
-    right: 3.5rem;
+    /* Clear of the zoom icons and the X on the same line. */
+    right: 8.75rem;
     z-index: 3;
     font-weight: 600;
     color: var(--text-primary, #e8e8e8);

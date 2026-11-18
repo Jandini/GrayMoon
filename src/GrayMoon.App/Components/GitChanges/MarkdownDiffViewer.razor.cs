@@ -79,6 +79,26 @@ public sealed partial class MarkdownDiffViewer : IAsyncDisposable
         }
     }
 
+    /// <summary>Changes the document zoom shared by every preview in the tab: "in", "out" or "reset" (100%).</summary>
+    public async Task ZoomAsync(string action)
+    {
+        if (!await EnsureReadyAsync())
+        {
+            return;
+        }
+
+        try
+        {
+            await _module!.InvokeVoidAsync("zoomPreview", action);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     /// <summary>Moves to the next change. False when already on the last one and <paramref name="wrap"/> is off.</summary>
     public Task<bool> GoToNextChangeAsync(bool wrap = false) => StepChangeAsync("goToNextChange", wrap);
 

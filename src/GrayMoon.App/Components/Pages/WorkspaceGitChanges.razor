@@ -313,14 +313,40 @@
                                         </div>
                                     }
                                 </div>
-                                <button type="button"
-                                        class="git-diff-expand-btn text-nowrap flex-shrink-0"
-                                        title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
-                                        aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
-                                        aria-pressed="@_diffReviewExpanded"
-                                        @onclick="ToggleDiffReviewExpandedAsync">
-                                    <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
-                                </button>
+                                <div class="git-diff-chrome__actions">
+                                    @if (_mdSurface == MdSurface.Preview)
+                                    {
+                                        <button type="button"
+                                                class="git-diff-expand-btn text-nowrap"
+                                                title="Zoom in document (Ctrl+wheel)"
+                                                aria-label="Zoom in document"
+                                                @onclick="@(() => ZoomMarkdownPreviewAsync("in"))">
+                                            <i class="bi bi-zoom-in" aria-hidden="true"></i>
+                                        </button>
+                                        <button type="button"
+                                                class="git-diff-expand-btn text-nowrap"
+                                                title="Zoom out document (Ctrl+wheel)"
+                                                aria-label="Zoom out document"
+                                                @onclick="@(() => ZoomMarkdownPreviewAsync("out"))">
+                                            <i class="bi bi-zoom-out" aria-hidden="true"></i>
+                                        </button>
+                                        <button type="button"
+                                                class="git-diff-expand-btn text-nowrap"
+                                                title="Reset document zoom to 100% (Ctrl+0)"
+                                                aria-label="Reset document zoom"
+                                                @onclick="@(() => ZoomMarkdownPreviewAsync("reset"))">
+                                            <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+                                        </button>
+                                    }
+                                    <button type="button"
+                                            class="git-diff-expand-btn text-nowrap flex-shrink-0"
+                                            title="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                            aria-label="@(_diffReviewExpanded ? "Show file tree" : "Hide file tree for wider review")"
+                                            aria-pressed="@_diffReviewExpanded"
+                                            @onclick="ToggleDiffReviewExpandedAsync">
+                                        <i class="bi @(_diffReviewExpanded ? "bi-fullscreen-exit" : "bi-arrows-fullscreen")" aria-hidden="true"></i>
+                                    </button>
+                                </div>
                             </div>
                         }
                         else
