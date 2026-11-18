@@ -5,6 +5,83 @@
 const viewers = new Map();
 let mermaidReadyPromise = null;
 
+// Document zoom: Ctrl+wheel (and Ctrl +/-/0 with focus in the preview) scales only the rendered
+// document, not the page. One level for every preview in this browser tab, kept in sessionStorage.
+const PREVIEW_ZOOM_STORAGE_KEY = 'graymoon.git-changes.md-preview-zoom';
+const PREVIEW_ZOOM_MIN = 0.5;
+const PREVIEW_ZOOM_MAX = 3;
+const PREVIEW_ZOOM_STEP = 1.1;
+const MERMAID_REFIT_EVENT = 'gm-mermaid-refit';
+let previewZoom = null;
+
+function clampPreviewZoom(value) {
+    if (!Number.isFinite(value) || value <= 0) {
+        return 1;
+    }
+
+    const clamped = Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, value));
+    // Snap to 100% when a wheel step lands next to it, so zooming in and back out ends at exactly 1.
+    return Math.abs(clamped - 1) < 0.03 ? 1 : Math.round(clamped * 100) / 100;
+}
+
+function getPreviewZoom() {
+    if (previewZoom === null) {
+        previewZoom = 1;
+        try {
+            const stored = parseFloat(window.sessionStorage.getItem(PREVIEW_ZOOM_STORAGE_KEY) || '');
+            if (Number.isFinite(stored)) {
+                previewZoom = clampPreviewZoom(stored);
+            }
+        } catch {
+            /* storage unavailable - zoom still works, it is just not remembered */
+        }
+    }
+
+    return previewZoom;
+}
+
+function applyPreviewZoom(entry) {
+    const zoom = getPreviewZoom();
+    const el = entry.el;
+    // Keep the reading position: the text re-wraps, so restore the same relative offset.
+    const ratio = el.scrollHeight > 0 ? el.scrollTop / el.scrollHeight : 0;
+    el.style.zoom = zoom === 1 ? '' : String(zoom);
+    for (const frame of el.querySelectorAll('.mermaid-panzoom')) {
+        sizeMermaidFrame(frame);
+        frame.dispatchEvent(new Event(MERMAID_REFIT_EVENT));
+    }
+    el.scrollTop = ratio * el.scrollHeight;
+}
+
+function setPreviewZoom(value) {
+    const next = clampPreviewZoom(value);
+    if (next === getPreviewZoom()) {
+        return;
+    }
+
+    previewZoom = next;
+    try {
+        window.sessionStorage.setItem(PREVIEW_ZOOM_STORAGE_KEY, String(next));
+    } catch {
+        /* ignore - see getPreviewZoom */
+    }
+
+    for (const entry of viewers.values()) {
+        applyPreviewZoom(entry);
+    }
+}
+
+function onPreviewWheel(e) {
+    // Chromium reports a touchpad pinch as Ctrl+wheel too. Without preventDefault the browser
+    // (or WebView2) zooms the whole page.
+    if (!e.ctrlKey || e.altKey || e.deltaY === 0) {
+        return;
+    }
+
+    e.preventDefault();
+    setPreviewZoom(getPreviewZoom() * (e.deltaY < 0 ? PREVIEW_ZOOM_STEP : 1 / PREVIEW_ZOOM_STEP));
+}
+
 function configureMermaid(api) {
     api.initialize({
         startOnLoad: false,
@@ -197,10 +274,18 @@ function attachPanZoom(container, content, options = {}) {
         apply();
     };
 
+    // Pointer coordinates are viewport pixels; translate() runs in the container's own pixels,
+    // which differ while the document zoom is not 100%.
+    const localScale = () => {
+        const width = container.offsetWidth;
+        return width > 0 ? container.getBoundingClientRect().width / width || 1 : 1;
+    };
+
     const zoomBy = (factor, clientX, clientY) => {
         const rect = container.getBoundingClientRect();
-        const cx = (clientX ?? (rect.left + rect.width / 2)) - rect.left;
-        const cy = (clientY ?? (rect.top + rect.height / 2)) - rect.top;
+        const local = localScale();
+        const cx = ((clientX ?? (rect.left + rect.width / 2)) - rect.left) / local;
+        const cy = ((clientY ?? (rect.top + rect.height / 2)) - rect.top) / local;
         const prev = scale;
         scale = Math.min(maxScale, Math.max(minScale, scale * factor));
         translateX = cx - (cx - translateX) * (scale / prev);
@@ -248,6 +333,8 @@ function attachPanZoom(container, content, options = {}) {
     container.style.userSelect = 'none';
     container.style.webkitUserSelect = 'none';
     container.addEventListener('selectstart', (e) => e.preventDefault());
+    // The document zoom changes the frame's size in its own pixels; fit the diagram again.
+    container.addEventListener(MERMAID_REFIT_EVENT, () => fit());
 
     requestAnimationFrame(() => {
         fit();
@@ -280,8 +367,9 @@ function attachPanZoom(container, content, options = {}) {
         e.preventDefault();
         clearTextSelection();
         isPanning = true;
-        startX = e.clientX - translateX;
-        startY = e.clientY - translateY;
+        const local = localScale();
+        startX = e.clientX / local - translateX;
+        startY = e.clientY / local - translateY;
         container.setPointerCapture(e.pointerId);
         container.classList.add('mermaid-panzoom--dragging');
     });
@@ -292,8 +380,9 @@ function attachPanZoom(container, content, options = {}) {
         }
         e.preventDefault();
         clearTextSelection();
-        translateX = e.clientX - startX;
-        translateY = e.clientY - startY;
+        const local = localScale();
+        translateX = e.clientX / local - startX;
+        translateY = e.clientY / local - startY;
         apply();
     });
 
@@ -393,7 +482,13 @@ function fitSvgToContainer(container, host) {
 function sizeMermaidFrame(wrap) {
     const vh = window.innerHeight || 800;
     // Tall default frame; diagram is then fit-to-fill this box.
-    const preferred = Math.max(340, Math.min(580, Math.round(vh * 0.48)));
+    let preferred = Math.max(340, Math.min(580, Math.round(vh * 0.48)));
+    // The height is in the frame's own pixels. Zoomed in, keep the frame the same size on screen
+    // so it never grows past the pane; the diagram already fills it and has its own zoom.
+    const zoom = wrap.closest('.markdown-diff-viewer') ? getPreviewZoom() : 1;
+    if (zoom > 1) {
+        preferred = Math.round(preferred / zoom);
+    }
     wrap.style.minHeight = `${preferred}px`;
     wrap.style.height = `${preferred}px`;
 }
@@ -1149,6 +1244,20 @@ function onFindDocumentKeydown(e) {
     }
 
     const modifier = e.ctrlKey || e.metaKey;
+    // Ctrl +/-/0 with focus in the preview zooms the document; elsewhere the browser zooms the page.
+    if (modifier && !e.altKey && inPreview && !inOtherField) {
+        const zoomKey = e.key === '+' || e.key === '=' ? PREVIEW_ZOOM_STEP
+            : e.key === '-' || e.key === '_' ? 1 / PREVIEW_ZOOM_STEP
+            : e.key === '0' ? 0
+            : null;
+        if (zoomKey !== null) {
+            e.preventDefault();
+            e.stopPropagation();
+            setPreviewZoom(zoomKey === 0 ? 1 : getPreviewZoom() * zoomKey);
+            return;
+        }
+    }
+
     if (modifier && !e.altKey && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         if (inOtherField || (!inPreview && !entry.findOpen)) {
             return;
@@ -1227,6 +1336,8 @@ export async function init(elementId) {
         wrap: null,
     };
     viewers.set(elementId, entry);
+    el.addEventListener('wheel', onPreviewWheel, { passive: false });
+    applyPreviewZoom(entry);
     ensureFindWidget(entry);
     ensureFindKeyListener();
     return true;
@@ -1328,6 +1439,7 @@ export function dispose(elementId) {
     cancelFindDebounce(entry);
     unwrapFindMarks(entry.el);
     entry.widget?.remove();
+    entry.el.removeEventListener('wheel', onPreviewWheel);
     entry.el.innerHTML = '';
     viewers.delete(elementId);
     if (viewers.size === 0) {
