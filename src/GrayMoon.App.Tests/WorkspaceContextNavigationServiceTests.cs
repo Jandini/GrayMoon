@@ -54,6 +54,57 @@ public sealed class WorkspaceContextNavigationServiceTests
         Assert.Contains("EDX1", Uri.UnescapeDataString(navigation.Uri), StringComparison.Ordinal);
     }
 
+    // 2026-11-18: the Changes page ran with WorkspaceId 0 and the previous Workspace's ?context=244.
+    // ResolveForPageAsync threw "Workspace 0 was not found" out of the page's parameter lifecycle and
+    // ended the circuit ("Reload page").
+    [Fact]
+    public async Task ResolveForPage_throws_for_a_missing_workspace_and_TryResolveForPage_returns_null()
+    {
+        const string uri = "http://localhost/workspaces/1/changes?context=244";
+        var navigation = new TestNavigationManager(uri);
+        var selected = new FakeSelected(null);
+        var service = new WorkspaceContextNavigationService(
+            new FakeResolver(), selected, navigation, NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResolveForPageAsync(workspaceId: 404, contextQuery: null));
+
+        Assert.Null(await service.TryResolveForPageAsync(workspaceId: 404, contextQuery: null));
+    }
+
+    [Fact]
+    public async Task TryResolveForPage_without_a_workspace_id_resolves_nothing_and_keeps_url_and_selection()
+    {
+        const string uri = "http://localhost/workspaces/1/changes?context=244";
+        var navigation = new TestNavigationManager(uri);
+        var selected = new FakeSelected(null);
+        var resolver = new FakeResolver();
+        var service = new WorkspaceContextNavigationService(
+            resolver, selected, navigation, NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        var info = await service.TryResolveForPageAsync(workspaceId: 0, contextQuery: 244);
+
+        Assert.Null(info);
+        Assert.Equal(uri, navigation.Uri);
+        Assert.Empty(selected.SetCalls);
+        Assert.Equal(0, resolver.Calls);
+    }
+
+    [Fact]
+    public async Task TryResolveForPage_resolves_like_ResolveForPage_for_a_known_workspace()
+    {
+        var selected = new FakeSelected(new WorkspaceFeatureContextId(1));
+        var service = new WorkspaceContextNavigationService(
+            new FakeResolver(),
+            selected,
+            new TestNavigationManager("http://localhost/workspaces/19/changes?context=34"),
+            NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        var info = await service.TryResolveForPageAsync(workspaceId: 19, contextQuery: 34);
+
+        Assert.Equal(34, info?.ContextId.Value);
+        Assert.Equal([(19, 34)], selected.SetCalls);
+    }
+
     [Fact]
     public void AppendContextQuery_adds_context_for_feature_and_skips_workspace()
     {
@@ -111,11 +162,19 @@ public sealed class WorkspaceContextNavigationServiceTests
 
     private sealed class FakeResolver : IWorkspaceFeatureContextResolver
     {
+        public int Calls { get; private set; }
+
         public Task<WorkspaceFeatureContextId> GetOrCreateSpecialWorkspaceContextIdAsync(int workspaceId, CancellationToken cancellationToken = default)
-            => Task.FromResult(new WorkspaceFeatureContextId(workspaceId == 1 ? 1 : 33));
+        {
+            Calls++;
+            return workspaceId is 1 or 19
+                ? Task.FromResult(new WorkspaceFeatureContextId(workspaceId == 1 ? 1 : 33))
+                : throw new InvalidOperationException($"Workspace {workspaceId} was not found.");
+        }
 
         public Task<WorkspaceFeatureContextInfo> GetRequiredAsync(WorkspaceFeatureContextId contextId, int? expectedWorkspaceId = null, CancellationToken cancellationToken = default)
         {
+            Calls++;
             var owner = contextId.Value switch
             {
                 34 => 19,

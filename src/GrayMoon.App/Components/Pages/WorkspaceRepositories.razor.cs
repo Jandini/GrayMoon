@@ -13,7 +13,7 @@ namespace GrayMoon.App.Components.Pages;
 public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
-    [SupplyParameterFromQuery(Name = "context")] public int? ContextQuery { get; set; }
+    [Parameter, PageQuery("context")] public int? ContextQuery { get; set; }
     [Inject] private IWorkspacePageService WorkspacePageService { get; set; } = default!;
     [Inject] private WorkspaceOperationOutcomeStore OperationOutcomes { get; set; } = default!;
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = default!;

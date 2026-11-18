@@ -1,6 +1,11 @@
-﻿<Router AppAssembly="typeof(Program).Assembly">
+﻿@inject NavigationManager Navigation
+
+@* The router is static (pages are interactive on their own), so this runs once per navigation on the server.
+   PageQueryRouteData puts a page's [PageQuery] values next to its route values: both then reach the page in
+   one parameter update. See PageQueryAttribute. *@
+<Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <RouteView RouteData="PageQueryRouteData.WithQueryParameters(routeData, Navigation.Uri)" DefaultLayout="typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>

@@ -147,7 +147,7 @@
 @code {
     [Parameter] public int WorkspaceId { get; set; }
 
-    [SupplyParameterFromQuery(Name = "context")]
+    [Parameter, PageQuery("context")]
     public int? ContextQuery { get; set; }
 
     private WorkspacePageAccessOutcome? _pageAccess;

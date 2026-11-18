@@ -16,7 +16,7 @@ public sealed partial class WorkspaceProjects : IAsyncDisposable, IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
 
-    [SupplyParameterFromQuery(Name = "context")]
+    [Parameter, PageQuery("context")]
     public int? ContextQuery { get; set; }
 
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;

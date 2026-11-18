@@ -56,6 +56,39 @@ public sealed class WorkspaceContextNavigationService(
     }
 
     /// <summary>
+    /// <see cref="ResolveForPageAsync"/> for a page that must stay alive when its Workspace cannot be
+    /// resolved. Returns null, and leaves the URL and the stored selection alone, when the page has no
+    /// Workspace id yet (a parameter set without the route value arrives as 0) or the Workspace does not
+    /// exist. An exception thrown from a page's parameter lifecycle ends the whole circuit ("Reload page").
+    /// </summary>
+    public async Task<WorkspaceFeatureContextInfo?> TryResolveForPageAsync(
+        int workspaceId,
+        int? contextQuery,
+        CancellationToken cancellationToken = default)
+    {
+        if (workspaceId <= 0)
+        {
+            logger.LogWarning(
+                "Page has no Workspace id (got {WorkspaceId}, context query {ContextQuery}) at {Uri}; nothing resolved.",
+                workspaceId, contextQuery, navigation.Uri);
+            return null;
+        }
+
+        try
+        {
+            return await ResolveForPageAsync(workspaceId, contextQuery, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not resolve a context for workspace {WorkspaceId} (context query {ContextQuery}) at {Uri}.",
+                workspaceId, contextQuery, navigation.Uri);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Same precedence as <see cref="ResolveForPageAsync"/> (valid <c>?context=</c>, then the stored
     /// selection, then the special Workspace) without persisting the selection or rewriting the URL.
     /// For sidebar widgets that only need to know which context a workspace link will open.

@@ -200,6 +200,8 @@ dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj
 
 GrayMoon uses interactive Blazor Server components.
 
+The router (`Components/Routes.razor`) is static; each page declares its own interactive render mode and is a root component of the circuit. A navigation is a server render of the new page followed by one parameter update of the page's root component. A page's query-string values travel in that same update: a page property marked `[Parameter, PageQuery("name")]` is read from the URL by `PageQueryRouteData` during the server render and passed next to the route values. `[SupplyParameterFromQuery]` is not used on a page, because it is pushed from the circuit's location change at the start of the navigation together with the previous route values, so a page would see a Workspace id and a `?context=` that never belonged together (`PageQueryRouteDataTests` fails on it).
+
 Workspace pages are split into Razor markup and partial code-behind files to keep large workflows manageable.
 
 Shared patterns include:

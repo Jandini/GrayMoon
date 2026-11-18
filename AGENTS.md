@@ -590,3 +590,7 @@ Every new checkbox or radio gets `class="form-check-input form-check-input-gray"
 ## Text parameters need `@`
 
 A string component parameter written `Message="_field"` (no `@`) is a literal, so the dialog shows "_field" instead of the value. Write `Message="@_field"` for every string parameter (Message, Title, RepoName, ...); only non-string parameters may omit the `@`. `RazorStringParameterLiteralTests` fails on a text-like name given a bare field.
+
+## Page query values use `[PageQuery]`, never `[SupplyParameterFromQuery]`
+
+A routable page reads a query-string value with `[Parameter, PageQuery("name")]` (`int?` or `string`). `PageQueryRouteData` (called from `Routes.razor`) passes it with the route values, so the page gets its Workspace id and `?context=` in one parameter update. `[SupplyParameterFromQuery]` on a page is delivered separately and earlier, next to the previous route values: a switch from a Feature of one Workspace to another Workspace made every Workspace page load the first Workspace without its Feature (and store that as its selection) before loading the target. `PageQueryRouteDataTests` fails on a page that uses it.
