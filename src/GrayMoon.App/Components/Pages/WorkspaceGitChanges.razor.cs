@@ -20,10 +20,10 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     [Parameter] public int WorkspaceId { get; set; }
 
     /// <summary>Prefills the filter from `?q=` (e.g. the Workflow Repositories changed-files badge links here with `repo:Name`).</summary>
-    [SupplyParameterFromQuery(Name = "q")]
+    [Parameter, PageQuery("q")]
     public string? IncomingFilterQuery { get; set; }
 
-    [SupplyParameterFromQuery(Name = "context")]
+    [Parameter, PageQuery("context")]
     public int? ContextQuery { get; set; }
 
     private WorkspaceFeatureContextId? _selectedContextId;

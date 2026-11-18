@@ -15,10 +15,10 @@ public sealed partial class WorkspaceActions : IDisposable
     [Parameter] public int WorkspaceId { get; set; }
 
     /// <summary>Prefills the repository/workflow search from <c>?q=</c> (e.g. the merge-dialog checks link uses <c>repo:Name</c>).</summary>
-    [SupplyParameterFromQuery(Name = "q")]
+    [Parameter, PageQuery("q")]
     public string? SearchQuery { get; set; }
 
-    [SupplyParameterFromQuery(Name = "context")]
+    [Parameter, PageQuery("context")]
     public int? ContextQuery { get; set; }
 
     private WorkspacePageAccessOutcome? _pageAccess;
