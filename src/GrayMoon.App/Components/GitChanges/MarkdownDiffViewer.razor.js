@@ -6,7 +6,8 @@ const viewers = new Map();
 let mermaidReadyPromise = null;
 
 // Document zoom: Ctrl+wheel (and Ctrl +/-/0 with focus in the preview) scales only the rendered
-// document, not the page. One level for every preview in this browser tab, kept in sessionStorage.
+// document, not the page. One level for every preview in this browser tab, kept in sessionStorage
+// so it survives a page reload (F5); the reset icon in the preview chrome and Ctrl+0 go back to 100%.
 const PREVIEW_ZOOM_STORAGE_KEY = 'graymoon.git-changes.md-preview-zoom';
 const PREVIEW_ZOOM_MIN = 0.5;
 const PREVIEW_ZOOM_MAX = 3;
@@ -464,8 +465,15 @@ function fitSvgToContainer(container, host) {
     const style = window.getComputedStyle(container);
     const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
     const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-    const availW = Math.max(40, container.clientWidth - padX - 16);
-    const availH = Math.max(40, container.clientHeight - padY - 16);
+    // Inside a zoomed document, fit against the frame as it is at 100%: its width in own pixels
+    // shrinks as the zoom grows, and its height may be capped to the pane. The diagram then keeps
+    // its 100% size in own pixels, so on screen it grows and shrinks with the text around it.
+    const zoom = container.closest('.markdown-diff-viewer') ? getPreviewZoom() : 1;
+    const baseH = zoom === 1 ? NaN : parseFloat(container.dataset.mermaidBaseHeight || '');
+    const frameW = container.clientWidth * zoom;
+    const frameH = Number.isFinite(baseH) && baseH > 0 ? baseH : container.clientHeight;
+    const availW = Math.max(40, frameW - padX - 16);
+    const availH = Math.max(40, frameH - padY - 16);
     if (availW <= 0 || availH <= 0) {
         return;
     }
@@ -476,21 +484,32 @@ function fitSvgToContainer(container, host) {
 
     svg.setAttribute('width', String(displayW));
     svg.setAttribute('height', String(displayH));
-    svg.style.cssText = `width:${displayW}px;height:${displayH}px;max-width:none;max-height:none;display:block;`;
+    svg.style.cssText = `width:${displayW}px;height:${displayH}px;max-width:none;max-height:none;display:block;flex-shrink:0;`;
 }
 
 function sizeMermaidFrame(wrap) {
     const vh = window.innerHeight || 800;
     // Tall default frame; diagram is then fit-to-fill this box.
     let preferred = Math.max(340, Math.min(580, Math.round(vh * 0.48)));
-    // The height is in the frame's own pixels. Zoomed in, keep the frame the same size on screen
-    // so it never grows past the pane; the diagram already fills it and has its own zoom.
-    const zoom = wrap.closest('.markdown-diff-viewer') ? getPreviewZoom() : 1;
-    if (zoom > 1) {
-        preferred = Math.round(preferred / zoom);
+    // fitSvgToContainer sizes the diagram against this height, whatever the frame is capped to.
+    wrap.dataset.mermaidBaseHeight = String(preferred);
+    // The height is in the frame's own pixels, so the frame grows and shrinks with the document.
+    // Zoomed in, stop at the visible pane: a frame taller than the pane could not be seen whole.
+    const viewer = wrap.closest('.markdown-diff-viewer');
+    const zoom = viewer ? getPreviewZoom() : 1;
+    if (viewer && zoom > 1) {
+        const paneHeight = viewer.getBoundingClientRect().height / zoom;
+        if (paneHeight > 0) {
+            preferred = Math.max(120, Math.min(preferred, Math.round(paneHeight - 24)));
+        }
     }
     wrap.style.minHeight = `${preferred}px`;
     wrap.style.height = `${preferred}px`;
+    // The stylesheet's 260px minimum would push the centered diagram out of a shorter frame.
+    const content = wrap.querySelector('.mermaid-panzoom__content');
+    if (content) {
+        content.style.minHeight = preferred < 260 ? '0' : '';
+    }
 }
 
 function cleanHeadingTitle(text) {
@@ -1341,6 +1360,14 @@ export async function init(elementId) {
     ensureFindWidget(entry);
     ensureFindKeyListener();
     return true;
+}
+
+/** Zoom icons in the page chrome: same steps as Ctrl+wheel; anything but in / out is back to 100%. */
+export function zoomPreview(action) {
+    const zoom = getPreviewZoom();
+    setPreviewZoom(action === 'in' ? zoom * PREVIEW_ZOOM_STEP
+        : action === 'out' ? zoom / PREVIEW_ZOOM_STEP
+        : 1);
 }
 
 export async function setHtml(elementId, html) {
