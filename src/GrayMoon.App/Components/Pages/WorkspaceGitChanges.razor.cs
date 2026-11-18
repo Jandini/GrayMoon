@@ -82,6 +82,13 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     {
         JobService.Changed += OnJobServiceChanged;
         CommitGeneration.Changed += OnCommitGenerationChanged;
+        if (WorkspaceId <= 0)
+        {
+            // No route value yet: OnParametersSetAsync reports it and the next parameter set loads the page.
+            WorkerConnectionTracker.OnStateChanged(OnAiWorkerStateChanged);
+            return Task.CompletedTask;
+        }
+
         ApplyIncomingFilterQuery();
         EnsureActivitySubscription();
         _ = LoadAiMenuAsync();
@@ -147,6 +154,25 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
     protected override async Task OnParametersSetAsync()
     {
+        if (WorkspaceId <= 0)
+        {
+            // Seen once after a cross-workspace switch (2026-11-18): the page ran with WorkspaceId 0 and the
+            // previous Workspace's ?context=. Keep what is loaded, subscribe to nothing for Workspace 0, and
+            // let the next parameter set (with the route value) load normally.
+            Logger.LogWarning(
+                "Changes page received no Workspace id (context query {ContextQuery}, loaded workspace {LoadedWorkspaceId}) at {Uri}; parameter set ignored.",
+                ContextQuery, _loadedWorkspaceId, NavigationManager.Uri);
+            _errorMessage = "This page did not receive its Workspace. Reload the page if it does not recover.";
+            _missingWorkspaceIdReported = true;
+            return;
+        }
+
+        if (_missingWorkspaceIdReported)
+        {
+            _missingWorkspaceIdReported = false;
+            _errorMessage = null;
+        }
+
         var workspaceChanged = _loadedWorkspaceId is int loadedWorkspaceId && loadedWorkspaceId != WorkspaceId;
         if (workspaceChanged)
         {
@@ -162,11 +188,15 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
 
         _loadedWorkspaceId = WorkspaceId;
         _loadedContextQuery = ContextQuery;
-        ResetAiForScopeChange(reloadMenu: workspaceChanged);
+        // The menu is also (re)read when it was never read for this Workspace (first parameters had no id).
+        ResetAiForScopeChange(reloadMenu: workspaceChanged || _aiMenuWorkspaceId != WorkspaceId);
         await ResolveContextAndStartLoadAsync();
     }
 
     private Task? _initialLoadTask;
+
+    /// <summary>True while the error shown is the "no Workspace id" one, so valid parameters clear it.</summary>
+    private bool _missingWorkspaceIdReported;
 
     /// <summary>
     /// Runs the initial (or workspace-switch) load inline instead of a background job, so opening this
@@ -1023,7 +1053,18 @@ public sealed partial class WorkspaceGitChanges : IAsyncDisposable
     }
     private async Task ResolveContextAndStartLoadAsync()
     {
-        var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
+        // Never throws: an exception here is unhandled in the parameter lifecycle and ends the circuit.
+        var workspaceId = WorkspaceId;
+        var info = await ContextNavigation.TryResolveForPageAsync(workspaceId, ContextQuery);
+        if (_disposed || workspaceId != WorkspaceId)
+            return;
+
+        if (info is null)
+        {
+            _errorMessage = "Workspace not found.";
+            return;
+        }
+
         _selectedContextId = info.ContextId;
         RestoreWorkspaceCommitMessage();
         StartInitialLoadJob();

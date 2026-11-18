@@ -136,9 +136,16 @@ public sealed partial class WorkspaceGitChanges
         return message;
     }
 
+    /// <summary>The Workspace the provider menu was last requested for; null until the first request.</summary>
+    private int? _aiMenuWorkspaceId;
+
     private async Task LoadAiMenuAsync()
     {
         var workspaceId = WorkspaceId;
+        if (workspaceId <= 0)
+            return;
+
+        _aiMenuWorkspaceId = workspaceId;
         try
         {
             var menu = await AiOperations.GetProvidersAsync(workspaceId, CancellationToken.None);
