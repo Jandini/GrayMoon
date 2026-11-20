@@ -1,0 +1,108 @@
+/* Scope | Name | Value | remove. Rows are display: contents so every column lines up across rows.
+   The grid is the scroll container for the variables: the intro text, the column headers (sticky), the Add button
+   and the footer stay in place, and the tab itself never scrolls. It shows exactly three variables and scrolls the
+   rest, so a row is never cut in half: the height is the header plus three rows, each with the gap above it.
+   --env-row is the height of a small Bootstrap input or select (line 1.5 x 0.875rem, padding 2 x 0.25rem,
+   border 2 x 1px); change it together with the controls in the rows. */
+.env-grid {
+    --env-head: 1.5rem;
+    --env-row: calc(1.5 * 0.875rem + 0.5rem + 2px);
+    --env-gap: 0.4rem;
+    --env-visible-rows: 3;
+    display: grid;
+    /* Name and Value share all the width the card has; Scope and the remove button keep their size. */
+    grid-template-columns: minmax(8rem, 9.5rem) minmax(10rem, 1fr) minmax(9rem, 1.4fr) auto;
+    column-gap: 0.5rem;
+    row-gap: var(--env-gap);
+    align-items: center;
+    /* The last 1px is the bottom padding below. */
+    max-height: calc(var(--env-head) + var(--env-visible-rows) * (var(--env-gap) + var(--env-row)) + 1px);
+    overflow-y: auto;
+    /* Room for the focus frame of the first and last column, and a gap before the scrollbar. */
+    padding: 0 0.35rem 1px 1px;
+}
+
+.env-grid__head,
+.env-grid__row {
+    display: contents;
+}
+
+/* Stays above the rows that scroll under it, on the card's own background. */
+.env-grid__head > span {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: var(--env-head);
+    padding: 0 0 0 0.15rem;
+    line-height: var(--env-head);
+    background: var(--bg-card);
+}
+
+/* The scope list and the name suggestions open in popups the browser draws itself. No page CSS reaches them or
+   their scrollbar; a dark color scheme on the control is what makes both dark instead of white. */
+.env-grid .form-select,
+.env-grid .form-control {
+    color-scheme: dark;
+}
+
+/* Bootstrap's select arrow is dark gray, invisible on the dark input background. */
+.env-grid .form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23adb5bd' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+}
+
+/* The scope's icon sits inside the select, left of its text. A native option cannot hold an image, so the open
+   list is text only. */
+.env-scope {
+    position: relative;
+    min-width: 0;
+}
+
+.env-scope .form-select {
+    padding-left: 1.9rem;
+}
+
+.env-scope__icon {
+    position: absolute;
+    top: 50%;
+    left: 0.6rem;
+    width: 14px;
+    height: 14px;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+i.env-scope__icon {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1;
+}
+
+.env-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--bs-secondary-color);
+    font-size: 1.05rem;
+    line-height: 1;
+}
+
+.env-remove:hover:not(:disabled),
+.env-remove:focus-visible {
+    color: var(--bs-danger);
+    background: rgba(var(--bs-danger-rgb), 0.12);
+    outline: none;
+}
+
+.env-remove:disabled {
+    opacity: 0.5;
+}
+
+.env-add {
+    margin-top: 0.75rem;
+}

@@ -14,19 +14,15 @@ public sealed class GetAiProvidersCommand(AiCliRunner aiCli) : ICommandHandler<G
         var providers = await aiCli.ProbeAsync(request.Refresh, cancellationToken);
         return new GetAiProvidersResponse
         {
-            Providers = providers.Select(p => new AiProviderAvailabilityDto
-            {
-                ProviderId = p.ProviderId,
-                IsInstalled = p.IsInstalled,
-                Version = p.Version,
-                HasNoTools = p.HasNoTools,
-                Problem = p.Problem,
-            }).ToList(),
+            Providers = providers.Select(AiProviderAvailabilityDto.From).ToList(),
         };
     }
 }
 
-/// <summary>Runs exactly one provider call for one prepared prompt. Never retries; a bad answer is reported, not repaired.</summary>
+/// <summary>
+/// Runs exactly one provider call for one prepared prompt. Never retries; a bad answer is reported, not repaired. A
+/// failure an environment variable fixes is reported with that variable, and the App decides whether to ask again.
+/// </summary>
 public sealed class GenerateAiTextCommand(AiCliRunner aiCli) : ICommandHandler<GenerateAiTextRequest, GenerateAiTextResponse>
 {
     public async Task<GenerateAiTextResponse> ExecuteAsync(GenerateAiTextRequest request, CancellationToken cancellationToken = default)
@@ -40,7 +36,7 @@ public sealed class GenerateAiTextCommand(AiCliRunner aiCli) : ICommandHandler<G
         var started = Stopwatch.GetTimestamp();
         var outcome = await aiCli.GenerateAsync(
             providerId,
-            new AiCliRequest(systemPrompt, userPrompt, schema, model),
+            new AiCliRequest(systemPrompt, userPrompt, schema, model) { Environment = request.Environment },
             TimeSpan.FromSeconds(Math.Clamp(request.TimeoutSeconds, 10, 600)),
             cancellationToken);
 
@@ -52,6 +48,7 @@ public sealed class GenerateAiTextCommand(AiCliRunner aiCli) : ICommandHandler<G
             ErrorMessage = outcome.Message,
             ElapsedMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
             Warning = AiGenerationWarningDto.From(outcome.Warning),
+            EnvironmentFix = AgentEnvironmentFixDto.From(outcome.EnvironmentFix),
         };
     }
 }

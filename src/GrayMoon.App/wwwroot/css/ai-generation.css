@@ -378,6 +378,14 @@
     overflow-y: auto;
 }
 
+/* The page default (html in app.css) gives every element a gray scrollbar-color. Back to auto here, or Chromium
+   would skip the ::-webkit-scrollbar rules below and draw the wide default scrollbar with arrows. */
+@supports selector(::-webkit-scrollbar) {
+    .gm-ai-suggestion__body {
+        scrollbar-color: auto;
+    }
+}
+
 @supports not selector(::-webkit-scrollbar) {
     .gm-ai-suggestion__body {
         scrollbar-width: thin;

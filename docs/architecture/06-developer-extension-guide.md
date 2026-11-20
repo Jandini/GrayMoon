@@ -480,7 +480,7 @@ AI generation runs on the Worker: `CollectGitEvidence` -> `AiPromptBuilder` (Com
 To add one:
 
 1. `GrayMoon.Common/Ai/AiProviderConfiguration.cs`: add the id to `AiProviderIds` (constant, `All`, `DisplayName`) and, if needed, a `DefaultModel` entry. Models are validated by `AiProviderConfiguration.IsValidModel`.
-2. Implement a `sealed` `IAiCliAdapter`: `ProviderId`, `ExecutableNames` (preferred first), `HasNoTools` (true only if the CLI can run with no tools at all; shown to the user), `Prepare` (argument list for the per-run empty work folder) and `Interpret` (parse the answer, classify failures into `AiGenerationErrorKind`).
+2. Implement a `sealed` `IAiCliAdapter`: `ProviderId`, `ExecutableNames` (preferred first), `HasNoTools` (true only if the CLI can run with no tools at all; shown to the user), `Prepare` (argument list for the per-run empty work folder) and `Interpret` (parse the answer, classify failures into `AiGenerationErrorKind`). Also `KnownEnvironmentVariables` (variables the CLI reads that a user may want to set; shown as name suggestions on the Worker page Environment tab while the CLI is installed; an empty list is fine) and `SuggestEnvironmentFix` (the `AgentEnvironmentFix` for one exact failure text, else null).
 3. Register it in `Cli/Handlers/RunCommandHandler.cs` (`AddSingleton<IAiCliAdapter, ...>`); `AiCliRunner` discovers adapters by `ProviderId`.
 4. App: add the icon mapping in `WorkspaceAiGenerationOperations.IconFor` and the SVG under `wwwroot/icons/`.
 5. Tests in `GrayMoon.Worker.Tests/AiCliRunnerTests.cs`.
@@ -491,6 +491,7 @@ Adapter rules:
 - No argument may span lines (Windows `.cmd` shims); put prompts in files in the work folder or on stdin.
 - Disable tools, MCP servers, hooks, sessions and user config wherever the CLI allows; if a no-tools option is rejected, fail as `UnsupportedCli` and never retry with tools.
 - Never pass credentials; the CLI must already be signed in for the Worker's user.
+- `SuggestEnvironmentFix` matches one exact failure and names a variable that keeps the CLI safe (the Cursor fix adds trust in the system certificate store; it does not switch certificate checking off). A match makes GrayMoon store the variable and run once more, so a loose pattern changes the user's Environment list for the wrong failure. Set `AppendToExisting` for a list-like variable such as `NODE_OPTIONS`. Verify the variable against the runtime the CLI bundles: Cursor Agent's Node 24.5 ignores `NODE_USE_SYSTEM_CA=1` (read from Node 24.6 on) and honors `NODE_OPTIONS=--use-system-ca`.
 - Never log arguments or prompts (`BoundedProcessRunner` logs only the executable, timing and sizes).
 - The answer is strict JSON parsed by `AiGeneratedTextParser`; one provider call per click, never partial results.
 - Cursor only: a nonzero process exit may return `success` with optional `AiGenerationWarning` (`ProviderExitedAfterResult`) when stdout has a verified `type=result` / `subtype=success` / `is_error=false` envelope and extractable JSON. The App still validates the commit/PR shape before accepting the warning. Do not recover timeout, cancel, start failure, truncation, Claude or Codex this way. Correlated Worker logs use `OperationId` and `CompletionClassification`; anomaly-only Cursor launcher file snapshots must never fail the generation.

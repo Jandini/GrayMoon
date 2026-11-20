@@ -22,8 +22,14 @@ public sealed record HostInfoQuery(HostInfoRead? Read, string? Error);
 /// The latest host check for the whole App. Startup, the Worker page and an Install Now all refresh it.
 /// Commit and New Pull Request only read it, so opening them does not probe the AI CLIs again.
 /// </summary>
-public sealed class HostInfoCache(ILogger<HostInfoCache> logger)
+/// <remarks>
+/// The first successful check of this App process also lists, on the Worker page's Environment tab, the known agent
+/// variables the user already has set on the host (<see cref="AgentEnvironmentStore.ImportHostValuesAsync"/>).
+/// </remarks>
+public sealed class HostInfoCache(ILogger<HostInfoCache> logger, AgentEnvironmentStore? agentEnvironment = null)
 {
+    private bool _hostEnvironmentImported;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private HostInfoRead? _current;
 
@@ -41,7 +47,10 @@ public sealed class HostInfoCache(ILogger<HostInfoCache> logger)
 
             var query = await QueryAsync(workerBridge, cancellationToken);
             if (query.Read is not null)
+            {
                 _current = query.Read;
+                await ImportHostEnvironmentOnceAsync(query.Read, cancellationToken);
+            }
             return query.Read is null && _current is not null && !refresh
                 ? new HostInfoQuery(_current, null)
                 : query;
@@ -49,6 +58,29 @@ public sealed class HostInfoCache(ILogger<HostInfoCache> logger)
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Called inside the gate. Once per App process, at the startup host check (or the first one that succeeds when the
+    /// Worker was offline then): later checks do not bring back a row the user removed. A failure never fails the host
+    /// check; it is logged and the next check tries again.
+    /// </summary>
+    private async Task ImportHostEnvironmentOnceAsync(HostInfoRead read, CancellationToken cancellationToken)
+    {
+        if (_hostEnvironmentImported || agentEnvironment is null)
+            return;
+
+        try
+        {
+            var added = await agentEnvironment.ImportHostValuesAsync(read.AiProviders.SelectMany(p => p.HostEnvironmentValues).ToList(), cancellationToken);
+            _hostEnvironmentImported = true;
+            if (added.Count > 0)
+                logger.LogInformation("Listed environment variables already set on the Worker host: {Variables}", string.Join(", ", added.Select(v => $"{v.Scope}:{v.Name}")));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "The agent environment variables set on the Worker host could not be listed; the next host check tries again.");
         }
     }
 
@@ -109,7 +141,11 @@ public sealed class HostInfoCache(ILogger<HostInfoCache> logger)
                 var entry = dto.AiProviders.FirstOrDefault(p => string.Equals(p.ProviderId, id, StringComparison.Ordinal));
                 return entry is null
                     ? Missing(id)
-                    : new AiProviderAvailability(id, entry.IsInstalled, entry.Version, entry.HasNoTools, entry.Problem);
+                    : new AiProviderAvailability(id, entry.IsInstalled, entry.Version, entry.HasNoTools, entry.Problem)
+                    {
+                        KnownEnvironmentVariables = KnownVariablesFrom(id, entry),
+                        HostEnvironmentValues = HostValuesFrom(id, entry),
+                    };
             }).ToList();
         }
 
@@ -132,6 +168,26 @@ public sealed class HostInfoCache(ILogger<HostInfoCache> logger)
                 installed ? null : $"{AiProviderIds.DisplayName(id)} CLI was not found on the Worker's PATH.");
         }).ToList();
     }
+
+    /// <summary>The Worker is not trusted to send usable names: an entry that is not a valid variable is left out.</summary>
+    private static IReadOnlyList<KnownAgentEnvironmentVariable> KnownVariablesFrom(string providerId, AiProviderDto entry) =>
+        entry.KnownEnvironmentVariables is not { Count: > 0 } known
+            ? []
+            : known
+                .Where(v => AgentEnvironment.NameError(v.Name) is null && AgentEnvironment.ValueError(v.Value) is null)
+                .Select(v => new KnownAgentEnvironmentVariable(providerId, v.Name!, v.Value ?? string.Empty, v.Description?.Trim() ?? string.Empty))
+                .ToList();
+
+    /// <summary>The known variables that are set on the host, for an installed CLI only. Unusable names and values are left out.</summary>
+    private static IReadOnlyList<AgentEnvironmentHostValue> HostValuesFrom(string providerId, AiProviderDto entry) =>
+        !entry.IsInstalled || entry.KnownEnvironmentVariables is not { Count: > 0 } known
+            ? []
+            : known
+                .Where(v => AgentEnvironment.NameError(v.Name) is null
+                            && !string.IsNullOrEmpty(v.CurrentValue)
+                            && AgentEnvironment.ValueError(v.CurrentValue) is null)
+                .Select(v => new AgentEnvironmentHostValue(providerId, v.Name!, v.CurrentValue!))
+                .ToList();
 
     private static AiProviderAvailability Missing(string providerId) =>
         new(providerId, false, null, providerId != AiProviderIds.Cursor, $"{AiProviderIds.DisplayName(providerId)} CLI was not found on the Worker's PATH.");
@@ -156,5 +212,14 @@ public sealed class HostInfoCache(ILogger<HostInfoCache> logger)
         public string? Version { get; set; }
         public bool HasNoTools { get; set; }
         public string? Problem { get; set; }
+        public List<KnownVariableDto>? KnownEnvironmentVariables { get; set; }
+    }
+
+    private sealed class KnownVariableDto
+    {
+        public string? Name { get; set; }
+        public string? Value { get; set; }
+        public string? Description { get; set; }
+        public string? CurrentValue { get; set; }
     }
 }

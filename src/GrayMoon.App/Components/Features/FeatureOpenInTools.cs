@@ -1,9 +1,13 @@
+using GrayMoon.Common.Ai;
+
 namespace GrayMoon.App.Components.Features;
 
 /// <summary>
 /// One Open-in tool. <see cref="Id"/> is stored in the workspace database and is also the key in
 /// GrayMoon.Desktop's tool-availability message. <see cref="DesktopCommand"/> is the WebView2
-/// message GrayMoon.Desktop handles to launch it.
+/// message GrayMoon.Desktop handles to launch it. <see cref="AgentScope"/> is set for an AI tool: the
+/// <see cref="AiProviderIds"/> value whose environment variables (Worker page, Environment) the tool
+/// starts with. Editors, Terminal and Explorer have none and start with an unchanged environment.
 /// </summary>
 internal sealed record OpenInTool(
     string Id,
@@ -11,7 +15,8 @@ internal sealed record OpenInTool(
     string DesktopCommand,
     bool RequiresInstall,
     string? IconImageSrc = null,
-    string? IconClass = null)
+    string? IconClass = null,
+    string? AgentScope = null)
 {
     public string Title => "Open in " + Label;
 }
@@ -43,9 +48,9 @@ internal static class FeatureOpenInTools
     /// </summary>
     public static readonly IReadOnlyList<OpenInTool> All =
     [
-        new(Cursor, "Cursor", "OpenInCursor", RequiresInstall: true, IconImageSrc: "icons/cursor.svg"),
-        new(ClaudeCli, "Claude CLI", "OpenInClaudeCli", RequiresInstall: true, IconImageSrc: "icons/claude.svg"),
-        new(CodexCli, "Codex CLI", "OpenInCodexCli", RequiresInstall: true, IconImageSrc: "icons/codex.svg"),
+        new(Cursor, "Cursor", "OpenInCursor", RequiresInstall: true, IconImageSrc: "icons/cursor.svg", AgentScope: AiProviderIds.Cursor),
+        new(ClaudeCli, "Claude CLI", "OpenInClaudeCli", RequiresInstall: true, IconImageSrc: "icons/claude.svg", AgentScope: AiProviderIds.Claude),
+        new(CodexCli, "Codex CLI", "OpenInCodexCli", RequiresInstall: true, IconImageSrc: "icons/codex.svg", AgentScope: AiProviderIds.Codex),
         new(VsCode, "VS Code", "OpenInVsCode", RequiresInstall: true, IconImageSrc: "icons/visualstudiocode.svg"),
         new(VisualStudio, "Visual Studio", "OpenInVisualStudio", RequiresInstall: true, IconImageSrc: "icons/visualstudio.svg"),
         new(Terminal, "Terminal", "OpenInTerminal", RequiresInstall: false, IconClass: "bi-terminal"),

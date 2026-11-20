@@ -91,6 +91,17 @@ html, body {
     overflow: hidden;
 }
 
+/* Scrollbars are gray and auto-width everywhere, never the browser's default white. scrollbar-color is inherited, so
+   this one declaration is the default for every scroll container, including ones added later: a new container needs
+   no scrollbar CSS at all. It keeps the browser's own scrollbar (system width, arrow buttons) and only recolors it:
+   gray thumb and arrows on a transparent track. scrollbar-width is not set, so it stays "auto".
+   Chromium and WebView2 ignore every ::-webkit-scrollbar rule on an element whose scrollbar-color is not auto, and
+   an inherited value counts. A container that draws its own scrollbar with ::-webkit-scrollbar rules therefore
+   resets scrollbar-color to auto on itself (see .gm-ai-suggestion__body in css/ai-generation.css). */
+html {
+    scrollbar-color: #5a5a5a transparent;
+}
+
 /* Links */
 a, .btn-link {
     color: var(--accent-blue);

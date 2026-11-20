@@ -244,9 +244,102 @@ Host tab          only while Online or VersionMismatch; Worker version, .NET SDK
                   Cursor Agent (cursorAgentVersion; listed with its install command, never required)
                   footer in Desktop: "Install Now" for missing prerequisites, and "Restart"
                   (restarts the Worker service so an AI agent installed afterwards is on its PATH)
+Environment tab   always shown; a grid of the environment variables GrayMoon sets when it starts an AI agent:
+                  Scope (All, or an installed agent: Claude, Codex, Cursor; every agent while the Worker is
+                  offline; a row keeps a scope whose agent is "(not installed)"), Name, Value, and a remove
+                  button (x in a circle). The Scope box shows the icon of the chosen scope: the agent's
+                  own icon, or the AI glyph (stars) for All; the open list is the browser's and is text only.
+                  The grid shows exactly three rows and scrolls the rest under sticky column headers,
+                  so the text above, "Add" and the footer stay in place and the tab itself does not scroll.
+                  "Add" appends a row with scope All. Typing a name suggests the
+                  variables the installed agents are known to read (all of them for All, one agent's for that
+                  agent); picking one fills its usual value when the value is empty.
+                  footer: the first problem (a name that is not letters, digits and underscores, a name
+                  listed twice in one scope, a value that is not one line), "Revert" and "Save"; nothing is
+                  stored until Save. A list GrayMoon changed meanwhile reloads when the grid has no edits,
+                  else a note says so.
+                  At startup (the first host check of the App) a known variable that is already set on the
+                  Worker host (NODE_OPTIONS for Cursor, CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP for Claude)
+                  is listed for its agent with the value found there, when that CLI is installed and the
+                  agent does not already get the name from the list (its own row or an All row). A row
+                  removed afterwards stays removed until the App starts again.
 ```
 
 `GetHostInfo` (one of the two commands allowed on a version mismatch) supplies the host versions and which AI CLIs are installed. It probes .NET, Git, GitVersion, CodeGraph, and each AI CLI together, at most four at a time. Required prerequisites follow the Workspace profiles (`HostPrerequisiteRequirements.For`): Git always, GitVersion when any Workspace uses it, the .NET SDK when any Workspace uses GitVersion, package restore or dependency-aware update. Missing optional tools are labelled "(optional)". The Home nav circle is red only while the Worker is down, and it clears as soon as the Worker is up; it does not check host prerequisites or connectors. Claude, Codex and Cursor Agent count as missing but are never required.
+
+### Environment variables for AI agents
+
+The Environment tab accepts any variable. Only two are offered as name suggestions (they come from the agent adapters, `IAiCliAdapter.KnownEnvironmentVariables`): `NODE_OPTIONS` for Cursor and `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP` for Claude. The tables below list other variables the agents' own documentation describes and that are useful for how GrayMoon runs them; type them by hand. They were read from the vendor pages on 2026-11-20 and are not checked by GrayMoon, so confirm a variable against the installed CLI version before relying on it. "(path)", "(URL)", "(key)" and "(number)" mean you supply the value.
+
+Commit message and pull request text runs start the CLI without tools, so variables about commands, shells and terminals only matter for Open in Claude CLI, Codex CLI and Cursor.
+
+Cursor (Cursor Agent CLI; source: cursor.com/docs/cli/reference/configuration, authentication):
+
+```text
+NODE_OPTIONS            --use-system-ca   trusts the Windows certificate store as well as the bundled list; fixes
+                                          "unable to get local issuer certificate" behind a TLS-inspecting proxy.
+                                          GrayMoon adds it for Cursor by itself on that error,
+                                          after the options already listed (or found on the host at startup). Not on Cursor's pages;
+                                          verified on the Node 24.5 the CLI bundles (NODE_USE_SYSTEM_CA=1 is ignored
+                                          there, it is read from Node 24.6 on)
+NODE_EXTRA_CA_CERTS     (path)            one extra PEM certificate to trust; Cursor's documented setting for proxies
+                                          that inspect SSL
+HTTPS_PROXY             (URL)             proxy for HTTPS traffic
+HTTP_PROXY              (URL)             proxy for HTTP traffic
+NODE_USE_ENV_PROXY      1                 needed for the CLI to honor HTTP_PROXY and HTTPS_PROXY
+CURSOR_API_KEY          (key)             signs in without a browser; useful when the Worker runs as a service
+CURSOR_CONFIG_DIR       (path)            moves the CLI configuration folder
+```
+
+Cursor's pages list no variable for telemetry, update checks or `NO_PROXY`. A proxy that does not support HTTP/2 streaming (Zscaler) is handled in the CLI configuration file (`network.useHttp1ForAgent`), not by a variable.
+
+Codex (source: the Codex "Environment variables" page, learn.chatgpt.com/docs/config-file/environment-variables):
+
+```text
+CODEX_CA_CERTIFICATE    (path)            PEM bundle for corporate TLS interception or private root certificates;
+                                          takes precedence over SSL_CERT_FILE. Codex's counterpart of the Cursor fix
+SSL_CERT_FILE           (path)            fallback PEM bundle when CODEX_CA_CERTIFICATE is unset
+CODEX_API_KEY           (key)             API key for non-interactive runs (codex exec, which GrayMoon uses)
+CODEX_HOME              (path)            root of Codex state (config, sign-in, logs, sessions); default ~/.codex,
+                                          and the folder must already exist
+RUST_LOG                debug             log filter and verbosity (error, warn, info, debug, trace); codex exec
+                                          defaults to error
+```
+
+Codex's pages document no proxy variable (`HTTPS_PROXY`, `NO_PROXY`) and no variable that turns off telemetry or update checks; those are settings in its `config.toml`. GrayMoon starts `codex exec` with `--ignore-user-config`, so a commit message or pull request text run does not read that file.
+
+Claude (Claude Code; source: code.claude.com/docs/en/env-vars, which lists about 400 variables):
+
+```text
+CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP   1          stops Claude Code from ending background shell commands
+                                                        under memory pressure. macOS and Linux only: Windows has
+                                                        no memory-pressure signal, so it has no effect there.
+                                                        Needs Claude Code 2.1.193 or later
+HTTPS_PROXY                                  (URL)      proxy for HTTPS traffic
+HTTP_PROXY                                   (URL)      proxy for HTTP traffic
+NO_PROXY                                     (hosts)    domains and addresses that bypass the proxy
+DISABLE_AUTOUPDATER                          1          stops background self-updates; "claude update" still works
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC     1          turns off auto-update, telemetry, error reporting, feedback
+                                                        and release notes together. Any non-empty value disables,
+                                                        "0" and "false" included
+DISABLE_TELEMETRY                            1          telemetry only. Any non-empty value opts out
+API_TIMEOUT_MS                               600000     time for one API attempt to return response headers
+                                                        (default 10 minutes)
+CLAUDE_CODE_MAX_OUTPUT_TOKENS                (number)   output tokens per request
+CLAUDE_CODE_EFFORT_LEVEL                     low        reasoning effort: low, medium, high, xhigh, max
+CLAUDE_CODE_GIT_BASH_PATH                    (path)     bash.exe on Windows, when Claude Code cannot find it
+BASH_DEFAULT_TIMEOUT_MS                      120000     default timeout of a foreground command (default 2 minutes)
+CLAUDE_CODE_DISABLE_TERMINAL_TITLE           1          stops Claude Code from renaming the terminal tab
+ANTHROPIC_BASE_URL                           (URL)      sends requests through a proxy or company gateway
+ANTHROPIC_API_KEY                            (key)      API key instead of the subscription sign-in
+CLAUDE_CODE_USE_BEDROCK                      1          use Amazon Bedrock (CLAUDE_CODE_USE_VERTEX, _USE_FOUNDRY
+                                                        for the other providers)
+CLAUDE_CONFIG_DIR                            (path)     moves the Claude Code configuration folder (default ~/.claude)
+```
+
+Claude Code needs no certificate variable for a TLS-inspecting proxy: `CLAUDE_CODE_CERT_STORE` defaults to `bundled,system`, so it already trusts the operating system's store. A client certificate is set with `CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY` and `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE`.
+
+A proxy or certificate needed by every agent can be listed once with scope All; an agent that does not read a variable ignores it. Values are stored encrypted, so a key or token may be listed, but it is then passed to every start of that agent.
 
 ### Install script guards
 
@@ -1205,7 +1298,7 @@ The script has its own copy of the grammar (one pass, no allocation per token) b
 
 When running in Desktop mode, GrayMoon may provide native actions such as opening a repository folder or external URL.
 
-The context selector also shows an **Open in...** flyout for the selected context: Cursor, Claude CLI, Codex CLI, VS Code and Visual Studio (each only when Desktop detects it), Terminal and Explorer, with a per-repository sub-flyout. Each tool can be added to or removed from the button row next to the selector (persisted per Workspace); using a tool does not add it. The button row stays usable while the selector itself is disabled (a running job, or a page load): the selector trigger and New Feature follow that block, but launching a tool only posts a path to Desktop and takes no Workspace lock, so only the tool just clicked locks itself until its "Starting..." toast closes. The Open in... flyout lives inside the dropdown, so it is reachable only while the selector is enabled; pin a tool to keep it available during a job. The App resolves the paths (`IWorkspaceNativeLaunchService`); Desktop only launches the tool. The tools render only when this client's WebView bridge (window.graymoonDesktop) answers; Desktop:PipeName is process-wide and only triggers the installed-tool scan, so a browser tab on the Desktop-launched App never shows them.
+The context selector also shows an **Open in...** flyout for the selected context: Cursor, Claude CLI, Codex CLI, VS Code and Visual Studio (each only when Desktop detects it), Terminal and Explorer, with a per-repository sub-flyout. Each tool can be added to or removed from the button row next to the selector (persisted per Workspace); using a tool does not add it. The button row stays usable while the selector itself is disabled (a running job, or a page load): the selector trigger and New Feature follow that block, but launching a tool only posts a path to Desktop and takes no Workspace lock, so only the tool just clicked locks itself until its "Starting..." toast closes. The Open in... flyout lives inside the dropdown, so it is reachable only while the selector is enabled; pin a tool to keep it available during a job. The App resolves the paths (`IWorkspaceNativeLaunchService`); Desktop only launches the tool. Cursor, Claude CLI and Codex CLI (`OpenInTool.AgentScope`) are also posted with the environment variables listed for that agent and for All on the Worker page (Environment tab); VS Code, Visual Studio, Terminal and Explorer start with an unchanged environment, and so does an AI tool with nothing listed. The tools render only when this client's WebView bridge (window.graymoonDesktop) answers; Desktop:PipeName is process-wide and only triggers the installed-tool scan, so a browser tab on the Desktop-launched App never shows them.
 
 The web/container application remains fully functional without Desktop.
 
@@ -1592,7 +1685,14 @@ Worker GenerateAiText       one CLI process in its own empty temp folder, no too
                             timeout AiGeneration:TimeoutSeconds (default 120); Cursor may return success=true
                             with optional warning metadata (ProviderExitedAfterResult) when a verified success
                             envelope was recovered after a nonzero exit — never on timeout, cancel, start
-                            failure or truncated stdout
+                            failure or truncated stdout; the process gets the environment variables
+                            listed for the provider and for All (Worker page, Environment tab)
+App: known failure          when Cursor fails with "unable to get local issuer certificate" the Worker names
+                            NODE_OPTIONS=--use-system-ca; the App stores it for Cursor (added to a
+                            NODE_OPTIONS already listed, never a second row), reports "Added the environment
+                            variable ... Trying again..." and sends GenerateAiText once more. The text then
+                            shows a notice naming the variable; a second failure is the error, with the
+                            same note. No other failure adds a variable or retries.
 AiGeneratedTextParser       strict JSON check in the App; the result is never partial; a Worker warning is
                             attached to AiGenerationResult only after this validation succeeds
 ```

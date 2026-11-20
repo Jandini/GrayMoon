@@ -1,12 +1,20 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GrayMoon.Common;
 using GrayMoon.Common.Ai;
 
 namespace GrayMoon.Worker.Services.Ai;
 
 /// <summary>A prepared prompt for one provider call. The adapter never sees a repository path.</summary>
-public sealed record AiCliRequest(string SystemPrompt, string UserPrompt, string JsonSchema, string? Model);
+public sealed record AiCliRequest(string SystemPrompt, string UserPrompt, string JsonSchema, string? Model)
+{
+    /// <summary>
+    /// The user's environment variables for this provider (Worker page, Environment), already resolved by the App.
+    /// Null or empty runs the CLI with the Worker's own environment.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+}
 
 /// <summary>Arguments, stdin and files (relative to the isolated working folder) for one CLI run.</summary>
 public sealed record AiCliInvocation(IReadOnlyList<string> Arguments, byte[]? Stdin, IReadOnlyDictionary<string, string> Files);
@@ -22,6 +30,12 @@ public sealed record AiCliOutcome(string? Json, AiGenerationErrorKind Error, str
 
     public static AiCliOutcome Failure(AiGenerationErrorKind error, string message) =>
         new(null, error, message);
+
+    /// <summary>
+    /// Only with a failure: the environment variable the provider's adapter names for this failure, when the run did not
+    /// already have it. The App adds it and runs once more; the Worker itself never retries.
+    /// </summary>
+    public AgentEnvironmentFix? EnvironmentFix { get; init; }
 }
 
 /// <summary>
@@ -42,6 +56,18 @@ public interface IAiCliAdapter
     /// </summary>
     bool HasNoTools { get; }
 
+    /// <summary>
+    /// Environment variables this CLI is known to read and a user may want to set. Offered as suggestions on the Worker
+    /// page (Environment) while the CLI is installed; none is applied until the user, or a fix, lists it.
+    /// </summary>
+    IReadOnlyList<KnownAgentEnvironmentVariable> KnownEnvironmentVariables { get; }
+
+    /// <summary>
+    /// The environment variable that makes a run with this failure text (stderr and stdout) work, or null when the
+    /// failure is not one a variable fixes. Match one exact failure: a wrong match adds a variable the user did not ask for.
+    /// </summary>
+    AgentEnvironmentFix? SuggestEnvironmentFix(string failureText);
+
     AiCliInvocation Prepare(AiCliRequest request, string workDirectory);
 
     AiCliOutcome Interpret(BoundedProcessResult result, string workDirectory);
@@ -60,6 +86,14 @@ public sealed class ClaudeCliAdapter : IAiCliAdapter
     public IReadOnlyList<string> ExecutableNames { get; } = ["claude"];
 
     public bool HasNoTools => true;
+
+    public IReadOnlyList<KnownAgentEnvironmentVariable> KnownEnvironmentVariables { get; } =
+    [
+        new(AiProviderIds.Claude, "CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP", "1",
+            "1 keeps background shells running when Claude Code is under memory pressure (default 0)."),
+    ];
+
+    public AgentEnvironmentFix? SuggestEnvironmentFix(string failureText) => null;
 
     public AiCliInvocation Prepare(AiCliRequest request, string workDirectory)
     {
@@ -155,6 +189,10 @@ public sealed class CodexCliAdapter : IAiCliAdapter
 
     public bool HasNoTools => true;
 
+    public IReadOnlyList<KnownAgentEnvironmentVariable> KnownEnvironmentVariables { get; } = [];
+
+    public AgentEnvironmentFix? SuggestEnvironmentFix(string failureText) => null;
+
     public AiCliInvocation Prepare(AiCliRequest request, string workDirectory)
     {
         List<string> arguments =
@@ -216,7 +254,7 @@ public sealed class CodexCliAdapter : IAiCliAdapter
 /// file in that empty folder (the CLI documents the prompt only as an argument, which cannot carry the evidence safely
 /// through a <c>.cmd</c> shim).
 /// </summary>
-public sealed class CursorCliAdapter : IAiCliAdapter
+public sealed partial class CursorCliAdapter : IAiCliAdapter
 {
     private const string RequestFile = "request.md";
 
@@ -231,6 +269,27 @@ public sealed class CursorCliAdapter : IAiCliAdapter
     public IReadOnlyList<string> ExecutableNames { get; } = ["agent", "cursor-agent"];
 
     public bool HasNoTools => false;
+
+    /// <summary>
+    /// Makes the Node runtime bundled with Cursor Agent trust the operating system's certificate store as well as its own
+    /// list. Behind a TLS-inspecting company proxy (seen on an enterprise Windows VDI) the proxy's root certificate is
+    /// only in that store, and every request fails with "unable to get local issuer certificate". Verified on the
+    /// bundled Node 24.5: <c>NODE_OPTIONS=--use-system-ca</c> loads the store, while <c>NODE_USE_SYSTEM_CA=1</c> is
+    /// only read from Node 24.6 on and changes nothing there. Certificate checking stays on.
+    /// </summary>
+    internal static readonly AgentEnvironmentFix SystemCertificateStoreFix = new("NODE_OPTIONS", "--use-system-ca", AppendToExisting: true);
+
+    [GeneratedRegex(@"unable to get local issuer certificate|UNABLE_TO_GET_ISSUER_CERT_LOCALLY", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex LocalIssuerCertificateFailure();
+
+    public IReadOnlyList<KnownAgentEnvironmentVariable> KnownEnvironmentVariables { get; } =
+    [
+        new(AiProviderIds.Cursor, SystemCertificateStoreFix.Name, SystemCertificateStoreFix.Value,
+            "Trusts the Windows certificate store. Fixes \"unable to get local issuer certificate\" behind a company proxy."),
+    ];
+
+    public AgentEnvironmentFix? SuggestEnvironmentFix(string failureText) =>
+        LocalIssuerCertificateFailure().IsMatch(failureText) ? SystemCertificateStoreFix : null;
 
     public AiCliInvocation Prepare(AiCliRequest request, string workDirectory)
     {

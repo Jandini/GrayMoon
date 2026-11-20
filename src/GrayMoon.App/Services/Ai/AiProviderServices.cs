@@ -15,7 +15,14 @@ public sealed class AiGenerationOptions
 }
 
 /// <summary>One provider as the Worker's account sees it.</summary>
-public sealed record AiProviderAvailability(string ProviderId, bool IsInstalled, string? Version, bool HasNoTools, string? Problem);
+public sealed record AiProviderAvailability(string ProviderId, bool IsInstalled, string? Version, bool HasNoTools, string? Problem)
+{
+    /// <summary>Environment variables the provider's CLI is known to read, as its Worker adapter lists them. Empty from an older Worker.</summary>
+    public IReadOnlyList<KnownAgentEnvironmentVariable> KnownEnvironmentVariables { get; init; } = [];
+
+    /// <summary>The known variables the user already has set on the Worker host, with the values found there. Empty when none is set.</summary>
+    public IReadOnlyList<AgentEnvironmentHostValue> HostEnvironmentValues { get; init; } = [];
+}
 
 /// <summary>
 /// Which AI CLIs the Worker can run. Taken from the startup host check (<see cref="HostInfoCache"/>), so opening

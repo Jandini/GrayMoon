@@ -51,6 +51,7 @@ public static partial class Migrations
         (17, "Repository missing-from-provider column", dbContext => MigrateRepositoryMissingFromProviderColumnAsync(dbContext)),
         (18, "Connector removed-at column", dbContext => MigrateConnectorRemovedAtColumnAsync(dbContext)),
         (19, "Reference repository columns", dbContext => MigrateReferenceRepositoriesAsync(dbContext)),
+        (20, "Agent environment variables", dbContext => MigrateAgentEnvironmentVariablesAsync(dbContext)),
     };
 
     public static Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null) =>
@@ -613,6 +614,30 @@ public static partial class Migrations
     /// <summary>
     /// Recent Open-in tools for the feature-selector bar. Strict step 7. Idempotent.
     /// </summary>
+    /// <summary>
+    /// Environment variables for the AI agents GrayMoon starts (Worker page, Environment). The name is NOCASE so the
+    /// unique index refuses "Path" beside "PATH" in one scope.
+    /// </summary>
+    public static async Task MigrateAgentEnvironmentVariablesAsync(AppDbContext dbContext, ILogger? logger = null)
+    {
+        var conn = dbContext.Database.GetDbConnection();
+        if (conn.State != ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS "AgentEnvironmentVariables" (
+                "AgentEnvironmentVariableId" INTEGER NOT NULL CONSTRAINT "PK_AgentEnvironmentVariables" PRIMARY KEY AUTOINCREMENT,
+                "Scope" TEXT NOT NULL,
+                "Name" TEXT COLLATE NOCASE NOT NULL,
+                "ProtectedValue" TEXT NOT NULL,
+                "Position" INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_AgentEnvironmentVariables_Scope_Name" ON "AgentEnvironmentVariables" ("Scope", "Name");
+            """;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     public static async Task MigrateWorkspaceOpenInRecentToolsAsync(AppDbContext dbContext, ILogger? logger = null)
     {
         var conn = dbContext.Database.GetDbConnection();

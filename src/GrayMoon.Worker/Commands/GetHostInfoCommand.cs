@@ -56,14 +56,7 @@ public sealed class GetHostInfoCommand(ICommandLineService commandLine, CodeGrap
             CursorAgentVersion = InstalledVersion(AiProviderIds.Cursor),
             ClaudeVersion = InstalledVersion(AiProviderIds.Claude),
             CodexVersion = InstalledVersion(AiProviderIds.Codex),
-            AiProviders = aiProviders.Select(p => new AiProviderAvailabilityDto
-            {
-                ProviderId = p.ProviderId,
-                IsInstalled = p.IsInstalled,
-                Version = p.Version,
-                HasNoTools = p.HasNoTools,
-                Problem = p.Problem,
-            }).ToList(),
+            AiProviders = aiProviders.Select(AiProviderAvailabilityDto.From).ToList(),
             UserProfilePath = userProfile,
         };
     }

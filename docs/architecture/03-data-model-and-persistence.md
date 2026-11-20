@@ -121,6 +121,8 @@ Current strict steps:
                                                            which left later Workspaces uncopied. Idempotent: it skips anything already copied)
 17  Repository missing-from-provider column                (Repositories.MissingFromProviderSinceUtc)
 18  Connector removed-at column                            (Connectors.RemovedAtUtc)
+19  Reference repository columns                           (read only repository columns on links and Feature repositories)
+20  Agent environment variables                            (AgentEnvironmentVariables table, section 17)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -777,6 +779,17 @@ WorkspaceSelectedFeatureContexts   last selected Feature context per Workspace (
 WorkspaceOpenInRecentTools         Open-in tools pinned on the feature-selector bar (PK WorkspaceId + ToolId; Position = left-to-right order)
 Workspaces.PinnedAiProviderId      AI provider pinned on this machine (section 4)
 ```
+
+Environment variables for the AI agents GrayMoon starts (Worker page, Environment tab) are machine-level and have their own table:
+
+```text
+AgentEnvironmentVariables          one row per variable: Scope ("all" or an AI provider id: claude, codex, cursor),
+                                   Name (NOCASE; unique with Scope, so a scope lists a name once whatever its case),
+                                   ProtectedValue (encrypted with ITokenProtector like a connector token, section 18),
+                                   Position (grid order)
+```
+
+`AgentEnvironmentStore` (singleton, factory-created contexts) is the only reader and writer. `SaveAsync` replaces the list in one transaction after `AgentEnvironment.ListError` (Common) accepts it; `ApplyFixAsync` adds or extends one row when an agent fails for a reason a variable fixes; `ImportHostValuesAsync` adds a row for a known variable the user already has set on the Worker host (once per App process, from the first host check), never for a name the agent already gets from the list. All three run behind one gate. `ResolveAsync(providerId)` gives the variables one agent starts with: every `all` row, then the agent's own rows on top. A row whose value cannot be decrypted is left out and logged. The list is never written to `graymoon.json`, because a value can be a key or a token.
 
 AI provider and model choices shared with the team are in the `ai` section of `graymoon.json` (section 4A), not in the database. Process-level options (for example `AiGeneration:TimeoutSeconds`, `Sync:MaxConcurrency`, `TokenKey`) come from ASP.NET Core configuration, not the Settings table.
 
