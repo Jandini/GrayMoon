@@ -281,8 +281,8 @@ runs on the thread pool while the dispatcher may be rendering the page.
    own `CancellationTokenSource`.** Reopening a modal, changing a parameter
    (`RunId`), or typing a new search cancels the previous load and ignores its
    late result; a newer request is never silently dropped while an older one
-   is in flight. `FilterSearchInput` and `DebouncedQueryLoader` are the
-   reference examples. [28, AddFilesModal, GhaWorkflowLiveTerminal]
+   is in flight. `DebouncedQueryLoader` is the reference example.
+   [28, AddFilesModal, GhaWorkflowLiveTerminal]
 8. **Background loops in components catch every exception, log it, and keep
    going or stop cleanly.** Catching only `OperationCanceledException` lets
    one fault end the loop for good. `DisposeAsync` never rethrows a stored

@@ -48,5 +48,4 @@
 
 .workspace-context-search__field ::deep .filter-search-backdrop {
     border: none;
-    border-radius: 0;
 }

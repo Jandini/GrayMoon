@@ -74,7 +74,7 @@
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search workspaces…"
                                        Disabled="@(workspaces == null || workspaces.Count == 0)"
-                                       OnKeyDown="OnSearchKeyDown"
+                                       OnCommandKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
                 <button class="btn btn-outline-primary text-nowrap flex-shrink-0" @onclick="ShowRestoreModalAsync">

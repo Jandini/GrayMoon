@@ -47,7 +47,7 @@
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search repositories…"
                                        Disabled="@(isInitialLoading && !hasLoadedOnce)"
-                                       OnKeyDown="OnSearchKeyDown"
+                                       OnCommandKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
                 <button class="btn btn-outline-secondary flex-shrink-0"

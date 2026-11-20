@@ -78,13 +78,43 @@ public class FilterSearchExpressionTests
     }
 
     [Fact]
-    public void Highlight_segments_include_operators_and_fields()
+    public void Nesting_up_to_the_limit_parses()
     {
-        var segments = FilterSearchExpression.GetHighlightSegments("api or (topic:web and gray)");
-        Assert.Contains(segments, s => s.Kind == FilterSearchHighlightKind.OperatorOr);
-        Assert.Contains(segments, s => s.Kind == FilterSearchHighlightKind.OperatorAnd);
-        Assert.Contains(segments, s => s.Kind == FilterSearchHighlightKind.Paren);
-        Assert.Contains(segments, s => s.Kind == FilterSearchHighlightKind.FieldPrefix && s.Text == "topic:");
+        var depth = FilterSearchExpression.MaxNestingDepth;
+        var query = new string('(', depth) + "api" + new string(')', depth);
+
+        Assert.True(FilterSearchExpression.Parse(query).IsValid);
+        Assert.True(FilterSearchExpression.Matches(query, MatchTerm));
+    }
+
+    /// <summary>
+    /// The parser recurses once per parenthesis level. Before the limit, a long run of <c>(</c> typed or
+    /// pasted into a filter box overflowed the stack, which ends the whole process (it cannot be caught).
+    /// </summary>
+    [Fact]
+    public void Nesting_past_the_limit_is_invalid_and_does_not_overflow_the_stack()
+    {
+        var justOver = FilterSearchExpression.MaxNestingDepth + 1;
+        Assert.False(FilterSearchExpression.Parse(
+            new string('(', justOver) + "api" + new string(')', justOver)).IsValid);
+
+        var huge = new string('(', 200_000) + "api";
+        Assert.False(FilterSearchExpression.Parse(huge).IsValid);
+        // Invalid syntax falls back to word matching, as for any other parse error.
+        Assert.False(FilterSearchExpression.Matches(huge, MatchTerm));
+    }
+
+    /// <summary>A grid matches every row against one query; it is parsed once, not once per row.</summary>
+    [Fact]
+    public void Repeated_parse_of_the_same_query_returns_the_cached_result()
+    {
+        var query = "cached-" + Guid.NewGuid().ToString("N") + " or api";
+
+        var first = FilterSearchExpression.Parse(query);
+        var second = FilterSearchExpression.Parse(new string(query.AsSpan()));
+
+        Assert.True(first.IsValid);
+        Assert.Same(first, second);
     }
 
     private sealed record TestRepository(string Name, string Owner, string Topics, string Connector)

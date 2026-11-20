@@ -65,7 +65,7 @@
                                        Placeholder="Search file name, path, or repository..."
                                        Disabled="@isLoading"
                                        AutoFocus="true"
-                                       OnKeyDown="OnSearchKeyDown"
+                                       OnCommandKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </WorkspaceContextBar>
                 <button class="btn btn-outline-primary" @onclick="UpdateVersionsAsync"

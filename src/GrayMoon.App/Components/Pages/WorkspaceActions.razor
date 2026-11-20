@@ -147,7 +147,7 @@
                                            Placeholder="Search repository or workflow..."
                                            Disabled="@isLoading"
                                            AutoFocus="true"
-                                           OnKeyDown="OnSearchKeyDown"
+                                           OnCommandKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>
                     @if (HasFailedRows)

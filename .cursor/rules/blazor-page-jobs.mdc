@@ -31,7 +31,7 @@ jobs: page state only on the dispatcher".
 6. **A restartable load (modal reopen, parameter change, search) has a
    generation counter and its own `CancellationTokenSource`.** Late results are
    ignored; a newer request is never dropped silently. Reference:
-   `FilterSearchInput`, `DebouncedQueryLoader`.
+   `DebouncedQueryLoader`.
 7. **Component background loops catch every exception and log it**;
    `DisposeAsync` never rethrows a loop fault.
 8. **JS interop handles `JSDisconnectedException` and

@@ -1,39 +1,53 @@
+/*
+   wwwroot/js/filterSearchInput.js sets data-filter-state on .filter-search-wrap ("empty", "valid" or
+   "invalid") and fills .filter-search-backdrop-inner with one span per colored run. There is no
+   attribute before the script has attached; the input then shows its own text.
+*/
 .filter-search-wrap {
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
 }
 
-.filter-search-wrap:has(.filter-search-input-overlay) {
+.filter-search-wrap[data-filter-state="valid"] {
     background-color: var(--bg-input);
     border-radius: var(--bs-border-radius, 0.375rem);
 }
 
+/* The colored copy of the text. Its border and padding repeat .form-control, so the clip box below is
+   the input's content box: the copy starts, ends and is cut off exactly where the input's own text is. */
 .filter-search-backdrop {
     position: absolute;
     inset: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    pointer-events: none;
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem;
     border: 1px solid transparent;
-    border-radius: var(--bs-border-radius, 0.375rem);
+    pointer-events: none;
+    visibility: hidden;
     z-index: 0;
-    scrollbar-width: none;
 }
 
-.filter-search-backdrop::-webkit-scrollbar {
-    display: none;
+.filter-search-wrap[data-filter-state="valid"] .filter-search-backdrop {
+    visibility: visible;
 }
 
-.filter-search-backdrop-inner {
-    display: block;
-    padding: 0.375rem 0.75rem;
-    white-space: pre;
+/* A disabled input shows its own (dimmed) text. */
+.filter-search-wrap[data-filter-state="valid"] .filter-search-input:disabled ~ .filter-search-backdrop {
+    visibility: hidden;
+}
+
+.filter-search-backdrop-clip {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
-    font-family: inherit;
-    font-size: inherit;
-    font-weight: inherit;
-    letter-spacing: inherit;
+}
+
+/* The script moves this with a transform to follow the input's horizontal scroll. */
+.filter-search-backdrop-inner {
+    width: max-content;
+    white-space: pre;
+    color: var(--text-primary);
     line-height: 1.5;
 }
 
@@ -43,61 +57,41 @@
     width: 100%;
 }
 
-.filter-search-input-overlay {
+.filter-search-wrap[data-filter-state="valid"] .filter-search-input:enabled {
     color: transparent;
     caret-color: var(--text-primary);
     background-color: transparent;
-    scrollbar-width: none;
 }
 
-.filter-search-input-overlay::-webkit-scrollbar {
-    display: none;
-}
-
-.filter-search-input-overlay:focus {
-    color: transparent;
-    background-color: transparent;
-}
-
-.filter-search-wrap.filter-search-invalid .filter-search-input-invalid {
+.filter-search-wrap[data-filter-state="invalid"] .filter-search-input {
     color: var(--error);
     caret-color: var(--error);
 }
 
-.filter-search-token-and {
+.filter-search-backdrop-inner ::deep .filter-search-token-and {
     color: var(--filter-op-and, #7ee787);
 }
 
-.filter-search-token-or {
+.filter-search-backdrop-inner ::deep .filter-search-token-or {
     color: var(--filter-op-or, #ffa657);
 }
 
-.filter-search-token-paren {
+.filter-search-backdrop-inner ::deep .filter-search-token-paren {
     color: var(--filter-op-paren, #8b949e);
 }
 
-.filter-search-token-field,
-.filter-search-token-field-value {
+.filter-search-backdrop-inner ::deep .filter-search-token-field {
     color: var(--filter-field, #79c0ff);
 }
 
-.filter-search-token-text {
-    color: var(--text-primary);
-}
-
-.filter-search-token-ws {
-    white-space: pre;
-}
-
-.filter-search-wrap.has-filter .filter-search-input {
-    padding-right: 2.25rem;
-}
-
-.filter-search-wrap.has-filter .filter-search-backdrop-inner {
+/* Room for the clear button, which is shown while the box has text. */
+.filter-search-wrap:is([data-filter-state="valid"], [data-filter-state="invalid"]) .filter-search-input,
+.filter-search-wrap:is([data-filter-state="valid"], [data-filter-state="invalid"]) .filter-search-backdrop {
     padding-right: 2.25rem;
 }
 
 .filter-search-clear {
+    display: none;
     position: absolute;
     right: 0.25rem;
     top: 50%;
@@ -109,6 +103,10 @@
     cursor: pointer;
     line-height: 1;
     z-index: 2;
+}
+
+.filter-search-wrap:is([data-filter-state="valid"], [data-filter-state="invalid"]) .filter-search-clear {
+    display: block;
 }
 
 .filter-search-clear:hover {

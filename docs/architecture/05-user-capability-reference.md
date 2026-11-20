@@ -1189,6 +1189,16 @@ field filters such as repo:
 
 Pages may layer domain-specific predicates over the shared parser.
 
+Limits: a query is at most 1000 characters (`FilterSearchExpression.MaxQueryLength`, the box's `maxlength`) and parentheses nest at most 64 deep (`MaxNestingDepth`); deeper nesting is a syntax error, like a missing `)`.
+
+### The filter box
+
+`FilterSearchInput` is the one search box of every grid. The browser owns it while the user types: `wwwroot/js/filterSearchInput.js` colors `and`, `or`, parentheses and `field:value`, turns the text red when the syntax is invalid, shows the clear button and follows the horizontal scroll, all in the same task as the keystroke. No keystroke is sent to the server. The typed text reaches the server (`ValueChanged`) after 150 ms without a keystroke, and at once for Escape, Enter (`OnCommandKeyDown`, raised for these two keys only, after the text on screen was committed) and the clear button.
+
+The component's markup is constant: it renders the input's `value` once and never renders the colored copy or `data-filter-state` (`empty`, `valid`, `invalid`, set by the script on the wrapper and read by the stylesheet). A value changed by the page (Escape clears the filter) is handed to the script, not rendered. A render that arrives late can therefore never overwrite what was typed since.
+
+The script has its own copy of the grammar (one pass, no allocation per token) because validity must be known without a round trip. `FilterSearchInputScriptTests` runs the script in a JavaScript engine against `FilterSearchExpression`, so the two cannot drift: change the parser and the script together.
+
 ---
 
 ## 30. Desktop integration

@@ -52,7 +52,7 @@
                                            Placeholder="Search project name or file..."
                                            Disabled="@(isInitialLoading && !hasLoadedOnce)"
                                            AutoFocus="true"
-                                           OnKeyDown="OnSearchKeyDown"
+                                           OnCommandKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>
                 </div>

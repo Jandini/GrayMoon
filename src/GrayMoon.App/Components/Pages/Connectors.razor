@@ -42,7 +42,7 @@
                                        InputAdditionalClass="workspace-grid-search"
                                        Placeholder="Search connectors…"
                                        Disabled="@(connectors == null || connectors.Count == 0)"
-                                       OnKeyDown="OnSearchKeyDown"
+                                       OnCommandKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
                 <button class="btn btn-outline-primary flex-shrink-0"
