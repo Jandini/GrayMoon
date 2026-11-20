@@ -249,18 +249,12 @@ public sealed class AiCliEnvironmentTests
     [Fact]
     public void The_host_reader_returns_what_the_worker_process_has()
     {
-        var name = "GRAYMOON_TEST_HOST_VARIABLE_" + Guid.NewGuid().ToString("N");
-        Assert.Null(HostEnvironmentVariables.Read(name));
+        Assert.Null(HostEnvironmentVariables.Read("GRAYMOON_TEST_HOST_VARIABLE_" + Guid.NewGuid().ToString("N")));
 
-        Environment.SetEnvironmentVariable(name, "from-the-process");
-        try
-        {
-            Assert.Equal("from-the-process", HostEnvironmentVariables.Read(name));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(name, null);
-        }
+        // A test must not set a variable of the test process (parallel tests share it), so read one it already has.
+        var path = Environment.GetEnvironmentVariable("PATH");
+        Assert.False(string.IsNullOrEmpty(path));
+        Assert.Equal(path, HostEnvironmentVariables.Read("PATH"));
     }
 
     private sealed class FixedLocator(string path) : IAiCliExecutableLocator
