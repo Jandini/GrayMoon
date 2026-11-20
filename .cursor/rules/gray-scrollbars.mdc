@@ -1,0 +1,21 @@
+---
+description: Scrollbars are gray and auto-width, never the browser's default white
+alwaysApply: true
+---
+
+# Scrollbars are gray
+
+The browser's default scrollbar is white on Windows, which clashes with the dark theme. Every scrollbar in GrayMoon is gray and keeps the system width ("auto") and its arrow buttons. This is for vertical and horizontal scrollbars alike.
+
+`src/GrayMoon.App/wwwroot/app.css` holds the one default for the whole App: `html { scrollbar-color: #5a5a5a transparent; }`. `scrollbar-color` is inherited, so it reaches every scroll container and only recolors the browser's own scrollbar. So:
+
+- A new scroll container (`overflow: auto`, `overflow-y: auto`, a scrolling `tbody`, a `textarea`, a `pre`) needs no scrollbar CSS. Do not copy scrollbar rules into a component to get the gray scrollbar.
+- Do not write `::-webkit-scrollbar` rules to make a scrollbar gray. They replace the browser's scrollbar with a drawn one that has no arrow buttons, and Chromium and WebView2 ignore them anyway on an element whose `scrollbar-color` is not `auto` (the inherited default counts).
+- Never give a scrollbar a white or light thumb.
+- A container that needs a different scrollbar may set its own gray `scrollbar-color` (another track color) or `scrollbar-width: thin`.
+- Only a container that must draw its scrollbar itself (thinner than `thin`, no arrows) uses `::-webkit-scrollbar` rules, and then sets `scrollbar-color: auto` on itself so Chromium uses them, inside `@supports selector(::-webkit-scrollbar)` (see `.gm-ai-suggestion__body` in `wwwroot/css/ai-generation.css`). That is the only place `scrollbar-color: auto` is allowed.
+- The popup of a native `<select>` or `<datalist>` is drawn by the browser and takes no page CSS. Give the control `color-scheme: dark` so the popup and its scrollbar are dark (see `WorkerEnvironmentTab.razor.css`).
+
+`GrayScrollbarConventionTests` fails when the default is removed, when a stylesheet declares a light scrollbar, or when one resets `scrollbar-color` to `auto` without drawing its own scrollbar.
+
+The same rule applies to WPF windows and dialogs in GrayMoon.Desktop: a scrolling control uses a dark gray scrollbar, never the default light one.

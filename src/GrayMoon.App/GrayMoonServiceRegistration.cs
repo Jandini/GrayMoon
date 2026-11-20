@@ -194,6 +194,7 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
         services.AddSingleton<HostInfoCache>();
         services.AddSingleton<AiProviderAvailabilityCache>();
+        services.AddSingleton<AgentEnvironmentStore>();
         services.AddScoped<WorkspaceAiProviderPins>();
         services.AddScoped<IWorkspaceAiGenerationOperations, WorkspaceAiGenerationOperations>();
         services.AddSingleton<IWorkspaceManifestFile, WorkspaceManifestFile>();

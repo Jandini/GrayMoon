@@ -84,6 +84,11 @@ public sealed class AiGenerationTests
         public required ManifestTestFixture Fixture { get; init; }
         public required Workspace Workspace { get; init; }
         public required WorkspaceAiGenerationOperations Operations { get; init; }
+        public required AgentEnvironmentStore Environment { get; init; }
+
+        /// <summary>Answers one GenerateAiText request from its arguments; null uses <see cref="Generation"/>.</summary>
+        public Func<JsonElement, object>? GenerationFor { get; set; }
+        public bool CursorInstalled { get; set; }
         public required Dictionary<string, int> RepositoryIds { get; init; }
         public string ManifestContent { get; set; } = string.Empty;
         public Func<JsonElement, object> Evidence { get; set; } = _ => new { repositories = Array.Empty<object>() };
@@ -107,11 +112,13 @@ public sealed class AiGenerationTests
         await using var db = await fixture.Factory.CreateDbContextAsync();
         var ids = await db.Repositories.ToDictionaryAsync(r => r.RepositoryName, r => r.RepositoryId);
 
+        var environment = new AgentEnvironmentStore(fixture.Factory, new TestTokenProtector(), NullLogger<AgentEnvironmentStore>.Instance);
         var harness = new Harness
         {
             Fixture = fixture,
             Workspace = workspace,
             RepositoryIds = ids,
+            Environment = environment,
             Operations = new WorkspaceAiGenerationOperations(
                 fixture.Bridge,
                 fixture.Factory,
@@ -119,6 +126,7 @@ public sealed class AiGenerationTests
                 manifestService,
                 new AiProviderAvailabilityCache(new HostInfoCache(NullLogger<HostInfoCache>.Instance)),
                 new WorkspaceAiProviderPins(fixture.Factory),
+                environment,
                 Options.Create(new GitChangesOptions()),
                 Options.Create(new AiGenerationOptions()),
                 new GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService(
@@ -141,14 +149,14 @@ public sealed class AiGenerationTests
                 aiProviders = AiProviderIds.All.Where(harness.ProviderReported).Select(id => new
                 {
                     providerId = id,
-                    isInstalled = id == AiProviderIds.Claude && harness.ClaudeInstalled,
+                    isInstalled = (id == AiProviderIds.Claude && harness.ClaudeInstalled) || (id == AiProviderIds.Cursor && harness.CursorInstalled),
                     version = "1.0",
                     hasNoTools = id != AiProviderIds.Cursor,
-                    problem = id == AiProviderIds.Claude && harness.ClaudeInstalled ? null : "not found",
+                    problem = (id == AiProviderIds.Claude && harness.ClaudeInstalled) || (id == AiProviderIds.Cursor && harness.CursorInstalled) ? null : "not found",
                 }).ToArray(),
             }, null),
             WorkerHubMethods.CollectGitEvidence => new WorkerCommandResponse(true, harness.Evidence(ManifestTestFixture.ToJson(args)), null),
-            WorkerHubMethods.GenerateAiText => new WorkerCommandResponse(true, harness.Generation, null),
+            WorkerHubMethods.GenerateAiText => new WorkerCommandResponse(true, harness.GenerationFor?.Invoke(ManifestTestFixture.ToJson(args)) ?? harness.Generation, null),
             _ => new WorkerCommandResponse(false, null, $"unexpected {command}"),
         };
         return harness;
@@ -513,6 +521,184 @@ public sealed class AiGenerationTests
         await h.Operations.GetProvidersAsync(h.Workspace.WorkspaceId, CancellationToken.None);
         Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GetHostInfo);
         Assert.DoesNotContain(h.Sent, s => s.Command == WorkerHubMethods.GetAiProviders);
+    }
+
+    // ---- Environment variables: sent with the run; a known failure adds one and runs once more ----
+
+    private const string CommitAnswer = """{"subject":"Add the feature","body":"Details."}""";
+
+    private static readonly object IssuerFailure = new
+    {
+        success = false,
+        errorKind = "ProviderFailed",
+        errorMessage = "The CLI failed. (Error: unable to get local issuer certificate)",
+        environmentFix = new { name = "NODE_OPTIONS", value = "--use-system-ca", appendToExisting = true },
+    };
+
+    private static AiCommitScope OneRepository(Harness h) =>
+        new(h.Workspace.WorkspaceId, Context, GitCommitEvidenceMode.Staged, [new(h.RepositoryIds["Api"], "main")]);
+
+    private static async Task<Harness> CreateCursorHarnessAsync()
+    {
+        var h = await CreateHarnessAsync();
+        h.CursorInstalled = true;
+        h.Evidence = request => EvidenceFor(request);
+        return h;
+    }
+
+    private static Dictionary<string, string>? EnvironmentOf(JsonElement generationArgs) =>
+        generationArgs.TryGetProperty("environment", out var environment) && environment.ValueKind == JsonValueKind.Object
+            ? environment.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!)
+            : null;
+
+    [Fact]
+    public async Task The_provider_runs_with_the_variables_listed_for_it_and_for_all()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+        Assert.Null(await h.Environment.SaveAsync(
+        [
+            new(AgentEnvironmentScopes.All, "SHARED", "1"),
+            new(AiProviderIds.Claude, "CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP", "1"),
+            new(AiProviderIds.Cursor, "NODE_OPTIONS", "--use-system-ca"),
+        ]));
+
+        var result = await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Claude, progress: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        var environment = EnvironmentOf(Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText).Args);
+        Assert.Equal(
+            new Dictionary<string, string> { ["SHARED"] = "1", ["CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP"] = "1" },
+            environment);
+    }
+
+    [Fact]
+    public async Task Without_listed_variables_no_environment_is_sent()
+    {
+        await using var h = await CreateHarnessAsync();
+        h.Evidence = request => EvidenceFor(request);
+
+        await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Claude, progress: null, CancellationToken.None);
+
+        Assert.Null(EnvironmentOf(Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText).Args));
+    }
+
+    [Fact]
+    public async Task The_issuer_certificate_failure_adds_the_variable_and_the_second_run_answers()
+    {
+        await using var h = await CreateCursorHarnessAsync();
+        h.GenerationFor = args => EnvironmentOf(args)?.GetValueOrDefault("NODE_OPTIONS") == "--use-system-ca"
+            ? new { success = true, json = CommitAnswer, errorKind = "None" }
+            : IssuerFailure;
+        var steps = new List<string>();
+
+        var result = await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Cursor, new SynchronousProgress(steps.Add), CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal("Add the feature\n\nDetails.", result.Value!.Message);
+        Assert.Equal(2, h.Sent.Count(s => s.Command == WorkerHubMethods.GenerateAiText));
+        Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.CollectGitEvidence);
+
+        // Stored for Cursor only, so the next run (and Open in Cursor) has it without failing first.
+        Assert.Equal([new AgentEnvironmentVariable(AiProviderIds.Cursor, "NODE_OPTIONS", "--use-system-ca")], await h.Environment.GetAsync());
+
+        // The user is told what GrayMoon changed, by name and never by value.
+        Assert.Equal(AiGenerationWarningCodes.EnvironmentVariableAdded, result.Warning!.Code);
+        Assert.Contains("NODE_OPTIONS", result.Warning.Message);
+        Assert.Contains("Cursor", result.Warning.Message);
+        Assert.DoesNotContain("--use-system-ca", result.Warning.Message);
+        Assert.Contains(steps, s => s.Contains("NODE_OPTIONS") && s.Contains("Trying again"));
+    }
+
+    [Fact]
+    public async Task The_added_variable_keeps_the_node_options_the_user_already_listed()
+    {
+        await using var h = await CreateCursorHarnessAsync();
+        await h.Environment.SaveAsync([new(AiProviderIds.Cursor, "NODE_OPTIONS", "--max-old-space-size=4096")]);
+        var sentOptions = new List<string?>();
+        h.GenerationFor = args =>
+        {
+            sentOptions.Add(EnvironmentOf(args)?.GetValueOrDefault("NODE_OPTIONS"));
+            return sentOptions.Count == 1 ? IssuerFailure : new { success = true, json = CommitAnswer, errorKind = "None" };
+        };
+
+        var result = await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Cursor, progress: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal(["--max-old-space-size=4096", "--max-old-space-size=4096 --use-system-ca"], sentOptions);
+        // Still one NODE_OPTIONS row for Cursor: the fix never lists a name twice.
+        Assert.Equal("--max-old-space-size=4096 --use-system-ca", Assert.Single(await h.Environment.GetAsync()).Value);
+    }
+
+    [Fact]
+    public async Task A_second_failure_is_reported_once_and_never_retried_again()
+    {
+        await using var h = await CreateCursorHarnessAsync();
+        // A Worker that keeps naming the fix must not make the App loop.
+        h.GenerationFor = _ => IssuerFailure;
+
+        var result = await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Cursor, progress: null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(AiGenerationErrorKind.ProviderFailed, result.Failure!.Kind);
+        Assert.Contains("unable to get local issuer certificate", result.Failure.Message);
+        Assert.Contains("GrayMoon added the environment variable NODE_OPTIONS", result.Failure.Message);
+        Assert.Equal(2, h.Sent.Count(s => s.Command == WorkerHubMethods.GenerateAiText));
+        Assert.Single(await h.Environment.GetAsync());
+
+        // The variable is stored now, so the next click runs once: the fix is already in effect.
+        await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Cursor, progress: null, CancellationToken.None);
+        Assert.Equal(3, h.Sent.Count(s => s.Command == WorkerHubMethods.GenerateAiText));
+        Assert.Single(await h.Environment.GetAsync());
+    }
+
+    [Fact]
+    public async Task A_failure_without_a_fix_runs_once_and_stores_nothing()
+    {
+        await using var h = await CreateCursorHarnessAsync();
+        h.Generation = new { success = false, errorKind = "NotAuthenticated", errorMessage = "The CLI is not signed in." };
+
+        var result = await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Cursor, progress: null, CancellationToken.None);
+
+        Assert.Equal("The CLI is not signed in.", result.Failure!.Message);
+        Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText);
+        Assert.Empty(await h.Environment.GetAsync());
+    }
+
+    [Fact]
+    public async Task A_fix_that_is_not_a_usable_variable_is_ignored()
+    {
+        await using var h = await CreateCursorHarnessAsync();
+        h.Generation = new
+        {
+            success = false,
+            errorKind = "ProviderFailed",
+            errorMessage = "The CLI failed.",
+            environmentFix = new { name = "BAD NAME", value = "1\n2", appendToExisting = false },
+        };
+
+        var result = await h.Operations.GenerateCommitMessageAsync(OneRepository(h), AiProviderIds.Cursor, progress: null, CancellationToken.None);
+
+        Assert.Equal("The CLI failed.", result.Failure!.Message);
+        Assert.Single(h.Sent, s => s.Command == WorkerHubMethods.GenerateAiText);
+        Assert.Empty(await h.Environment.GetAsync());
+    }
+
+    [Fact]
+    public async Task The_pull_request_text_run_gets_the_same_fix_and_retry()
+    {
+        await using var h = await CreateCursorHarnessAsync();
+        h.GenerationFor = args => EnvironmentOf(args) is null
+            ? IssuerFailure
+            : new { success = true, json = """{"title":"Ship it","description":"Summary."}""", errorKind = "None" };
+        var scope = new AiPullRequestScope(h.Workspace.WorkspaceId, Context, [new(h.RepositoryIds["Api"], "feature/x", "main")]);
+
+        var result = await h.Operations.GeneratePullRequestTextAsync(scope, AiProviderIds.Cursor, CancellationToken.None);
+
+        Assert.True(result.Success, result.Failure?.Message);
+        Assert.Equal("Ship it", result.Value!.Title);
+        Assert.Equal(AiGenerationWarningCodes.EnvironmentVariableAdded, result.Warning!.Code);
+        Assert.Contains("NODE_OPTIONS", result.Warning.Message);
     }
 
     // ---- Local pin: one per workspace, never in graymoon.json ----

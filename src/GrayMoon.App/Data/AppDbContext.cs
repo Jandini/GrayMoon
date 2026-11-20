@@ -21,6 +21,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     public DbSet<WorkspaceFileLineStatus> WorkspaceFileLineStatuses => Set<WorkspaceFileLineStatus>();
     public DbSet<WorkspaceRepositoryCustomDependency> WorkspaceRepositoryCustomDependencies => Set<WorkspaceRepositoryCustomDependency>();
     public DbSet<Setting> Settings => Set<Setting>();
+    public DbSet<AgentEnvironmentVariableRow> AgentEnvironmentVariables => Set<AgentEnvironmentVariableRow>();
     public DbSet<WorkspaceGitRepositoryStatus> WorkspaceGitRepositoryStatuses => Set<WorkspaceGitRepositoryStatus>();
     public DbSet<WorkspaceGitChangeEntry> WorkspaceGitChangeEntries => Set<WorkspaceGitChangeEntry>();
     public DbSet<WorkspaceFeature> WorkspaceFeatures => Set<WorkspaceFeature>();
@@ -475,6 +476,18 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
             entity.HasIndex(s => s.Key).IsUnique();
             entity.Property(s => s.Key).IsRequired().HasMaxLength(200);
             entity.Property(s => s.Value).HasMaxLength(2000);
+        });
+
+        modelBuilder.Entity<AgentEnvironmentVariableRow>(entity =>
+        {
+            entity.ToTable("AgentEnvironmentVariables");
+            entity.HasKey(v => v.AgentEnvironmentVariableId);
+            entity.Property(v => v.AgentEnvironmentVariableId).ValueGeneratedOnAdd();
+            entity.Property(v => v.Scope).IsRequired().HasMaxLength(32);
+            // Windows compares variable names without case, so "Path" and "PATH" are one variable.
+            entity.Property(v => v.Name).IsRequired().HasMaxLength(128).UseCollation("NOCASE");
+            entity.Property(v => v.ProtectedValue).IsRequired();
+            entity.HasIndex(v => new { v.Scope, v.Name }).IsUnique();
         });
 
         modelBuilder.Entity<WorkspaceGitRepositoryStatus>(entity =>

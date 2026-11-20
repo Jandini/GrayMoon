@@ -12,6 +12,12 @@ public static class AiGenerationWarningCodes
     /// The provider CLI returned a verified successful result envelope and usable JSON, then exited with a nonzero code.
     /// </summary>
     public const string ProviderExitedAfterResult = "ProviderExitedAfterResult";
+
+    /// <summary>
+    /// The first run failed for a reason an environment variable fixes; GrayMoon added that variable and the second run
+    /// answered. Raised by the App, never by the Worker.
+    /// </summary>
+    public const string EnvironmentVariableAdded = "EnvironmentVariableAdded";
 }
 
 /// <summary>
@@ -36,6 +42,13 @@ public sealed record AiGenerationWarning(
 
     public static AiGenerationWarning ProviderExitedAfterResult(string? correlationId, string message = WorkerCandidateMessage) =>
         new(AiGenerationWarningCodes.ProviderExitedAfterResult, message, correlationId);
+
+    /// <summary>What GrayMoon did after a failed run: the variable it added and for which agent. The value is not shown.</summary>
+    public static string EnvironmentVariableAddedMessage(string providerId, string variableName) =>
+        $"{AiProviderIds.DisplayName(providerId)} failed the first time, so GrayMoon added the environment variable {variableName} for {AiProviderIds.DisplayName(providerId)} and tried again. See Worker, Environment.";
+
+    public static AiGenerationWarning EnvironmentVariableAdded(string providerId, string variableName) =>
+        new(AiGenerationWarningCodes.EnvironmentVariableAdded, EnvironmentVariableAddedMessage(providerId, variableName));
 }
 
 /// <summary>Optional warning on the Worker <c>GenerateAiText</c> response. Older App/Worker binaries ignore missing fields.</summary>

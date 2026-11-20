@@ -46,6 +46,9 @@
                                 <button class="nav-link @(ActiveTab == "host" ? "active" : "") @(HostTabMissingPrerequisites ? "install-tab-update" : "")" type="button" role="tab" @onclick='() => SetActiveTab("host")'>Host</button>
                             </li>
                         }
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(ActiveTab == "environment" ? "active" : "")" type="button" role="tab" @onclick='() => SetActiveTab("environment")'>Environment</button>
+                        </li>
                     </ul>
                 </div>
                 <div class="card-body">
@@ -148,6 +151,10 @@
                                 }
                             </div>
                         }
+                        @* Always rendered, so edits survive a switch to another tab. *@
+                        <div class="tab-pane @(ActiveTab == "environment" ? "show active" : "")" role="tabpanel">
+                            <WorkerEnvironmentTab @ref="_environmentTab" Providers="@hostInfo?.AiProviders" StateChanged="OnEnvironmentStateChanged" />
+                        </div>
                     </div>
                 </div>
                 @if (ActiveTab == "install")
@@ -193,6 +200,21 @@
                         </div>
                     </div>
                 }
+                else if (ActiveTab == "environment" && _environmentTab is { } environment)
+                {
+                    <div class="card-footer card-footer-worker d-flex justify-content-between align-items-center gap-3">
+                        <small class="@(environment.IsDirty && environment.Problem is not null ? "text-danger" : "text-muted")">@EnvironmentFooterText(environment)</small>
+                        <div class="d-flex align-items-center gap-2">
+                            @if (environment.IsDirty)
+                            {
+                                <button type="button" class="btn btn-outline-secondary text-nowrap" disabled="@environment.IsSaving" @onclick="environment.RevertAsync">Revert</button>
+                            }
+                            <button type="button" class="btn btn-primary text-nowrap" disabled="@(!environment.CanSave)" @onclick="environment.SaveAsync">
+                                @(environment.IsSaving ? "Saving..." : "Save")
+                            </button>
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -217,6 +239,16 @@
     private WorkerPairingCode? _pairingCode;
     private bool _autoUpdateWorker;
     private bool _autoUpdateSaving;
+    private WorkerEnvironmentTab? _environmentTab;
+
+    // The Environment footer (Save, Revert, the message) reads the tab component; its callback redraws this page.
+    private void OnEnvironmentStateChanged()
+    {
+    }
+
+    private static string EnvironmentFooterText(WorkerEnvironmentTab environment) =>
+        !environment.IsDirty ? "Used the next time GrayMoon starts an AI agent. Nothing is changed on the machine itself."
+        : environment.Problem ?? "Unsaved changes.";
 
     protected override async Task OnInitializedAsync()
     {

@@ -26,6 +26,7 @@ public sealed class WorkspaceAiGenerationOperations(
     IWorkspaceManifestService manifestService,
     AiProviderAvailabilityCache availability,
     WorkspaceAiProviderPins pins,
+    AgentEnvironmentStore agentEnvironment,
     IOptions<GitChangesOptions> gitChangesOptions,
     IOptions<AiGenerationOptions> aiOptions,
     IWorkspaceRepositoryOperationPolicy operationPolicy,
@@ -280,21 +281,21 @@ public sealed class WorkspaceAiGenerationOperations(
         // The commit overlay names the provider only. The model is still sent to the CLI.
         var model = kind == GitEvidenceKind.Commit || choice.Model is null ? string.Empty : $" ({choice.Model})";
         progress.Report($"Writing {subject} with {AiProviderIds.DisplayName(providerId)}{model}...");
-        var generation = await workerBridge.SendCommandAsync(
-            WorkerHubMethods.GenerateAiText,
-            new
+        var (generation, answer) = await SendGenerationAsync(providerId, choice.Model, prompt, cancellationToken);
+
+        // The provider's adapter recognized a failure that an environment variable fixes (Cursor behind a company
+        // proxy). Store the variable once and ask once more. A run that already had the variable carries no fix, and
+        // the second answer's fix is ignored, so this can never loop.
+        AgentEnvironmentVariable? addedVariable = null;
+        if (answer is { Success: false } && answer.EnvironmentFix?.ToFix() is { } fix)
+        {
+            addedVariable = await agentEnvironment.ApplyFixAsync(providerId, fix, cancellationToken);
+            if (addedVariable is not null)
             {
-                providerId,
-                model = choice.Model,
-                systemPrompt = prompt.SystemPrompt,
-                userPrompt = prompt.UserPrompt,
-                jsonSchema = prompt.JsonSchema,
-                timeoutSeconds = Math.Clamp(aiOptions.Value.TimeoutSeconds, 10, 600),
-            },
-            cancellationToken);
-        var answer = generation.Success
-            ? WorkerResponseJson.DeserializeWorkerResponse<GenerateAiTextWorkerResponse>(generation.Data)
-            : null;
+                progress.Report($"Added the environment variable {addedVariable.Name} for {AiProviderIds.DisplayName(providerId)}. Trying again...");
+                (generation, answer) = await SendGenerationAsync(providerId, choice.Model, prompt, cancellationToken);
+            }
+        }
 
         var outcome = answer switch
         {
@@ -303,6 +304,13 @@ public sealed class WorkspaceAiGenerationOperations(
             _ => GenerationRun.Fail(answer.ErrorKind == AiGenerationErrorKind.None ? AiGenerationErrorKind.ProviderFailed : answer.ErrorKind,
                 answer.ErrorMessage ?? "The AI provider did not answer.", prompt.Coverage),
         };
+        if (addedVariable is not null)
+        {
+            // The user is always told that GrayMoon changed the Environment list, whether the second run answered or not.
+            outcome = outcome.Failure is { } failure
+                ? outcome with { Failure = failure with { Message = $"{failure.Message} GrayMoon added the environment variable {addedVariable.Name} for {AiProviderIds.DisplayName(providerId)} (Worker, Environment) and tried again." } }
+                : outcome with { Warning = AiGenerationWarning.EnvironmentVariableAdded(providerId, addedVariable.Name) };
+        }
 
         logger.LogInformation(
             "AI generation. Kind={Kind} Provider={Provider} ModelSet={ModelSet} Repositories={Repositories} ChangedFiles={ChangedFiles} ExcerptFiles={ExcerptFiles} HistoryCommits={HistoryCommits} HistoryShown={HistoryShown} RedactedLines={RedactedLines} Partial={Partial} EstimatedTokens={EstimatedTokens} EvidenceMs={EvidenceMs} WorkerEvidenceMs={WorkerEvidenceMs} PromptMs={PromptMs} ProviderMs={ProviderMs} TotalMs={TotalMs} Outcome={Outcome} WarningCode={WarningCode} CorrelationId={CorrelationId}",
@@ -313,9 +321,43 @@ public sealed class WorkspaceAiGenerationOperations(
         return outcome;
     }
 
-    /// <summary>Attaches a warning only after consumer validation succeeded; never promote an unvalidated Worker candidate.</summary>
+    /// <summary>
+    /// One Worker <c>GenerateAiText</c> call with the variables listed for the provider (Worker page, Environment), read
+    /// fresh each time so a variable stored a moment ago is part of the next call.
+    /// </summary>
+    private async Task<(WorkerCommandResponse Response, GenerateAiTextWorkerResponse? Answer)> SendGenerationAsync(
+        string providerId,
+        string? model,
+        PreparedAiPrompt prompt,
+        CancellationToken cancellationToken)
+    {
+        var environment = await agentEnvironment.ResolveAsync(providerId, cancellationToken);
+        var response = await workerBridge.SendCommandAsync(
+            WorkerHubMethods.GenerateAiText,
+            new
+            {
+                providerId,
+                model,
+                systemPrompt = prompt.SystemPrompt,
+                userPrompt = prompt.UserPrompt,
+                jsonSchema = prompt.JsonSchema,
+                timeoutSeconds = Math.Clamp(aiOptions.Value.TimeoutSeconds, 10, 600),
+                environment = environment.Count == 0 ? null : environment,
+            },
+            cancellationToken);
+        return (response, response.Success
+            ? WorkerResponseJson.DeserializeWorkerResponse<GenerateAiTextWorkerResponse>(response.Data)
+            : null);
+    }
+
+    /// <summary>
+    /// Attaches a warning only after consumer validation succeeded; never promote an unvalidated Worker candidate. The
+    /// App's own notice that it added an environment variable keeps its text; a Worker candidate gets the consumer's copy.
+    /// </summary>
     private static AiGenerationWarning? AcceptedWarning(AiGenerationWarning? candidate, string userMessage) =>
-        candidate is null ? null : candidate with { Message = userMessage };
+        candidate is null ? null
+        : candidate.Code == AiGenerationWarningCodes.EnvironmentVariableAdded ? candidate
+        : candidate with { Message = userMessage };
 
     private static string Describe(IReadOnlyList<RepositoryGitEvidence> failed)
     {
@@ -339,7 +381,8 @@ public sealed class WorkspaceAiGenerationOperations(
             .ToDictionaryAsync(l => l.RepositoryId, l => l.RepositoryName, cancellationToken);
     }
 
-    private static string IconFor(string providerId) => providerId switch
+    /// <summary>The provider's icon under <c>wwwroot</c>, or empty for an id this App has no icon for. Also used by the Worker page's Environment tab.</summary>
+    internal static string IconFor(string providerId) => providerId switch
     {
         AiProviderIds.Claude => "icons/claude.svg",
         AiProviderIds.Codex => "icons/codex.svg",
@@ -383,5 +426,8 @@ public sealed class WorkspaceAiGenerationOperations(
 
         [JsonPropertyName("warning")]
         public AiGenerationWarningDto? Warning { get; set; }
+
+        [JsonPropertyName("environmentFix")]
+        public AgentEnvironmentFixDto? EnvironmentFix { get; set; }
     }
 }

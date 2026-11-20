@@ -34,4 +34,11 @@ public sealed class GenerateAiTextRequest
 
     [JsonPropertyName("timeoutSeconds")]
     public int TimeoutSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Environment variables for the CLI process, as listed for this provider on the Worker page (Environment). Null runs
+    /// the CLI with the Worker's own environment. Names and values are checked again here before they are applied.
+    /// </summary>
+    [JsonPropertyName("environment")]
+    public Dictionary<string, string>? Environment { get; set; }
 }

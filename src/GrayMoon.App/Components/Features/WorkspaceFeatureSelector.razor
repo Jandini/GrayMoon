@@ -9,6 +9,8 @@
 @inject IWorkspaceCatalogOperations WorkspaceCatalog
 @inject IWorkspaceNativeLaunchService NativeLaunch
 @inject WorkspaceOpenInRecentTools OpenInRecentTools
+@inject GrayMoon.App.Services.Ai.AgentEnvironmentStore EnvironmentStore
+@inject ILogger<WorkspaceFeatureSelector> Logger
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
@@ -1117,8 +1119,32 @@
         }
     }
 
-    private Task<bool> PostToolAsync(OpenInTool tool, string path) =>
-        JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path }).AsTask();
+    /// <summary>
+    /// Posts the launch to GrayMoon Desktop. An AI tool also gets the environment variables listed for it on the
+    /// Worker page (Environment); a tool with none listed is posted exactly as before.
+    /// </summary>
+    private async Task<bool> PostToolAsync(OpenInTool tool, string path)
+    {
+        IReadOnlyDictionary<string, string>? environment = null;
+        if (tool.AgentScope is { } scope)
+        {
+            try
+            {
+                var resolved = await EnvironmentStore.ResolveAsync(scope);
+                if (resolved.Count > 0)
+                    environment = resolved;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The tool still opens, with the environment it had before; the log says why the variables are missing.
+                Logger.LogWarning(ex, "Reading the environment variables for {Tool} failed; starting it without them.", tool.Id);
+            }
+        }
+
+        return environment is null
+            ? await JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path })
+            : await JS.InvokeAsync<bool>("graymoonDesktop.post", tool.DesktopCommand, new { path, environment });
+    }
 
     private static bool IsDesktopBridgeFailure(Exception ex) =>
         ex is JSDisconnectedException

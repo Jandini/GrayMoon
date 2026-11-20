@@ -1,0 +1,303 @@
+@using GrayMoon.App.Services.Ai
+@using GrayMoon.Common.Ai
+@implements IDisposable
+@inject AgentEnvironmentStore Store
+@inject IToastService ToastService
+@inject ILogger<WorkerEnvironmentTab> Logger
+
+<p class="small text-muted mb-3">
+    GrayMoon sets these variables when it starts an AI agent: to write a commit message or pull request text, and for
+    Open in Cursor, Claude CLI and Codex CLI. A variable listed for one agent wins over the same name listed for All.
+</p>
+
+@if (_rows is null)
+{
+    <p class="text-muted mb-0">@(_loadError ?? "Loading...")</p>
+}
+else
+{
+    @if (_changedElsewhere)
+    {
+        <p class="small text-warning mb-3">GrayMoon changed this list while you were editing. Revert shows the stored list; Save replaces it with yours.</p>
+    }
+    @if (_rows.Count == 0)
+    {
+        <p class="small text-muted mb-0">No variables yet. AI agents start with the environment they already have.</p>
+    }
+    else
+    {
+        <div class="env-grid" role="table" aria-label="Environment variables">
+            <div class="env-grid__head" role="row">
+                <span class="small text-muted" role="columnheader">Scope</span>
+                <span class="small text-muted" role="columnheader">Name</span>
+                <span class="small text-muted" role="columnheader">Value</span>
+                <span role="columnheader"></span>
+            </div>
+            @foreach (var row in _rows)
+            {
+                var nameProblem = NameProblem(row);
+                var valueProblem = AgentEnvironment.ValueError(row.Value);
+                var listId = $"env-names-{row.Key:N}";
+                <div class="env-grid__row" role="row" @key="row.Key">
+                    <div class="env-scope">
+                        @* The icon of the chosen scope: the agent's own, or the app's AI glyph for All. *@
+                        @if (ScopeIcon(row.Scope) is { Length: > 0 } icon)
+                        {
+                            <img src="@icon" alt="" class="env-scope__icon" aria-hidden="true" />
+                        }
+                        else
+                        {
+                            <i class="bi bi-stars env-scope__icon" aria-hidden="true"></i>
+                        }
+                        <select class="form-select form-select-sm" aria-label="Scope" disabled="@_saving"
+                                @bind="row.Scope" @bind:after="NotifyChangedAsync">
+                            @foreach (var scope in ScopeOptions(row))
+                            {
+                                <option value="@scope">@ScopeLabel(scope)</option>
+                            }
+                        </select>
+                    </div>
+                    <input type="text" class="form-control form-control-sm font-monospace @(nameProblem is not null && row.Name.Length > 0 ? "is-invalid" : "")"
+                           aria-label="Name" placeholder="NAME" title="@nameProblem" list="@listId"
+                           spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="@AgentEnvironment.MaxNameLength" disabled="@_saving"
+                           @bind="row.Name" @bind:event="oninput" @bind:after="() => OnNameChangedAsync(row)" />
+                    <datalist id="@listId">
+                        @foreach (var known in Suggestions(row))
+                        {
+                            <option value="@known.Name" label="@SuggestionLabel(known)"></option>
+                        }
+                    </datalist>
+                    <input type="text" class="form-control form-control-sm font-monospace @(valueProblem is not null ? "is-invalid" : "")"
+                           aria-label="Value" placeholder="value" title="@valueProblem"
+                           spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="@AgentEnvironment.MaxValueLength" disabled="@_saving"
+                           @bind="row.Value" @bind:event="oninput" @bind:after="NotifyChangedAsync" />
+                    <button type="button" class="env-remove" title="Remove" disabled="@_saving"
+                            aria-label="@(row.Name.Length > 0 ? $"Remove {row.Name}" : "Remove")"
+                            @onclick="() => RemoveAsync(row)">
+                        <i class="bi bi-x-circle" aria-hidden="true"></i>
+                    </button>
+                </div>
+            }
+        </div>
+    }
+    <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap env-add"
+            disabled="@(_saving || _rows.Count >= AgentEnvironment.MaxVariables)" @onclick="AddAsync">
+        <i class="bi bi-plus-lg" aria-hidden="true"></i> Add
+    </button>
+}
+
+@code {
+    /// <summary>The AI CLIs of the last host check; null while the Worker is offline. Decides which agents are offered and which names are suggested.</summary>
+    [Parameter] public IReadOnlyList<AiProviderAvailability>? Providers { get; set; }
+
+    /// <summary>Raised when <see cref="CanSave"/>, <see cref="IsDirty"/> or <see cref="Problem"/> may have changed, so the page can redraw its footer.</summary>
+    [Parameter] public EventCallback StateChanged { get; set; }
+
+    private List<Row>? _rows;
+    private IReadOnlyList<AgentEnvironmentVariable> _stored = [];
+    private string? _loadError;
+    private bool _saving;
+    private bool _changedElsewhere;
+    private bool _disposed;
+
+    private sealed class Row
+    {
+        public Guid Key { get; } = Guid.NewGuid();
+        public string Scope { get; set; } = AgentEnvironmentScopes.All;
+        public string Name { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    public bool IsSaving => _saving;
+
+    /// <summary>True when the grid differs from the stored list.</summary>
+    public bool IsDirty => _rows is not null && !Current().SequenceEqual(_stored);
+
+    /// <summary>The first reason the grid cannot be saved, or null.</summary>
+    public string? Problem => _rows is null ? null : AgentEnvironment.ListError(Current());
+
+    public bool CanSave => !_saving && IsDirty && Problem is null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _stored = await Store.GetAsync();
+            _rows = _stored.Select(v => new Row { Scope = v.Scope, Name = v.Name, Value = v.Value }).ToList();
+            _loadError = null;
+            _changedElsewhere = false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Loading the agent environment variables failed.");
+            _rows = null;
+            _loadError = "The environment variables could not be loaded. See logs.";
+        }
+    }
+
+    /// <summary>The grid as it would be stored: names trimmed, values as typed.</summary>
+    private List<AgentEnvironmentVariable> Current() =>
+        _rows!.Select(r => new AgentEnvironmentVariable(r.Scope, r.Name.Trim(), r.Value)).ToList();
+
+    public async Task SaveAsync()
+    {
+        if (!CanSave)
+            return;
+
+        _saving = true;
+        await NotifyChangedAsync();
+        try
+        {
+            var variables = Current();
+            var refused = await Store.SaveAsync(variables);
+            if (refused is not null)
+            {
+                ToastService.ShowError(refused);
+                return;
+            }
+
+            _stored = variables;
+            _changedElsewhere = false;
+            foreach (var row in _rows!)
+                row.Name = row.Name.Trim();
+            ToastService.Show("Environment variables saved.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Saving the agent environment variables failed.");
+            ToastService.ShowError($"Could not save the environment variables: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+            await NotifyChangedAsync();
+        }
+    }
+
+    /// <summary>Drops the edits and shows the stored list again.</summary>
+    public async Task RevertAsync()
+    {
+        if (_saving)
+            return;
+
+        await LoadAsync();
+        await NotifyChangedAsync();
+    }
+
+    private Task AddAsync()
+    {
+        _rows!.Add(new Row());
+        return NotifyChangedAsync();
+    }
+
+    private Task RemoveAsync(Row row)
+    {
+        _rows!.Remove(row);
+        return NotifyChangedAsync();
+    }
+
+    /// <summary>Picking (or finishing typing) a known name fills in its usual value, unless a value is already there.</summary>
+    private Task OnNameChangedAsync(Row row)
+    {
+        if (row.Value.Length == 0
+            && Suggestions(row).FirstOrDefault(k => AgentEnvironment.NameComparer.Equals(k.Name, row.Name.Trim())) is { } known)
+        {
+            row.Name = known.Name;
+            row.Value = known.Value;
+        }
+
+        return NotifyChangedAsync();
+    }
+
+    private Task NotifyChangedAsync() => StateChanged.InvokeAsync();
+
+    private string? NameProblem(Row row)
+    {
+        var name = row.Name.Trim();
+        if (AgentEnvironment.NameError(name) is { } error)
+            return error;
+        return _rows!.Any(other => !ReferenceEquals(other, row)
+                                   && other.Scope == row.Scope
+                                   && AgentEnvironment.NameComparer.Equals(other.Name.Trim(), name))
+            ? $"{name} is already listed for {AgentEnvironmentScopes.DisplayName(row.Scope)}."
+            : null;
+    }
+
+    private IReadOnlyList<AiProviderAvailability> InstalledProviders =>
+        Providers?.Where(p => p.IsInstalled).ToList() ?? [];
+
+    /// <summary>
+    /// All, then the installed agents. Before the first host check (or with the Worker offline) every agent is offered,
+    /// and a row always keeps the scope it has, installed or not.
+    /// </summary>
+    private IEnumerable<string> ScopeOptions(Row row)
+    {
+        var installed = InstalledProviders.Select(p => p.ProviderId).ToHashSet(StringComparer.Ordinal);
+        return AgentEnvironmentScopes.Known.Where(scope =>
+            scope == AgentEnvironmentScopes.All
+            || Providers is null
+            || installed.Contains(scope)
+            || scope == row.Scope);
+    }
+
+    /// <summary>The agent's icon; empty for All, which shows the AI glyph instead.</summary>
+    private static string ScopeIcon(string scope) =>
+        scope == AgentEnvironmentScopes.All ? string.Empty : WorkspaceAiGenerationOperations.IconFor(scope);
+
+    private string ScopeLabel(string scope) =>
+        scope == AgentEnvironmentScopes.All || Providers is null || InstalledProviders.Any(p => p.ProviderId == scope)
+            ? AgentEnvironmentScopes.DisplayName(scope)
+            : $"{AgentEnvironmentScopes.DisplayName(scope)} (not installed)";
+
+    /// <summary>
+    /// The variables the installed agents are known to read: all of them for scope All, one agent's for that agent.
+    /// A name the scope already lists in another row is not offered again.
+    /// </summary>
+    private IEnumerable<KnownAgentEnvironmentVariable> Suggestions(Row row)
+    {
+        var taken = _rows!
+            .Where(other => !ReferenceEquals(other, row) && other.Scope == row.Scope)
+            .Select(other => other.Name.Trim())
+            .ToHashSet(AgentEnvironment.NameComparer);
+        return InstalledProviders
+            .Where(p => row.Scope == AgentEnvironmentScopes.All || p.ProviderId == row.Scope)
+            .SelectMany(p => p.KnownEnvironmentVariables)
+            .Where(k => !taken.Contains(k.Name))
+            .DistinctBy(k => k.Name, AgentEnvironment.NameComparer);
+    }
+
+    private static string SuggestionLabel(KnownAgentEnvironmentVariable known) =>
+        $"{AiProviderIds.DisplayName(known.ProviderId)} - {known.Description}";
+
+    /// <summary>
+    /// The stored list changed: this tab saved it, another tab did, or GrayMoon added a variable after an agent failed.
+    /// An untouched grid follows the store; a grid with edits keeps them and says the list moved.
+    /// </summary>
+    private void OnStoreChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed || _saving)
+                return;
+
+            if (IsDirty)
+                _changedElsewhere = true;
+            else
+                await LoadAsync();
+            StateHasChanged();
+            await NotifyChangedAsync();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Store.Changed -= OnStoreChanged;
+    }
+}

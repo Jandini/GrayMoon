@@ -10,7 +10,11 @@ using Microsoft.Extensions.Logging;
 namespace GrayMoon.Worker.Services.Ai;
 
 /// <summary>What the Worker knows about one provider's CLI on this machine, as the Worker's own account sees it.</summary>
-public sealed record AiCliAvailability(string ProviderId, bool IsInstalled, string? ExecutablePath, string? Version, bool HasNoTools, string? Problem);
+public sealed record AiCliAvailability(string ProviderId, bool IsInstalled, string? ExecutablePath, string? Version, bool HasNoTools, string? Problem)
+{
+    /// <summary>The provider adapter's <see cref="IAiCliAdapter.KnownEnvironmentVariables"/>.</summary>
+    public IReadOnlyList<KnownAgentEnvironmentVariable> KnownEnvironmentVariables { get; init; } = [];
+}
 
 /// <summary>
 /// The single gateway that runs a provider CLI: resolves the executable on PATH, creates an empty private folder as the
@@ -31,7 +35,8 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
     private readonly IReadOnlyDictionary<string, IAiCliAdapter> _adapters = adapters.ToDictionary(a => a.ProviderId, StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (AiCliAvailability Availability, DateTimeOffset At)> _probeCache = new(StringComparer.Ordinal);
 
-    // Variables that would point a child at a repository or make it interactive.
+    // Variables that would point a child at a repository or make it interactive. They are applied after the user's
+    // variables (Worker page, Environment), so a listed GIT_DIR or TERM cannot undo them.
     private static readonly IReadOnlyDictionary<string, string?> ChildEnvironment = new Dictionary<string, string?>
     {
         ["GIT_DIR"] = null,
@@ -70,6 +75,8 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
             return AiCliOutcome.Failure(AiGenerationErrorKind.Configuration, $"Unknown AI provider \"{providerId}\".");
         if (request.Model is not null && !AiProviderConfiguration.IsValidModel(request.Model))
             return AiCliOutcome.Failure(AiGenerationErrorKind.Configuration, "The model name is not valid.");
+        if (EnvironmentError(request.Environment) is { } environmentError)
+            return AiCliOutcome.Failure(AiGenerationErrorKind.Configuration, $"An environment variable is not valid. {environmentError}");
 
         var executable = locator.Find(adapter.ExecutableNames);
         if (executable is null)
@@ -96,7 +103,7 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                 MaxStdoutBytes = MaxAnswerBytes,
                 MaxStderrBytes = MaxStderrBytes,
                 Timeout = timeout,
-                Environment = ChildEnvironment,
+                Environment = BuildChildEnvironment(request.Environment),
             }, cancellationToken);
             var processMs = (long)Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
 
@@ -110,6 +117,11 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
             };
             var parseMs = (long)Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
             outcome = WithOperationId(outcome, operationId);
+            outcome = WithEnvironmentFix(adapter, request, result, outcome);
+            if (outcome.EnvironmentFix is { } fix)
+                logger.LogWarning(
+                    "AI CLI failure has a known environment fix. OperationId={OperationId} Provider={Provider} Variable={Variable}",
+                    operationId, providerId, fix.Name);
 
             var seconds = Stopwatch.GetElapsedTime(prepareStarted).TotalSeconds;
             ReportToOverlay(
@@ -178,6 +190,66 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                 Preview(result.StdoutText.Length > 600 ? result.StdoutText[^300..] : string.Empty, 300));
     }
 
+    /// <summary>Why the App-supplied variables cannot be applied, or null. The App is not trusted to have checked them.</summary>
+    internal static string? EnvironmentError(IReadOnlyDictionary<string, string>? environment)
+    {
+        if (environment is null)
+            return null;
+        if (environment.Count > AgentEnvironment.MaxVariables)
+            return $"At most {AgentEnvironment.MaxVariables} variables can be set.";
+        foreach (var (name, value) in environment)
+        {
+            if (AgentEnvironment.NameError(name) is { } nameError)
+                return nameError;
+            if (AgentEnvironment.ValueError(value) is { } valueError)
+                return $"{name}: {valueError}";
+        }
+
+        return null;
+    }
+
+    /// <summary>The user's variables first, then <see cref="ChildEnvironment"/> on top.</summary>
+    internal static IReadOnlyDictionary<string, string?> BuildChildEnvironment(IReadOnlyDictionary<string, string>? environment)
+    {
+        if (environment is null || environment.Count == 0)
+            return ChildEnvironment;
+
+        var merged = new Dictionary<string, string?>(AgentEnvironment.NameComparer);
+        foreach (var (name, value) in environment)
+            merged[name] = value;
+        foreach (var (name, value) in ChildEnvironment)
+            merged[name] = value;
+        return merged;
+    }
+
+    /// <summary>
+    /// Attaches the adapter's fix to a failed run that really ran (started, not timed out), unless the run already had
+    /// it: from the request, or inherited from the Worker's own environment. A run that had the fix and still failed
+    /// gets none, so the App's one retry can never repeat.
+    /// </summary>
+    private static AiCliOutcome WithEnvironmentFix(IAiCliAdapter adapter, AiCliRequest request, BoundedProcessResult result, AiCliOutcome outcome)
+    {
+        if (outcome.Error == AiGenerationErrorKind.None || !result.Started || result.TimedOut)
+            return outcome;
+
+        var fix = adapter.SuggestEnvironmentFix(result.Stderr + "\n" + result.StdoutText);
+        if (fix is null)
+            return outcome;
+
+        string? current = null;
+        if (request.Environment is not null)
+        {
+            foreach (var (name, value) in request.Environment)
+            {
+                if (AgentEnvironment.NameComparer.Equals(name, fix.Name))
+                    current = value;
+            }
+        }
+
+        current ??= Environment.GetEnvironmentVariable(fix.Name);
+        return AgentEnvironment.IsInEffect(fix, current) ? outcome : outcome with { EnvironmentFix = fix };
+    }
+
     private static AiCliOutcome WithOperationId(AiCliOutcome outcome, string operationId)
     {
         if (outcome.Warning is null)
@@ -215,6 +287,7 @@ public sealed class AiCliRunner(IEnumerable<IAiCliAdapter> adapters, IAiCliExecu
                     $"{Path.GetFileName(executable)} --version failed; reinstall or update the CLI.");
         }
 
+        availability = availability with { KnownEnvironmentVariables = adapter.KnownEnvironmentVariables };
         _probeCache[adapter.ProviderId] = (availability, DateTimeOffset.UtcNow);
         return availability;
     }
