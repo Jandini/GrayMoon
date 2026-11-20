@@ -169,6 +169,8 @@ public partial class NewPullRequestModal
         var scope = CurrentAiScope();
         var fingerprint = scope.Fingerprint();
         var textAtClick = UserWrittenText();
+        // The branch the default title is built from; its ticket id goes in front of the AI title too.
+        var titleBranch = Targets.Count > 0 ? Targets[0].HeadBranch : null;
         _aiLocalError = null;
         // The memory is the field once the dialog is gone; it must hold what the user had at the click.
         SaveDraft();
@@ -183,7 +185,13 @@ public partial class NewPullRequestModal
                         ops => ops.GeneratePullRequestTextAsync(scope, provider.Id, ct),
                         ct);
                     return result.Success
-                        ? WorkspacePullRequestTextGeneration.Outcome.Succeeded(new PullRequestAiText(result.Value!, fingerprint), provider.Label, textAtClick, result.Warning)
+                        ? WorkspacePullRequestTextGeneration.Outcome.Succeeded(
+                            new PullRequestAiText(
+                                result.Value! with { Title = PullRequestTitleHelper.PrefixWithTicket(result.Value!.Title, titleBranch) },
+                                fingerprint),
+                            provider.Label,
+                            textAtClick,
+                            result.Warning)
                         : WorkspacePullRequestTextGeneration.Outcome.Failed(result.Failure!.Message, provider.Label, textAtClick);
                 }
                 catch (OperationCanceledException)
