@@ -22,7 +22,7 @@ public sealed class NuGetService : IConnectorService
     /// <summary>Checks whether a package with the given id exists in the registry.</summary>
     public async Task<bool> PackageExistsAsync(Connector connector, string packageId, CancellationToken cancellationToken = default)
     {
-        if (connector.ConnectorType != ConnectorType.NuGet)
+        if (!ConnectorHelpers.IsPackageRegistry(connector.ConnectorType))
             throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by NuGetService.");
         if (string.IsNullOrWhiteSpace(packageId))
             return false;
@@ -56,7 +56,7 @@ public sealed class NuGetService : IConnectorService
     /// </summary>
     internal async Task<PackageVersionLookupResult> LookupPackageVersionAsync(Connector connector, string packageId, string version, CancellationToken cancellationToken = default)
     {
-        if (connector.ConnectorType != ConnectorType.NuGet)
+        if (!ConnectorHelpers.IsPackageRegistry(connector.ConnectorType))
             throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by NuGetService.");
         if (string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(version))
             return PackageVersionLookupResult.Absent(PackageVersionLookupKind.Inconclusive);
@@ -104,7 +104,7 @@ public sealed class NuGetService : IConnectorService
     /// <summary>Gets the PackageBaseAddress URL from the NuGet service index (e.g. https://api.nuget.org/v3-flatcontainer/).</summary>
     public async Task<string?> GetPackageBaseAddressAsync(Connector connector, CancellationToken cancellationToken = default)
     {
-        if (connector.ConnectorType != ConnectorType.NuGet)
+        if (!ConnectorHelpers.IsPackageRegistry(connector.ConnectorType))
             throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by NuGetService.");
 
         var indexUrl = connector.ApiBaseUrl?.TrimEnd('/') ?? "";
@@ -158,7 +158,14 @@ public sealed class NuGetService : IConnectorService
         var request = new HttpRequestMessage(method, url);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
+        if (connector.ConnectorType == ConnectorType.ProGet)
+        {
+            // No key means a public feed: the request goes out without sign-in.
+            var apiKey = ConnectorHelpers.UnprotectToken(connector.UserToken)?.Trim();
+            if (!string.IsNullOrEmpty(apiKey))
+                request.Headers.Authorization = ProGetAuthorization(connector.UserName, apiKey);
+        }
+        else if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
         {
             // GitHub Packages NuGet requires Basic auth with username and token
             var token = ConnectorHelpers.UnprotectToken(connector.UserToken)?.Trim();
@@ -182,6 +189,16 @@ public sealed class NuGetService : IConnectorService
         return request;
     }
 
+    /// <summary>
+    /// ProGet reads a feed with Basic sign-in: the fixed user name <c>api</c> and the API key as password
+    /// (a user name on the connector replaces <c>api</c>, for a ProGet user and password).
+    /// </summary>
+    internal static AuthenticationHeaderValue ProGetAuthorization(string? userName, string apiKey)
+    {
+        var user = string.IsNullOrWhiteSpace(userName) ? "api" : userName.Trim();
+        return new AuthenticationHeaderValue("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{user}:{apiKey}")));
+    }
+
     private static string NormalizeVersion(string v)
     {
         var parts = v.Trim().Split('.');
@@ -194,7 +211,7 @@ public sealed class NuGetService : IConnectorService
 
     public async Task<ConnectorTestResult> TestConnectionAsync(Connector connector)
     {
-        if (connector.ConnectorType != ConnectorType.NuGet)
+        if (!ConnectorHelpers.IsPackageRegistry(connector.ConnectorType))
         {
             throw new InvalidOperationException($"Connector type {connector.ConnectorType} is not supported by NuGetService.");
         }
@@ -205,8 +222,9 @@ public sealed class NuGetService : IConnectorService
             return await TestNuGetOrgConnectionAsync(connector);
         }
 
-        // Other registries require token
-        if (string.IsNullOrWhiteSpace(ConnectorHelpers.UnprotectToken(connector.UserToken)))
+        // Other registries require token, except ProGet, where a feed can be public
+        if (connector.ConnectorType != ConnectorType.ProGet
+            && string.IsNullOrWhiteSpace(ConnectorHelpers.UnprotectToken(connector.UserToken)))
         {
             return ConnectorTestResult.Fault("Connector token is required for this NuGet registry.");
         }
@@ -261,7 +279,11 @@ public sealed class NuGetService : IConnectorService
             var token = ConnectorHelpers.UnprotectToken(connector.UserToken);
             if (!string.IsNullOrWhiteSpace(token))
             {
-                if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
+                if (connector.ConnectorType == ConnectorType.ProGet)
+                {
+                    request.Headers.Authorization = ProGetAuthorization(connector.UserName, token.Trim());
+                }
+                else if (ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl))
                 {
                     // GitHub Packages uses Basic auth with username:token
                     var username = connector.UserName ?? "USER";
@@ -280,7 +302,9 @@ public sealed class NuGetService : IConnectorService
             if (response.IsSuccessStatusCode)
                 return ConnectorTestResult.Ok();
 
-            var registryName = ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl) ? "GitHub Packages" : "NuGet registry";
+            var registryName = connector.ConnectorType == ConnectorType.ProGet
+                ? "ProGet"
+                : ConnectorHelpers.IsGitHubPackages(connector.ApiBaseUrl) ? "GitHub Packages" : "NuGet registry";
             var message = MapHttpStatusToMessage(response.StatusCode, registryName);
             _logger.LogError("Failed to test authenticated NuGet connection. Status={StatusCode}", response.StatusCode);
             var isConnectorFault = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound;

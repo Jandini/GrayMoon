@@ -330,8 +330,7 @@
         var predefined = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "https://api.github.com/",
-            "https://api.nuget.org/v3/index.json",
-            "https://nuget.pkg.github.com/"
+            "https://api.nuget.org/v3/index.json"
         };
         if (connectors != null)
         {
@@ -663,6 +662,7 @@
         {
             ConnectorType.GitHub => "bi-github",
             ConnectorType.NuGet => "bi-box-seam",
+            ConnectorType.ProGet => "bi-boxes",
             _ => "bi-link-45deg"
         };
     }

@@ -18,9 +18,14 @@ public static class ConnectorHelpers
         {
             ConnectorType.GitHub => true, // Always requires token
             ConnectorType.NuGet => !IsNuGetOrg(apiBaseUrl),
+            ConnectorType.ProGet => false, // A ProGet feed can be public; a protected one needs an API key
             _ => true
         };
     }
+
+    /// <summary>True for the connector types that are package registries read through <c>NuGetService</c>.</summary>
+    public static bool IsPackageRegistry(ConnectorType connectorType)
+        => connectorType is ConnectorType.NuGet or ConnectorType.ProGet;
 
     public static bool IsNuGetOrg(string apiBaseUrl)
     {
@@ -65,6 +70,9 @@ public static class ConnectorHelpers
     {
         if (connectorType == ConnectorType.GitHub)
             return true; // Optional but shown
+
+        if (connectorType == ConnectorType.ProGet)
+            return false; // An API key signs in as the fixed user "api"
 
         if (IsNuGetOrg(apiBaseUrl))
             return false; // Not needed for public NuGet.org
