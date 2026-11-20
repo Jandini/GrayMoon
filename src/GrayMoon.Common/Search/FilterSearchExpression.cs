@@ -7,6 +7,22 @@ namespace GrayMoon.Common.Search;
 /// </summary>
 public static class FilterSearchExpression
 {
+    /// <summary>Longest query the filter box accepts (its <c>maxlength</c>).</summary>
+    public const int MaxQueryLength = 1000;
+
+    /// <summary>
+    /// Deepest parenthesis nesting that parses. The parser and the tree walkers recurse once per level, so
+    /// without a limit a long run of <c>(</c> overflows the stack, which ends the process. The filter box
+    /// script (<c>wwwroot/js/filterSearchInput.js</c>, <c>MAX_NESTING_DEPTH</c>) uses the same number.
+    /// </summary>
+    public const int MaxNestingDepth = 64;
+
+    /// <summary>
+    /// The last parsed query. A grid matches every row against the same query, so <see cref="Matches"/>
+    /// would otherwise tokenize and parse it once per row. The result is immutable.
+    /// </summary>
+    private static CachedParse? _lastParse;
+
     public static bool IsValidQuery(string? query) =>
         string.IsNullOrWhiteSpace(query) || Parse(query).IsValid;
 
@@ -17,6 +33,19 @@ public static class FilterSearchExpression
             return FilterSearchParseResult.Success(null);
         }
 
+        var cached = Volatile.Read(ref _lastParse);
+        if (cached is not null && cached.Query == query)
+        {
+            return cached.Result;
+        }
+
+        var result = ParseCore(query);
+        Volatile.Write(ref _lastParse, new CachedParse(query, result));
+        return result;
+    }
+
+    private static FilterSearchParseResult ParseCore(string query)
+    {
         try
         {
             var tokens = Tokenize(query);
@@ -61,16 +90,6 @@ public static class FilterSearchExpression
         }
 
         return LegacyAllMatch(query, matchTerm);
-    }
-
-    public static IReadOnlyList<FilterSearchExpressionHighlightSegment> GetHighlightSegments(string? query)
-    {
-        if (string.IsNullOrEmpty(query))
-        {
-            return Array.Empty<FilterSearchExpressionHighlightSegment>();
-        }
-
-        return LexForHighlight(query);
     }
 
     private static bool LegacyAllMatch(string? query, Func<FilterSearchTerm, bool> matchTerm)
@@ -152,81 +171,6 @@ public static class FilterSearchExpression
         return tokens;
     }
 
-    private static IReadOnlyList<FilterSearchExpressionHighlightSegment> LexForHighlight(string query)
-    {
-        var segments = new List<FilterSearchExpressionHighlightSegment>();
-        var i = 0;
-        while (i < query.Length)
-        {
-            var c = query[i];
-            if (char.IsWhiteSpace(c))
-            {
-                var wsStart = i;
-                while (i < query.Length && char.IsWhiteSpace(query[i]))
-                {
-                    i++;
-                }
-
-                segments.Add(new FilterSearchExpressionHighlightSegment(
-                    query[wsStart..i],
-                    FilterSearchHighlightKind.Whitespace));
-                continue;
-            }
-
-            if (c is '(' or ')')
-            {
-                segments.Add(new FilterSearchExpressionHighlightSegment(
-                    c.ToString(),
-                    FilterSearchHighlightKind.Paren));
-                i++;
-                continue;
-            }
-
-            var start = i;
-            while (i < query.Length && !char.IsWhiteSpace(query[i]) && query[i] is not '(' and not ')')
-            {
-                i++;
-            }
-
-            var text = query[start..i];
-            if (IsOperator(text, "and"))
-            {
-                segments.Add(new FilterSearchExpressionHighlightSegment(text, FilterSearchHighlightKind.OperatorAnd));
-            }
-            else if (IsOperator(text, "or"))
-            {
-                segments.Add(new FilterSearchExpressionHighlightSegment(text, FilterSearchHighlightKind.OperatorOr));
-            }
-            else
-            {
-                AddTermHighlightSegments(segments, text);
-            }
-        }
-
-        return segments;
-    }
-
-    private static void AddTermHighlightSegments(List<FilterSearchExpressionHighlightSegment> segments, string text)
-    {
-        var colon = text.IndexOf(':');
-        if (colon > 0)
-        {
-            var value = text[(colon + 1)..];
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                segments.Add(new FilterSearchExpressionHighlightSegment(
-                    text[..(colon + 1)],
-                    FilterSearchHighlightKind.FieldPrefix));
-                segments.Add(new FilterSearchExpressionHighlightSegment(
-                    value,
-                    FilterSearchHighlightKind.FieldValue));
-                return;
-            }
-        }
-
-        segments.Add(new FilterSearchExpressionHighlightSegment(text, FilterSearchHighlightKind.Text));
-    }
-
     private static bool IsOperator(string text, string op) =>
         text.Equals(op, StringComparison.OrdinalIgnoreCase);
 
@@ -242,11 +186,14 @@ public static class FilterSearchExpression
 
     private sealed record Token(TokenKind Kind, string Text, int Position);
 
+    private sealed record CachedParse(string Query, FilterSearchParseResult Result);
+
     private sealed class ParseException(string message) : Exception(message);
 
     private sealed class Parser(List<Token> tokens)
     {
         private int _index;
+        private int _depth;
 
         public bool IsAtEnd => Peek().Kind == TokenKind.End;
 
@@ -295,12 +242,18 @@ public static class FilterSearchExpression
         {
             if (Match(TokenKind.LParen))
             {
+                if (++_depth > MaxNestingDepth)
+                {
+                    throw new ParseException("Too many nested parentheses.");
+                }
+
                 var inner = ParseOrExpression();
                 if (!Match(TokenKind.RParen))
                 {
                     throw new ParseException("Missing ')'");
                 }
 
+                _depth--;
                 return inner;
             }
 

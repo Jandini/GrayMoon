@@ -1,85 +1,85 @@
 @using GrayMoon.Common.Search
 @inject IJSRuntime Js
-@implements IDisposable
+@implements IAsyncDisposable
 
-<div class="filter-search-wrap @GetSearchWrapClass() @WrapperAdditionalClass">
-    @if (ShowSearchHighlight)
-    {
-        <div class="filter-search-backdrop"
-             @ref="_searchBackdrop"
-             aria-hidden="true">
-            <div class="filter-search-backdrop-inner">
-                @foreach (var segment in GetHighlightSegments())
-                {
-                    <span class="@GetHighlightClass(segment.Kind)">@segment.Text</span>
-                }
-            </div>
-        </div>
-    }
+@*
+    The browser owns this box while the user types: wwwroot/js/filterSearchInput.js colors the text,
+    marks invalid syntax, shows the clear button and debounces, all without a round trip. This markup is
+    therefore constant - the value, the colored copy and data-filter-state are never rendered from here,
+    so a render that arrives late can not overwrite what was typed in the meantime.
+*@
+<div class="filter-search-wrap @WrapperAdditionalClass">
     <input id="@InputId"
-           class="form-control filter-search-input @GetSearchInputClass() @InputAdditionalClass"
+           class="form-control filter-search-input @InputAdditionalClass"
            placeholder="@Placeholder"
-           value="@_liveValue"
+           value="@_initialValue"
+           maxlength="@FilterSearchExpression.MaxQueryLength"
            disabled="@Disabled"
            autocomplete="off"
-           @oninput="OnInput"
-           @onscroll="OnSearchScrollAsync"
-           @onkeydown="OnKeyDown"
+           spellcheck="false"
            @ref="_inputElement" />
-    @if (!string.IsNullOrEmpty(_liveValue))
-    {
-        <button type="button"
-                class="filter-search-clear"
-                title="Clear filter"
-                aria-label="@ClearAriaLabel"
-                disabled="@Disabled"
-                @onclick="ClearAsync"
-                @onclick:stopPropagation="true">
-            <i class="bi bi-x-circle" aria-hidden="true"></i>
-        </button>
-    }
+    <div class="filter-search-backdrop" aria-hidden="true" @ref="_backdropElement">
+        <div class="filter-search-backdrop-clip">
+            <div class="filter-search-backdrop-inner"></div>
+        </div>
+    </div>
+    <button type="button"
+            class="filter-search-clear"
+            title="Clear filter"
+            aria-label="@ClearAriaLabel"
+            disabled="@Disabled"
+            @ref="_clearButtonElement">
+        <i class="bi bi-x-circle" aria-hidden="true"></i>
+    </button>
 </div>
 
 @code {
     private ElementReference _inputElement;
-    private ElementReference _searchBackdrop;
+    private ElementReference _backdropElement;
+    private ElementReference _clearButtonElement;
 
-    /// <summary>What's currently typed - updates instantly on every keystroke so display/coloring never
-    /// waits on a parent round trip. Only <see cref="ScheduleCommit"/> (debounced) pushes this out via
-    /// <see cref="ValueChanged"/>, which is what parents wire into (potentially expensive) filtering.</summary>
-    private string _liveValue = string.Empty;
+    private DotNetObjectReference<FilterSearchInput>? _selfReference;
+    private IJSObjectReference? _client;
 
-    /// <summary>Last value this component itself pushed via <see cref="ValueChanged"/>. Used to tell an
-    /// external reset of <see cref="Value"/> (e.g. an Escape-to-clear handler on the parent, or the parent
-    /// simply resetting its bound field) apart from the parent merely echoing back what we just sent.</summary>
-    private string? _lastEmittedValue;
+    /// <summary>Rendered once as the input's <c>value</c> and never changed, so Blazor never writes the
+    /// value again. Later changes go through the script (<see cref="_valueToPush"/>).</summary>
+    private string _initialValue = string.Empty;
+
+    /// <summary>The value the server and the browser last agreed on: the last one the browser committed, or
+    /// the last one the parent set. A <see cref="Value"/> that differs from it is a change made by the parent
+    /// (an Escape handler, a reset), not the echo of a commit.</summary>
+    private string _knownValue = string.Empty;
+
+    /// <summary>A value set by the parent that the browser has not been given yet.</summary>
+    private string? _valueToPush;
 
     private bool _initialized;
-    private CancellationTokenSource? _debounceCts;
-
-    private string? _highlightCacheKey;
-    private bool _highlightCacheIsValid = true;
-    private IReadOnlyList<FilterSearchExpressionHighlightSegment> _highlightCacheSegments =
-        Array.Empty<FilterSearchExpressionHighlightSegment>();
-
-    private string? _lastSyncedValue;
+    private bool _didAutoFocus;
+    private bool _disposed;
 
     [Parameter] public string Value { get; set; } = string.Empty;
+
+    /// <summary>Raised with the typed text after <see cref="DebounceMilliseconds"/> without a keystroke, and
+    /// at once for Escape, Enter and the clear button.</summary>
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
     [Parameter] public string Placeholder { get; set; } = "Search…";
     [Parameter] public string? InputId { get; set; }
     [Parameter] public string InputAdditionalClass { get; set; } = string.Empty;
     [Parameter] public string WrapperAdditionalClass { get; set; } = string.Empty;
     [Parameter] public string ClearAriaLabel { get; set; } = "Clear search filter";
     [Parameter] public bool Disabled { get; set; }
-    [Parameter] public bool EnableSyntaxHighlight { get; set; } = true;
 
-    /// <summary>Delay before a keystroke is pushed to <see cref="ValueChanged"/>. Local display/coloring is
-    /// never delayed by this - only the (typically expensive) downstream filtering/rebuild is. Set to 0 to
-    /// commit immediately.</summary>
+    /// <summary>Delay before the typed text is pushed to <see cref="ValueChanged"/>. The coloring is never
+    /// delayed by this - only the (typically expensive) filtering is. 0 commits on every keystroke.
+    /// Read once, when the box is first rendered.</summary>
     [Parameter] public int DebounceMilliseconds { get; set; } = 150;
 
-    [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
+    /// <summary>Raised for Escape and Enter only; the other keys stay in the browser, so typing sends
+    /// nothing to the server. <see cref="ValueChanged"/> has already been raised with the text on screen
+    /// when this runs.</summary>
+    [Parameter] public EventCallback<KeyboardEventArgs> OnCommandKeyDown { get; set; }
+
     [Parameter] public EventCallback OnClear { get; set; }
 
     /// <summary>
@@ -88,202 +88,191 @@
     /// </summary>
     [Parameter] public bool AutoFocus { get; set; }
 
-    private bool _didAutoFocus;
-
-    private bool IsSearchSyntaxValid
-    {
-        get
-        {
-            EnsureHighlightCache();
-            return _highlightCacheIsValid;
-        }
-    }
-
-    private bool ShowSearchHighlight =>
-        EnableSyntaxHighlight && !string.IsNullOrEmpty(_liveValue) && IsSearchSyntaxValid && !Disabled;
-
     public ValueTask FocusAsync() => _inputElement.FocusAsync();
 
     protected override void OnParametersSet()
     {
+        var value = Value ?? string.Empty;
         if (!_initialized)
         {
             _initialized = true;
-            _liveValue = Value;
-            _lastEmittedValue = Value;
+            _initialValue = value;
+            _knownValue = value;
             return;
         }
 
-        if (Value != _lastEmittedValue)
+        if (value != _knownValue)
         {
-            // The parent changed Value on its own (Clear/Escape handler, external reset, etc.), not as an
-            // echo of something we just committed - adopt it immediately and drop any pending debounce.
-            _debounceCts?.Cancel();
-            _liveValue = Value;
-            _lastEmittedValue = Value;
+            _knownValue = value;
+            _valueToPush = value;
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (AutoFocus && !_didAutoFocus && !Disabled)
-        {
-            try
-            {
-                await FocusAsync();
-                _didAutoFocus = true;
-            }
-            catch (JSException)
-            {
-                // Input not in the document yet.
-            }
-            catch (InvalidOperationException)
-            {
-                // JavaScript interop is not available during prerender.
-            }
-        }
-
-        if (!ShowSearchHighlight || _lastSyncedValue == _liveValue)
-        {
-            return;
-        }
-
-        _lastSyncedValue = _liveValue;
-        await OnSearchScrollAsync();
-    }
-
-    private IReadOnlyList<FilterSearchExpressionHighlightSegment> GetHighlightSegments()
-    {
-        EnsureHighlightCache();
-        return _highlightCacheSegments;
-    }
-
-    private void EnsureHighlightCache()
-    {
-        if (_highlightCacheKey == _liveValue)
-        {
-            return;
-        }
-
-        _highlightCacheKey = _liveValue;
-        _highlightCacheIsValid = FilterSearchExpression.IsValidQuery(_liveValue);
-        _highlightCacheSegments = _highlightCacheIsValid
-            ? FilterSearchExpression.GetHighlightSegments(_liveValue)
-            : Array.Empty<FilterSearchExpressionHighlightSegment>();
-    }
-
-    private string GetSearchWrapClass()
-    {
-        var classes = new List<string>();
-        if (!string.IsNullOrEmpty(_liveValue))
-        {
-            classes.Add("has-filter");
-        }
-
-        if (!IsSearchSyntaxValid)
-        {
-            classes.Add("filter-search-invalid");
-        }
-
-        return string.Join(' ', classes);
-    }
-
-    private string GetSearchInputClass() =>
-        ShowSearchHighlight ? "filter-search-input-overlay" : IsSearchSyntaxValid ? string.Empty : "filter-search-input-invalid";
-
-    private void OnInput(ChangeEventArgs e)
-    {
-        var value = e.Value?.ToString() ?? string.Empty;
-        if (value == _liveValue)
-        {
-            return;
-        }
-
-        _liveValue = value;
-        ScheduleCommit(value);
-    }
-
-    private void ScheduleCommit(string value)
-    {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-
-        if (DebounceMilliseconds <= 0)
-        {
-            _debounceCts = null;
-            _lastEmittedValue = value;
-            _ = ValueChanged.InvokeAsync(value);
-            return;
-        }
-
-        var cts = new CancellationTokenSource();
-        _debounceCts = cts;
-        _ = CommitAfterDelayAsync(value, cts);
-    }
-
-    private async Task CommitAfterDelayAsync(string value, CancellationTokenSource cts)
-    {
         try
         {
-            await Task.Delay(DebounceMilliseconds, cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
+            if (firstRender)
+            {
+                _selfReference = DotNetObjectReference.Create(this);
+                _valueToPush = null;
+                _client = await Js.InvokeAsync<IJSObjectReference>(
+                    "grayMoonFilterSearch.attach",
+                    _inputElement,
+                    _backdropElement,
+                    _clearButtonElement,
+                    _selfReference,
+                    _knownValue,
+                    DebounceMilliseconds);
 
-        if (cts.IsCancellationRequested)
-        {
-            return;
-        }
+                if (_disposed)
+                {
+                    // Disposed while the script was attaching: DisposeAsync had no client to release.
+                    await ReleaseClientAsync();
+                    return;
+                }
+            }
 
-        _lastEmittedValue = value;
-        await InvokeAsync(() => ValueChanged.InvokeAsync(value));
+            if (_client is not null && _valueToPush is { } value)
+            {
+                _valueToPush = null;
+                await _client.InvokeVoidAsync("setValue", value);
+            }
+
+            if (AutoFocus && !_didAutoFocus && !Disabled)
+            {
+                try
+                {
+                    await FocusAsync();
+                    _didAutoFocus = true;
+                }
+                catch (JSException)
+                {
+                    // Input not in the document yet; the next render tries again.
+                }
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone; there is no browser to update.
+        }
+        catch (InvalidOperationException)
+        {
+            // JavaScript interop is not available during prerender.
+        }
     }
 
-    private async Task ClearAsync()
+    private async Task ReleaseClientAsync()
     {
-        _debounceCts?.Cancel();
-        _liveValue = string.Empty;
-        _lastEmittedValue = string.Empty;
-        await ValueChanged.InvokeAsync(string.Empty);
-        if (OnClear.HasDelegate)
+        var client = _client;
+        _client = null;
+        if (client is null)
         {
+            return;
+        }
+
+        try
+        {
+            await client.InvokeVoidAsync("dispose");
+            await client.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone, and the script's listeners with it.
+        }
+    }
+
+    /// <summary>The browser's debounce ran out: the text on screen becomes the value.</summary>
+    [JSInvokable]
+    public Task CommitFromClient(string? value) => RunFromClientAsync(() => CommitAsync(Normalize(value)));
+
+    /// <summary>Escape or Enter was pressed. The text on screen is committed first, so the parent's key
+    /// handler (clear the filter, save the dialog) never works against an older value.</summary>
+    [JSInvokable]
+    public Task CommandKeyFromClient(
+        string? value, string? key, string? code, bool ctrlKey, bool shiftKey, bool altKey, bool metaKey, bool repeat)
+    {
+        if (key is not ("Escape" or "Enter"))
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunFromClientAsync(async () =>
+        {
+            await CommitAsync(Normalize(value));
+            await OnCommandKeyDown.InvokeAsync(new KeyboardEventArgs
+            {
+                Type = "keydown",
+                Key = key,
+                Code = code ?? string.Empty,
+                CtrlKey = ctrlKey,
+                ShiftKey = shiftKey,
+                AltKey = altKey,
+                MetaKey = metaKey,
+                Repeat = repeat,
+            });
+        });
+    }
+
+    /// <summary>The clear button was clicked; the browser has already emptied the box.</summary>
+    [JSInvokable]
+    public Task ClearFromClient() =>
+        RunFromClientAsync(async () =>
+        {
+            await CommitAsync(string.Empty);
             await OnClear.InvokeAsync();
-        }
-    }
+        });
 
-    private async Task OnSearchScrollAsync()
+    /// <summary>
+    /// Runs a call that came from the script. An exception from the parent's handler is given to the
+    /// renderer, as for a handler of a Blazor event (error boundary, or the circuit's error UI). Returned
+    /// to the script instead, it would only reach the browser console.
+    /// </summary>
+    private async Task RunFromClientAsync(Func<Task> action)
     {
-        if (!ShowSearchHighlight)
+        if (_disposed)
         {
             return;
         }
 
         try
         {
-            await Js.InvokeVoidAsync("grayMoonFilterSearch.syncScroll", _inputElement, _searchBackdrop);
+            await action();
         }
-        catch (JSException)
+        catch (Exception ex)
         {
-            // Backdrop not mounted yet during prerender.
+            await DispatchExceptionAsync(ex);
         }
     }
 
-    private static string GetHighlightClass(FilterSearchHighlightKind kind) => kind switch
+    private Task CommitAsync(string value)
     {
-        FilterSearchHighlightKind.OperatorAnd => "filter-search-token-and",
-        FilterSearchHighlightKind.OperatorOr => "filter-search-token-or",
-        FilterSearchHighlightKind.Paren => "filter-search-token-paren",
-        FilterSearchHighlightKind.FieldPrefix => "filter-search-token-field",
-        FilterSearchHighlightKind.FieldValue => "filter-search-token-field-value",
-        FilterSearchHighlightKind.Whitespace => "filter-search-token-ws",
-        _ => "filter-search-token-text",
-    };
+        if (value == _knownValue)
+        {
+            return Task.CompletedTask;
+        }
 
-    public void Dispose()
+        _knownValue = value;
+        return ValueChanged.InvokeAsync(value);
+    }
+
+    /// <summary>The browser enforces the length with <c>maxlength</c>; a caller that ignores it is cut off here.</summary>
+    private static string Normalize(string? value)
     {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= FilterSearchExpression.MaxQueryLength
+            ? value
+            : value[..FilterSearchExpression.MaxQueryLength];
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        await ReleaseClientAsync();
+        _selfReference?.Dispose();
     }
 }

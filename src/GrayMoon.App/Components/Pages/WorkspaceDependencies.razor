@@ -62,7 +62,7 @@
                                            Placeholder="Search repositories (shows each match and its dependency tree)..."
                                            Disabled="@(isLoading || graph == null)"
                                            AutoFocus="true"
-                                           OnKeyDown="OnSearchKeyDown"
+                                           OnCommandKeyDown="OnSearchKeyDown"
                                            OnClear="ClearSearchFilter" />
                     </WorkspaceContextBar>
                     @if (graph != null && graph.Nodes.Count > 0)

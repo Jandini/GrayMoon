@@ -156,7 +156,7 @@ Allowed leftovers until a later pass: `IWorkspacePageService` bag properties alr
 
 ### Filter search expression (GrayMoon.Common)
 
-`FilterSearchExpression` parses boolean queries (`and`, `or`, parentheses, field prefixes like `repo:`, `type:`). All workspace grid and catalog pages use `FilterSearchInput` + a per-page `ISearchMatcher` implementation. `and` binds tighter than `or`; spaces imply `and`. Parse errors fall back to implicit-and word matching so users always see results.
+`FilterSearchExpression` parses boolean queries (`and`, `or`, parentheses, field prefixes like `repo:`, `type:`). All workspace grid and catalog pages use `FilterSearchInput` + a per-page `ISearchMatcher` implementation. `and` binds tighter than `or`; spaces imply `and`. Parse errors fall back to implicit-and word matching so users always see results. The box itself is browser-owned: `wwwroot/js/filterSearchInput.js` colors and validates the text on every keystroke with its own copy of the grammar and sends the text to the server only after the debounce (or at once for Escape, Enter and Clear); `FilterSearchInputScriptTests` holds the script to the parser, so change both together, and never render the input's value or the colored text from the component (see "The filter box" in `docs/architecture/05-user-capability-reference.md`).
 
 ### Dependency levels
 
