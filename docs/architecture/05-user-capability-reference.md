@@ -1613,7 +1613,9 @@ Changes page      click the provider segment of the Commit control to write ONE 
                   what the button would commit (Commit Staged or Commit All); it only fills the message box
                   "Generate commit message" (On Commit) starts ticked, so Commit writes the message first when the box is empty; untick it to stop that
 New PR dialog     click the provider selector at the right of the tab bar to write ONE title and ONE Markdown
-                  description shared by every PR in the dialog
+                  description shared by every PR in the dialog; when the branch name holds a ticket id
+                  (ABC-123, the one the default title leads with) and the written title does not name it,
+                  the ticket id is put in front of the title
 both              pick an available provider in the menu (pins it for the Workspace on this machine; choosing the
                   provider that is already pinned removes it until another is pinned; never generates);
                   a CLI that is not installed is omitted; when none are available the Changes menu opens on On Commit
