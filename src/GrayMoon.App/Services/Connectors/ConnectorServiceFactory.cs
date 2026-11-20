@@ -16,7 +16,7 @@ public class ConnectorServiceFactory
         return connectorType switch
         {
             ConnectorType.GitHub => _serviceProvider.GetRequiredService<GitHubService>(),
-            ConnectorType.NuGet => _serviceProvider.GetRequiredService<NuGetService>(),
+            ConnectorType.NuGet or ConnectorType.ProGet => _serviceProvider.GetRequiredService<NuGetService>(),
             _ => throw new NotSupportedException($"Connector type {connectorType} is not supported.")
         };
     }

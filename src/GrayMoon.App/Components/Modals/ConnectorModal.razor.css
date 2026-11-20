@@ -1,0 +1,26 @@
+/* Tick or X at the end of the API Base URL and User Token boxes: reads as part of the box, so it shares the
+   input's background and frame. */
+.connector-field-mark {
+    display: flex;
+    align-items: center;
+    padding: 0 0.65rem;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-input);
+    border-left: 0;
+    font-size: 1.1rem;
+}
+
+.connector-field-mark--ok {
+    color: var(--success);
+}
+
+.connector-field-mark--failed {
+    color: var(--error);
+}
+
+/* Why the address or the token failed, under its box. */
+.connector-field-error {
+    margin-top: 0.25rem;
+    font-size: 0.875em;
+    color: var(--error);
+}

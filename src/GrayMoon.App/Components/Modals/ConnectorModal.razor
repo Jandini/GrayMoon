@@ -1,5 +1,9 @@
 @using GrayMoon.App.Models
+@using GrayMoon.App.Services.Connectors
+@implements IDisposable
 @inject IJSRuntime JSRuntime
+@inject ConnectorEndpointTester EndpointTester
+@inject ILogger<ConnectorModal> Logger
 
 @if (IsVisible)
 {
@@ -15,7 +19,7 @@
                 <div class="modal-body" id="connector-modal-body">
                     @if ((Mode == ConnectorModalMode.Create || Mode == ConnectorModalMode.Edit) && Model != null)
                     {
-                        <EditForm Model="@Model" OnValidSubmit="@(_ => OnSubmit.InvokeAsync())">
+                        <EditForm Model="@Model" OnValidSubmit="@(_ => HandleValidSubmitAsync())">
                             <DataAnnotationsValidator />
 
                             <div class="row mb-3">
@@ -51,6 +55,12 @@
                                                         <i class="bi bi-box-seam"></i> NuGet
                                                     </button>
                                                 </li>
+                                                <li>
+                                                    <button class="dropdown-item d-flex align-items-center gap-2" type="button"
+                                                            @onclick="() => SelectConnectorType(ConnectorType.ProGet)">
+                                                        <i class="bi bi-boxes"></i> ProGet
+                                                    </button>
+                                                </li>
                                             </ul>
                                         }
                                     </div>
@@ -59,16 +69,40 @@
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label">API Base URL <span class="text-danger">*</span></label>
-                                <input type="text"
-                                       class="form-control"
-                                       list="connector-api-base-url-list"
-                                       @bind="Model.ApiBaseUrl"
-                                       @bind:event="oninput"
-                                       placeholder="e.g. https://api.github.com/ or https://nuget.pkg.github.com/" />
+                                <label class="form-label">@AddressLabel <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <input type="text"
+                                           class="form-control"
+                                           list="connector-api-base-url-list"
+                                           @ref="_apiBaseUrlInput"
+                                           @bind="Model.ApiBaseUrl"
+                                           @bind:event="oninput"
+                                           @bind:after="OnApiBaseUrlEdited"
+                                           placeholder="@ApiBaseUrlPlaceholder" />
+                                    @if (_urlMark is { } urlOk)
+                                    {
+                                        <span class="@(urlOk ? "connector-field-mark connector-field-mark--ok" : "connector-field-mark connector-field-mark--failed")"
+                                              role="status"
+                                              title="@_markTitle"
+                                              aria-label="@_markTitle">
+                                            <i class="bi @(urlOk ? "bi-check-lg" : "bi-x-lg")" aria-hidden="true"></i>
+                                        </span>
+                                    }
+                                    <button type="button"
+                                            class="btn btn-outline-secondary text-nowrap"
+                                            title="@TestButtonTitle"
+                                            disabled="@(_isTesting || IsSubmitting || string.IsNullOrWhiteSpace(Model.ApiBaseUrl))"
+                                            @onclick="TestApiBaseUrlAsync">
+                                        @if (_isTesting)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-2"></span>
+                                        }
+                                        Test
+                                    </button>
+                                </div>
                                 <datalist id="connector-api-base-url-list">
-                                    <option value="@GitHubApiUrl"></option>
-                                    <option value="@NuGetGitHubPackagesUrl"></option>
+                                    <option value="@ConnectorUrlResolver.GitHubApiUrl"></option>
+                                    <option value="@ConnectorUrlResolver.NuGetOrgIndexUrl"></option>
                                     @if (ApiBaseUrlHints != null)
                                     {
                                         @foreach (var h in ApiBaseUrlHints.Where(x => !string.IsNullOrWhiteSpace(x)))
@@ -77,12 +111,52 @@
                                         }
                                     }
                                 </datalist>
+                                <div class="form-text">@ApiBaseUrlHelp</div>
+                                @if (_urlMessage != null)
+                                {
+                                    <div class="connector-field-error" role="alert">@_urlMessage</div>
+                                }
                                 <ValidationMessage For="@(() => Model.ApiBaseUrl)" />
                             </div>
 
                             @if (ShouldShowUserNameField() || ShouldShowTokenField())
                             {
                                 <div class="row mb-3">
+                                    @if (IsProGet)
+                                    {
+                                        <div class="col-md-6">
+                                            <label class="form-label">Feed <span class="text-danger">*</span></label>
+                                            <div class="input-group">
+                                                <input type="text"
+                                                       class="form-control"
+                                                       list="connector-feed-list"
+                                                       @bind="Model.FeedName"
+                                                       @bind:event="oninput"
+                                                       @bind:after="OnFeedEdited"
+                                                       placeholder="Feed name" />
+                                                @if (_feedMark is { } feedMarkOk)
+                                                {
+                                                    <span class="@(feedMarkOk ? "connector-field-mark connector-field-mark--ok" : "connector-field-mark connector-field-mark--failed")"
+                                                          role="status"
+                                                          title="@_markTitle"
+                                                          aria-label="@_markTitle">
+                                                        <i class="bi @(feedMarkOk ? "bi-check-lg" : "bi-x-lg")" aria-hidden="true"></i>
+                                                    </span>
+                                                }
+                                            </div>
+                                            <datalist id="connector-feed-list">
+                                                @foreach (var feed in _feedSuggestions)
+                                                {
+                                                    <option value="@feed"></option>
+                                                }
+                                            </datalist>
+                                            @if (_feedMessage != null)
+                                            {
+                                                <div class="connector-field-error" role="alert">@_feedMessage</div>
+                                            }
+                                            <ValidationMessage For="@(() => Model.FeedName)" />
+                                        </div>
+                                    }
                                     @if (ShouldShowUserNameField())
                                     {
                                         <div class="col-md-6">
@@ -93,28 +167,53 @@
                                     }
                                     @if (ShouldShowTokenField())
                                     {
-                                        <div class="@(ShouldShowUserNameField() ? "col-md-6" : "col-12")">
+                                        <div class="@(ShouldShowUserNameField() || IsProGet ? "col-md-6" : "col-12")">
                                             <label class="form-label">
-                                                User Token
+                                                @TokenLabel
                                                 @if (IsTokenRequired())
                                                 {
                                                     <span class="text-danger">*</span>
                                                 }
                                             </label>
                                             <div class="input-group">
-                                                <InputText class="form-control" type="password" @bind-Value="Model.UserToken" />
-                                                @if (Model.ConnectorType == ConnectorType.GitHub)
+                                                <InputText class="form-control" type="password" @bind-Value="Model.UserToken" @bind-Value:after="OnUserTokenEdited" />
+                                                @if (_tokenMark is { } tokenOk)
                                                 {
-                                                    <a class="btn btn-outline-secondary"
-                                                       href="https://github.com/settings/tokens/new?scopes=repo,workflow,read:packages&amp;description=GrayMoon%20Token"
-                                                       target="_blank"
-                                                       rel="noopener noreferrer"
-                                                       title="Create a classic personal access token on GitHub"
-                                                       style="border-color: var(--border-input) !important;">
-                                                        Create
-                                                    </a>
+                                                    <span class="@(tokenOk ? "connector-field-mark connector-field-mark--ok" : "connector-field-mark connector-field-mark--failed")"
+                                                          role="status"
+                                                          title="@_markTitle"
+                                                          aria-label="@_markTitle">
+                                                        <i class="bi @(tokenOk ? "bi-check-lg" : "bi-x-lg")" aria-hidden="true"></i>
+                                                    </span>
+                                                }
+                                                @if (ConnectorUrlResolver.OffersTokenPage(Model.ConnectorType, Model.ApiBaseUrl))
+                                                {
+                                                    var tokenPageUrl = ConnectorUrlResolver.GetTokenPageUrl(Model.ConnectorType, Model.ApiBaseUrl);
+                                                    if (tokenPageUrl != null)
+                                                    {
+                                                        <a class="btn btn-outline-secondary text-nowrap"
+                                                           href="@tokenPageUrl"
+                                                           target="_blank"
+                                                           rel="noopener noreferrer"
+                                                           title="Create a classic personal access token on GitHub">
+                                                            Create
+                                                        </a>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button"
+                                                                class="btn btn-outline-secondary text-nowrap"
+                                                                title="Create a classic personal access token on GitHub"
+                                                                @onclick="ExplainTokenPageNeedsUrlAsync">
+                                                            Create
+                                                        </button>
+                                                    }
                                                 }
                                             </div>
+                                            @if (_tokenMessage != null)
+                                            {
+                                                <div class="connector-field-error" role="alert">@_tokenMessage</div>
+                                            }
                                             <ValidationMessage For="@(() => Model.UserToken)" />
                                         </div>
                                     }
@@ -127,7 +226,7 @@
                             }
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" @onclick="OnCancel">Cancel</button>
-                                <button type="submit" class="btn btn-primary" data-default-action disabled="@IsSubmitting">
+                                <button type="submit" class="btn btn-primary" data-default-action disabled="@(IsSubmitting || _isTesting)">
                                     @if (IsSubmitting)
                                     {
                                         <span class="spinner-border spinner-border-sm me-2"></span>
@@ -166,8 +265,12 @@
 }
 
 @code {
-    private const string GitHubApiUrl = "https://api.github.com/";
-    private const string NuGetGitHubPackagesUrl = "https://nuget.pkg.github.com/";
+    private const string TokenPageNeedsUrlMessage = "API Base URL is required to create a token.";
+
+    private bool IsProGet => Model?.ConnectorType == ConnectorType.ProGet;
+    private string AddressLabel => IsProGet ? "Server URL" : "API Base URL";
+    private string TokenLabel => IsProGet ? "API Key" : "User Token";
+    private string TestButtonTitle => IsProGet ? "Find the ProGet server and the feed, and check them" : "Find the API endpoint and check it";
 
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public ConnectorModalMode Mode { get; set; }
@@ -187,11 +290,67 @@
     private bool _wasVisible;
     private bool _typeDropdownOpen;
     private ElementReference _modalElement;
+    private ElementReference _apiBaseUrlInput;
+
+    /// <summary>The form the per-opening state below belongs to; a new one (the dialog was opened again) resets it.</summary>
+    private ConnectorForm? _stateModel;
+    /// <summary>Create mode: the name the dialog itself filled in. While the name box still holds it, the name follows the type and the owner. Null in Edit mode.</summary>
+    private string? _autoName;
+    private bool _isTesting;
+    /// <summary>Tick (true) or X (false) at the end of the address box; null before a test and after the address changed.</summary>
+    private bool? _urlMark;
+    /// <summary>Tick or X at the end of the token box: the token was accepted or rejected by the found endpoint.</summary>
+    private bool? _tokenMark;
+    /// <summary>The test result in words, shown as the tooltip of the marks.</summary>
+    private string? _markTitle;
+    /// <summary>Why the address failed, under the address box. A success shows the tick only.</summary>
+    private string? _urlMessage;
+    /// <summary>Why the token failed, under the token box.</summary>
+    private string? _tokenMessage;
+    /// <summary>ProGet: tick or X at the end of the Feed box.</summary>
+    private bool? _feedMark;
+    /// <summary>ProGet: what is wrong with the feed (not named yet, or not on the server), under the Feed box.</summary>
+    private string? _feedMessage;
+    /// <summary>ProGet: the server's NuGet feeds from the last test, offered as suggestions in the Feed box.</summary>
+    private IReadOnlyList<string> _feedSuggestions = [];
+    private CancellationTokenSource? _testCts;
+
+    private string ApiBaseUrlPlaceholder => Model?.ConnectorType switch
+    {
+        ConnectorType.NuGet => "e.g. https://nuget.pkg.github.com/your-org/ or https://github.com/your-org/repository",
+        ConnectorType.ProGet => "e.g. https://proget.example.com or https://proget.example.com/nuget/feed-name/v3/index.json",
+        _ => "e.g. https://github.com/owner/repository or https://api.github.com/"
+    };
+
+    private string ApiBaseUrlHelp => Model?.ConnectorType switch
+    {
+        ConnectorType.NuGet => "Paste the feed URL, or a GitHub repository or organization URL, then click Test. GrayMoon finds the feed and checks it.",
+        ConnectorType.ProGet => "Paste the ProGet address or a feed URL, then click Test. GrayMoon finds the server and the feed and checks them.",
+        _ => "Paste the API URL or any repository URL, then click Test. GrayMoon finds the API endpoint and checks it."
+    };
+
+    protected override void OnParametersSet()
+    {
+        var model = IsVisible && Mode != ConnectorModalMode.Delete ? Model : null;
+        if (ReferenceEquals(model, _stateModel))
+            return;
+
+        _stateModel = model;
+        _autoName = model != null && Mode == ConnectorModalMode.Create ? model.ConnectorName : null;
+        _typeDropdownOpen = false;
+        _feedSuggestions = [];
+        ClearUrlStatus();
+
+        // A saved ProGet connector holds the feed endpoint; the dialog shows it as server and feed.
+        if (model != null)
+            ConnectorFormAutoFill.SplitProGetAddress(model);
+    }
 
     private string ConnectorTypeLabel => Model?.ConnectorType switch
     {
         ConnectorType.GitHub => "GitHub",
         ConnectorType.NuGet => "NuGet",
+        ConnectorType.ProGet => "ProGet",
         _ => "Select type"
     };
 
@@ -199,18 +358,293 @@
     {
         ConnectorType.GitHub => "bi-github",
         ConnectorType.NuGet => "bi-box-seam",
+        ConnectorType.ProGet => "bi-boxes",
         _ => "bi-chevron-down"
     };
 
     private void ToggleTypeDropdown() => _typeDropdownOpen = !_typeDropdownOpen;
 
-    private async Task SelectConnectorType(ConnectorType type)
+    private void SelectConnectorType(ConnectorType type)
     {
         if (Model == null) return;
-        Model.ConnectorType = type;
         _typeDropdownOpen = false;
-        await OnConnectorTypeChangedAsync();
+        var previous = Model.ConnectorType;
+        if (previous == type) return;
+
+        Model.ConnectorType = type;
+        ConnectorFormAutoFill.ApplyTypeChange(Model, previous);
+        ApplyAutoName(ConnectorUrlResolver.DefaultName(type));
+        _feedSuggestions = [];
+        ClearUrlStatus();
     }
+
+    /// <summary>Renames the connector only while the name box still holds the name the dialog put there.</summary>
+    private void ApplyAutoName(string name)
+    {
+        if (Model != null)
+            _autoName = ConnectorFormAutoFill.ApplyName(Model, _autoName, name);
+    }
+
+    /// <summary>The address changed, so a result shown for the old one no longer holds; a test still running is dropped.</summary>
+    private void OnApiBaseUrlEdited() => ClearUrlStatus();
+
+    /// <summary>The token changed, so its mark no longer holds. The address mark stays: the endpoint is still the one that was found.</summary>
+    private void OnUserTokenEdited()
+    {
+        _tokenMark = null;
+        _tokenMessage = null;
+    }
+
+    private void ClearUrlStatus()
+    {
+        CancelRunningTest();
+        _isTesting = false;
+        ClearMarks();
+    }
+
+    /// <summary>ProGet: the feed changed, so the feed and key marks no longer hold. The server mark stays.</summary>
+    private void OnFeedEdited()
+    {
+        _feedMark = null;
+        _feedMessage = null;
+        _tokenMark = null;
+        _tokenMessage = null;
+    }
+
+    private void ClearMarks()
+    {
+        _urlMark = null;
+        _tokenMark = null;
+        _feedMark = null;
+        _markTitle = null;
+        _urlMessage = null;
+        _tokenMessage = null;
+        _feedMessage = null;
+    }
+
+    /// <summary>ProGet: the server is fine but the feed is not named or not there: X at the Feed box and the reason under it.</summary>
+    private void SetFeedFailure(string message)
+    {
+        _feedMark = false;
+        _feedMessage = message;
+    }
+
+    /// <summary>The address itself is wrong or leads nowhere: X at the address box and the reason under it.</summary>
+    private void SetUrlFailure(string message)
+    {
+        ClearMarks();
+        _urlMark = false;
+        _markTitle = message;
+        _urlMessage = message;
+    }
+
+    /// <summary>
+    /// Shows a test result as marks. A found endpoint ticks the address box. The token box gets a tick when the
+    /// endpoint accepted the token and an X with the reason when it refused it; without a token it gets no mark.
+    /// </summary>
+    private void ShowTestResult(ConnectorEndpointTestResult result, bool tokenEntered)
+    {
+        if (!result.EndpointFound && result.ServerUrl == null)
+        {
+            SetUrlFailure(result.Message);
+            return;
+        }
+
+        ClearMarks();
+        _urlMark = true;
+        _markTitle = result.Message;
+        if (!result.EndpointFound)
+        {
+            // ProGet: the server answered, the feed is missing or unknown.
+            SetFeedFailure(result.Message);
+            return;
+        }
+
+        if (result.Feed != null)
+            _feedMark = true;
+
+        if (result.Outcome == ConnectorEndpointTestOutcome.Failed)
+        {
+            _tokenMark = false;
+            _tokenMessage = result.Message;
+        }
+        else if (result.Outcome == ConnectorEndpointTestOutcome.Ok && tokenEntered)
+        {
+            _tokenMark = true;
+        }
+    }
+
+    private void CancelRunningTest()
+    {
+        var cts = _testCts;
+        _testCts = null;
+        if (cts == null)
+            return;
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private Task TestApiBaseUrlAsync() => RunEndpointTestAsync();
+
+    /// <summary>
+    /// Finds and checks the endpoint behind the address, puts the found address in the box and shows the result under
+    /// it. Returns null when the test was dropped (the address changed or the dialog closed) or could not run.
+    /// </summary>
+    private async Task<ConnectorEndpointTestResult?> RunEndpointTestAsync()
+    {
+        var model = Model;
+        if (model == null)
+            return null;
+
+        CancelRunningTest();
+        var cts = _testCts = new CancellationTokenSource();
+        var token = cts.Token;
+        _isTesting = true;
+        ClearMarks();
+        try
+        {
+            var result = await EndpointTester.TestAsync(model.ConnectorType, model.ApiBaseUrl, model.UserName, model.UserToken, token, model.FeedName);
+            if (!ReferenceEquals(_testCts, cts) || !ReferenceEquals(model, _stateModel))
+                return null;
+
+            if (result.ServerUrl != null)
+            {
+                // ProGet: the box keeps the server, the feed has its own box; the two are joined when saving.
+                model.ApiBaseUrl = result.ServerUrl;
+                _feedSuggestions = result.Feeds;
+                if (result.EndpointFound)
+                {
+                    model.FeedName = result.Feed;
+                    ApplyAutoName(ConnectorUrlResolver.DefaultName(model.ConnectorType, result.Feed));
+                }
+            }
+            else if (result.ResolvedUrl != null)
+            {
+                model.ApiBaseUrl = result.ResolvedUrl;
+                ApplyAutoName(ConnectorUrlResolver.DefaultName(model.ConnectorType, result.Owner));
+            }
+
+            ShowTestResult(result, tokenEntered: !string.IsNullOrWhiteSpace(model.UserToken));
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Connector endpoint test failed unexpectedly.");
+            if (ReferenceEquals(_testCts, cts))
+                SetUrlFailure($"The test could not run: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (ReferenceEquals(_testCts, cts))
+            {
+                _testCts = null;
+                _isTesting = false;
+                cts.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Add / Update. An address that is not the endpoint yet (a repository URL, a host) goes through the same step as
+    /// the Test button first, so it is never saved as typed; an address that already is the endpoint is saved as is.
+    /// </summary>
+    private async Task HandleValidSubmitAsync()
+    {
+        if (Model == null || _isTesting)
+            return;
+
+        var resolution = ConnectorUrlResolver.Resolve(Model.ConnectorType, Model.ApiBaseUrl, Model.FeedName);
+        if (resolution.Kind == ConnectorEndpointKind.ProGet)
+        {
+            await SubmitProGetAsync(Model, resolution);
+            return;
+        }
+
+        if (!resolution.IsValid)
+        {
+            SetUrlFailure(resolution.Error!);
+            return;
+        }
+
+        if (!resolution.IsExact)
+        {
+            var result = await RunEndpointTestAsync();
+            if (result is not { EndpointFound: true })
+                return;
+        }
+
+        await OnSubmit.InvokeAsync();
+    }
+
+    /// <summary>
+    /// ProGet is saved with the feed endpoint. With a feed named (in the address or the Feed box) the endpoint is
+    /// known and saved without a request; without one, the Test step runs first and may find the only feed.
+    /// The box shows the server again afterwards, in case the save failed and the dialog stays open.
+    /// </summary>
+    private async Task SubmitProGetAsync(ConnectorForm model, ConnectorUrlResolution resolution)
+    {
+        if (!resolution.IsValid)
+        {
+            ClearMarks();
+            SetFeedFailure(resolution.Error!);
+            return;
+        }
+
+        if (resolution.Feed == null)
+        {
+            var result = await RunEndpointTestAsync();
+            if (result == null)
+                return;
+            if (!result.EndpointFound)
+            {
+                if (result.ServerUrl != null && result.Feeds.Count == 0)
+                    SetFeedFailure(ConnectorUrlResolver.FeedRequiredMessage);
+                return;
+            }
+
+            resolution = ConnectorUrlResolver.Resolve(ConnectorType.ProGet, model.ApiBaseUrl, model.FeedName);
+            if (!resolution.IsValid || resolution.Feed == null)
+                return;
+        }
+
+        model.FeedName = resolution.Feed;
+        model.ApiBaseUrl = resolution.Candidates[0];
+        try
+        {
+            await OnSubmit.InvokeAsync();
+        }
+        finally
+        {
+            model.ApiBaseUrl = resolution.ServerUrl!;
+        }
+    }
+
+    private async Task ExplainTokenPageNeedsUrlAsync()
+    {
+        if (Model == null)
+            return;
+
+        var message = string.IsNullOrWhiteSpace(Model.ApiBaseUrl)
+            ? TokenPageNeedsUrlMessage
+            : ConnectorUrlResolver.Resolve(Model.ConnectorType, Model.ApiBaseUrl).Error ?? TokenPageNeedsUrlMessage;
+        SetUrlFailure(message);
+        try
+        {
+            await _apiBaseUrlInput.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException or OperationCanceledException)
+        {
+            // The message is already shown; moving the caret is a convenience.
+            Logger.LogDebug(ex, "Could not focus the API Base URL box.");
+        }
+    }
+
+    public void Dispose() => CancelRunningTest();
 
     private bool ShouldShowUserNameField()
     {
@@ -228,22 +662,6 @@
     {
         if (Model == null) return true;
         return ConnectorHelpers.RequiresToken(Model.ConnectorType, Model.ApiBaseUrl ?? string.Empty);
-    }
-
-    private Task OnConnectorTypeChangedAsync()
-    {
-        if (Model == null)
-            return Task.CompletedTask;
-        // Runs after @bind-Value has updated Model.ConnectorType
-
-        if (Model.ConnectorType == ConnectorType.NuGet)
-            Model.ApiBaseUrl = NuGetGitHubPackagesUrl;
-        else if (Model.ConnectorType == ConnectorType.GitHub)
-            Model.ApiBaseUrl = GitHubApiUrl;
-        
-        if (ConnectorHelpers.IsNuGetOrg(Model.ApiBaseUrl ?? string.Empty))
-            Model.UserToken = null;
-        return Task.CompletedTask;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

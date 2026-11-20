@@ -44,7 +44,7 @@ internal static class PackageWaitDiagnostics
             return "GitHubPackages";
         if (ConnectorHelpers.IsNuGetOrg(connector.ApiBaseUrl))
             return "NuGetOrg";
-        if (ConnectorHelpers.IsProGet(connector.ApiBaseUrl))
+        if (connector.ConnectorType == ConnectorType.ProGet || ConnectorHelpers.IsProGet(connector.ApiBaseUrl))
             return "ProGet";
         return connector.ConnectorType.ToString();
     }

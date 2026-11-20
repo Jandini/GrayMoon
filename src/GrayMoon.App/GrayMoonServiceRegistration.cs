@@ -276,6 +276,7 @@ public static class GrayMoonServiceRegistration
         services.AddHttpClient<GitHubService>()
             .AddHttpMessageHandler<GitHubOverlayLoggingHandler>();
         services.AddHttpClient<NuGetService>();
+        services.AddHttpClient<ConnectorEndpointTester>();
         services.AddScoped<ConnectorServiceFactory>();
         services.AddScoped<IPullRequestService, PullRequestService>();
 

@@ -199,11 +199,37 @@ Deleting a connector never removes a repository that a Workspace uses. The delet
 
 A repository refresh never removes a repository that a Workspace uses: when the connector no longer returns it, it stays in the Workspace and the Repositories page lists it under "Not found on the provider" with the Workspaces that use it. Only repositories no Workspace uses leave the list, and only for a connector that returned at least one repository. A connector that answers with no repositories at all changes nothing and is named in the connector error list.
 
+### Connector dialog
+
+The Add / Edit Connector dialog (`ConnectorModal`) accepts what the user knows in **API Base URL**: the endpoint itself, a repository or organization URL, an SSH clone address, or a host. `ConnectorUrlResolver` (text only, no network) turns it into the endpoint candidates:
+
+| Typed | GitHub connector | NuGet connector |
+|---|---|---|
+| `github.com/...` | `https://api.github.com/` | `https://nuget.pkg.github.com/OWNER/index.json` (the owner is the first path segment) |
+| `SUBDOMAIN.ghe.com/...` | `https://api.SUBDOMAIN.ghe.com/` | the generic feed candidates |
+| any other host | `HOST/api/v3/`, then `api.HOST/`, then the address as typed | `.../v3/index.json`, then `.../index.json` |
+| `nuget.org` | - | `https://api.nuget.org/v3/index.json` |
+
+A GitHub Packages feed needs its owner (organization or user): a feed address without one is refused with a message and no request is made. Each owner needs its own connector.
+
+**ProGet** is a third connector type (`ConnectorType.ProGet`): a NuGet feed on a ProGet server, read through `NuGetService` like a NuGet connector (`ConnectorHelpers.IsPackageRegistry`). Its dialog has **Server URL**, **Feed** and **API Key** (no User Name, no Create button). Server URL takes the server (`https://proget.example.com`) or any feed address; the feed is read from `/nuget/FEED/...` or `/feeds/FEED/...`, else from the Feed box. The connector is saved with the feed endpoint `SERVER/nuget/FEED/v3/index.json` as its API Base URL; the dialog shows that as server and feed again when it is edited (`ConnectorFormAutoFill.SplitProGetAddress`). Each feed needs its own connector, and the untouched name becomes "ProGet FEED".
+
+Test for ProGet: `SERVER/health?format=json` (no key needed) must name the application ProGet, otherwise the test fails on the address and the API key is never sent. Then the feed endpoint is read, first without the key (a public feed needs none) and, when refused, with Basic sign-in as the user `api` with the key as password. The same sign-in is used for package lookups. Without a feed name, the key is used to list the server's NuGet feeds (`api/management/feeds/list`): a single feed is taken, several are offered as suggestions in the Feed box, and none (most keys may not list feeds) asks the user to type the name. The Feed box has its own mark: a tick when the feed was found, an X with the reason when it is missing or not on the server. A NuGet connector that points at ProGet is left as it is (it keeps its previous sign-in); switching its type to ProGet in Edit moves it to this one.
+
+The **Test** button next to the box (`ConnectorEndpointTester`) probes the candidates in order, writes the first one that answers as the right kind of API into the box, and shows the result as marks at the end of the boxes: a green tick in the address box when an endpoint was found, a red X with the reason under the box when not; a green tick in the token box when the endpoint accepted the token, a red X with the reason under it when it refused the token, and no token mark while no token is entered. The result in words is the tooltip of the marks. Changing the address clears both marks and drops a running test; changing the token clears the token mark only. A GitHub token is sent only to a host that has already answered as a GitHub API without it; each answer is read up to 256 KB and each request times out after 10 seconds. The address may name a private host, because an on-premises GitHub or feed lives there.
+
+**Add** / **Update** run the same step first when the address is not the endpoint yet, and stay open when no endpoint is found. An address that already is the endpoint is saved as typed with no request, so existing connectors are not rewritten. The test after saving (status column) is unchanged.
+
+**Create** next to the token opens the "new personal access token" page of the site the address belongs to (`github.com`, the Enterprise Server host, or the `ghe.com` tenant). Without a usable address it opens nothing and says "API Base URL is required to create a token." under the address box. It is offered for every GitHub connector and for a NuGet connector that is blank or on GitHub Packages (scope `read:packages` only).
+
+`ConnectorFormAutoFill` holds what the dialog fills in by itself. In Add mode the name follows the type ("GitHub", "NuGet", then "NuGet OWNER" once a GitHub Packages owner is known) until the user types a name. On a type switch the address is replaced only when it is blank or still the previous type's default; NuGet starts blank.
+
 ### Implementation areas
 
 ```text
 Connector models/repository
 connector services/factory
+ConnectorUrlResolver / ConnectorEndpointTester / ConnectorFormAutoFill (connector dialog)
 ConnectorHealthService
 token protection
 GitHubRepositoryService

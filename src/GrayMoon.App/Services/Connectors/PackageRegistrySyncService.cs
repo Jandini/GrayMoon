@@ -27,7 +27,7 @@ public sealed class PackageRegistrySyncService(
         }
 
         var connectors = (await connectorRepository.GetActiveAsync())
-            .Where(c => c.ConnectorType == ConnectorType.NuGet)
+            .Where(c => ConnectorHelpers.IsPackageRegistry(c.ConnectorType))
             .ToList();
         logger.LogTrace("Sync registries workspace {WorkspaceId}: {ConnectorCount} active NuGet connectors.", workspaceId, connectors.Count);
         if (connectors.Count == 0)
@@ -95,7 +95,7 @@ public sealed class PackageRegistrySyncService(
         if (packages.Count == 0) return;
 
         var connectors = (await connectorRepository.GetActiveAsync())
-            .Where(c => c.ConnectorType == ConnectorType.NuGet)
+            .Where(c => ConnectorHelpers.IsPackageRegistry(c.ConnectorType))
             .ToList();
         if (connectors.Count == 0) return;
 
