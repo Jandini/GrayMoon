@@ -69,8 +69,8 @@
 
 .version-config-textarea {
     font-size: 0.85rem;
-    min-height: 12rem;
-    max-height: 12rem;
+    min-height: 18rem;
+    max-height: 18rem;
     resize: none;
     overflow-y: none;
     scrollbar-width: auto;
