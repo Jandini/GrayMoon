@@ -43,6 +43,9 @@ public sealed record ConnectorEndpointTestResult(
     public IReadOnlyList<string> Feeds { get; init; } = [];
 }
 
+/// <summary>The feeds for the Feed dropdown; <see cref="Message"/> says why the list is empty.</summary>
+public sealed record ProGetFeedListResult(IReadOnlyList<string> Feeds, string? Message = null);
+
 /// <summary>
 /// Finds the API endpoint behind what the user typed in the connector dialog and checks it.
 /// Host policy (deliberate): the address is fetched whatever host it names, private networks included, because an
@@ -220,6 +223,35 @@ public sealed class ConnectorEndpointTester(HttpClient httpClient, ILogger<Conne
         }
 
         return new(ConnectorEndpointTestOutcome.Failed, WithLastError($"Could not read feed {feed}", response.Describe())) { ServerUrl = server, Feed = feed, Feeds = feeds };
+    }
+
+    /// <summary>
+    /// The Feed dropdown of the connector dialog: the NuGet feeds the API key may list on the ProGet server behind
+    /// <paramref name="serverInput"/>. The key is sent only after the health page has identified the server as ProGet.
+    /// An empty list comes with the reason in <see cref="ProGetFeedListResult.Message"/>.
+    /// </summary>
+    public async Task<ProGetFeedListResult> ListProGetFeedsAsync(string? serverInput, string? apiKey, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(serverInput))
+            return new([], "Enter the Server URL to list the feeds.");
+
+        var resolution = ConnectorUrlResolver.Resolve(ConnectorType.ProGet, serverInput);
+        if (resolution.ServerUrl == null)
+            return new([], resolution.Error ?? ConnectorUrlResolver.InvalidMessage);
+
+        var key = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        if (key == null)
+            return new([], "Enter an API key to list the feeds, or type the feed name.");
+
+        var server = resolution.ServerUrl;
+        var health = await SendAsync(server + "health?format=json", null, cancellationToken);
+        if (!TryReadProGetHealth(health, out _))
+            return new([], WithLastError("Could not find a ProGet server at this address", health.Describe()));
+
+        var feeds = await ListProGetNuGetFeedsAsync(server, key, cancellationToken);
+        return feeds.Count == 0
+            ? new([], "This API key may not list feeds - type the feed name.")
+            : new(feeds);
     }
 
     /// <summary>

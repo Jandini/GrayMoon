@@ -315,6 +315,63 @@ public sealed class ConnectorProGetTests
         Assert.True(result.Success);
     }
 
+    // ---- Feed dropdown -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_feed_dropdown_lists_the_nuget_feeds_of_the_server_behind_any_feed_address()
+    {
+        var handler = new ScriptedHandler();
+        handler.Respond(HealthUrl, HttpStatusCode.OK, Health);
+        handler.Respond(FeedListUrl, HttpStatusCode.OK,
+            """[{"name":"team-feed","feedType":"nuget"},{"name":"npm-feed","feedType":"npm"},{"name":"approved","feedType":"NuGet"}]""");
+
+        var result = await Tester(handler).ListProGetFeedsAsync(Endpoint, ApiKey);
+
+        Assert.Equal(["approved", "team-feed"], result.Feeds);
+        Assert.Null(result.Message);
+        Assert.Equal([HealthUrl, FeedListUrl], handler.Requests.Select(r => r.Url));
+        Assert.Equal(ApiKey, handler.Requests[1].ApiKeyHeader);
+    }
+
+    [Fact]
+    public async Task The_feed_dropdown_never_sends_the_key_to_a_server_that_is_not_proget()
+    {
+        var handler = new ScriptedHandler();
+        handler.Respond(HealthUrl, HttpStatusCode.OK, """{"status":"up"}""");
+        handler.Respond(FeedListUrl, HttpStatusCode.OK, """[{"name":"team-feed","feedType":"nuget"}]""");
+
+        var result = await Tester(handler).ListProGetFeedsAsync("https://proget.company.com", ApiKey);
+
+        Assert.Empty(result.Feeds);
+        Assert.StartsWith("Could not find a ProGet server at this address", result.Message);
+        Assert.Equal([HealthUrl], handler.Requests.Select(r => r.Url));
+        Assert.All(handler.Requests, r => Assert.Null(r.ApiKeyHeader));
+    }
+
+    [Fact]
+    public async Task The_feed_dropdown_says_what_is_missing_without_a_request()
+    {
+        var handler = new ScriptedHandler();
+        var tester = Tester(handler);
+
+        Assert.Equal("Enter the Server URL to list the feeds.", (await tester.ListProGetFeedsAsync(" ", ApiKey)).Message);
+        Assert.Equal("Enter an API key to list the feeds, or type the feed name.", (await tester.ListProGetFeedsAsync("https://proget.company.com", null)).Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task The_feed_dropdown_asks_for_the_name_when_the_key_may_not_list_feeds()
+    {
+        var handler = new ScriptedHandler();
+        handler.Respond(HealthUrl, HttpStatusCode.OK, Health);
+        handler.Respond(FeedListUrl, HttpStatusCode.Forbidden, "");
+
+        var result = await Tester(handler).ListProGetFeedsAsync("https://proget.company.com", ApiKey);
+
+        Assert.Empty(result.Feeds);
+        Assert.Equal("This API key may not list feeds - type the feed name.", result.Message);
+    }
+
     // ---- Harness ----------------------------------------------------------------------------
 
     private static ConnectorEndpointTester Tester(HttpMessageHandler handler)

@@ -89,7 +89,7 @@
                                         </span>
                                     }
                                     <button type="button"
-                                            class="btn btn-outline-secondary text-nowrap"
+                                            class="btn btn-outline-secondary connector-attached-btn text-nowrap"
                                             title="@TestButtonTitle"
                                             disabled="@(_isTesting || IsSubmitting || string.IsNullOrWhiteSpace(Model.ApiBaseUrl))"
                                             @onclick="TestApiBaseUrlAsync">
@@ -126,30 +126,71 @@
                                     {
                                         <div class="col-md-6">
                                             <label class="form-label">Feed <span class="text-danger">*</span></label>
-                                            <div class="input-group">
-                                                <input type="text"
-                                                       class="form-control"
-                                                       list="connector-feed-list"
-                                                       @bind="Model.FeedName"
-                                                       @bind:event="oninput"
-                                                       @bind:after="OnFeedEdited"
-                                                       placeholder="Feed name" />
-                                                @if (_feedMark is { } feedMarkOk)
+                                            <div class="position-relative">
+                                                <div class="input-group">
+                                                    <input type="text"
+                                                           class="form-control"
+                                                           autocomplete="off"
+                                                           role="combobox"
+                                                           aria-expanded="@(_feedListOpen ? "true" : "false")"
+                                                           aria-controls="connector-feed-list"
+                                                           @ref="_feedInput"
+                                                           @bind="Model.FeedName"
+                                                           @bind:event="oninput"
+                                                           @bind:after="OnFeedEdited"
+                                                           @onkeydown="OnFeedKeyDownAsync"
+                                                           @onkeydown:stopPropagation="_feedListOpen"
+                                                           @onblur="CloseFeedList"
+                                                           placeholder="Feed name" />
+                                                    @if (_feedMark is { } feedMarkOk)
+                                                    {
+                                                        <span class="@(feedMarkOk ? "connector-field-mark connector-field-mark--ok" : "connector-field-mark connector-field-mark--failed")"
+                                                              role="status"
+                                                              title="@_markTitle"
+                                                              aria-label="@_markTitle">
+                                                            <i class="bi @(feedMarkOk ? "bi-check-lg" : "bi-x-lg")" aria-hidden="true"></i>
+                                                        </span>
+                                                    }
+                                                    <button type="button"
+                                                            class="btn btn-outline-secondary connector-attached-btn"
+                                                            tabindex="-1"
+                                                            title="Show the feeds on this server"
+                                                            aria-label="Show the feeds on this server"
+                                                            @onmousedown:preventDefault
+                                                            @onclick="ToggleFeedListAsync">
+                                                        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                                                    </button>
+                                                </div>
+                                                @if (_feedListOpen)
                                                 {
-                                                    <span class="@(feedMarkOk ? "connector-field-mark connector-field-mark--ok" : "connector-field-mark connector-field-mark--failed")"
-                                                          role="status"
-                                                          title="@_markTitle"
-                                                          aria-label="@_markTitle">
-                                                        <i class="bi @(feedMarkOk ? "bi-check-lg" : "bi-x-lg")" aria-hidden="true"></i>
-                                                    </span>
+                                                    var visibleFeeds = VisibleFeeds;
+                                                    <ul class="connector-feed-list" id="connector-feed-list" role="listbox" @onmousedown:preventDefault>
+                                                        @if (_feedsLoading)
+                                                        {
+                                                            <li class="connector-feed-list__note">
+                                                                <span class="spinner-border spinner-border-sm me-2"></span>Loading feeds...
+                                                            </li>
+                                                        }
+                                                        else if (visibleFeeds.Count == 0)
+                                                        {
+                                                            <li class="connector-feed-list__note">@(_feedListNote ?? "No feed matches - the name is used as typed.")</li>
+                                                        }
+                                                        else
+                                                        {
+                                                            @foreach (var feed in visibleFeeds)
+                                                            {
+                                                                var isCurrent = string.Equals(feed, Model.FeedName?.Trim(), StringComparison.OrdinalIgnoreCase);
+                                                                <li class="@(isCurrent ? "connector-feed-list__item connector-feed-list__item--active" : "connector-feed-list__item")"
+                                                                    role="option"
+                                                                    aria-selected="@(isCurrent ? "true" : "false")"
+                                                                    @onclick="() => SelectFeed(feed)">
+                                                                    @feed
+                                                                </li>
+                                                            }
+                                                        }
+                                                    </ul>
                                                 }
                                             </div>
-                                            <datalist id="connector-feed-list">
-                                                @foreach (var feed in _feedSuggestions)
-                                                {
-                                                    <option value="@feed"></option>
-                                                }
-                                            </datalist>
                                             @if (_feedMessage != null)
                                             {
                                                 <div class="connector-field-error" role="alert">@_feedMessage</div>
@@ -191,7 +232,7 @@
                                                     var tokenPageUrl = ConnectorUrlResolver.GetTokenPageUrl(Model.ConnectorType, Model.ApiBaseUrl);
                                                     if (tokenPageUrl != null)
                                                     {
-                                                        <a class="btn btn-outline-secondary text-nowrap"
+                                                        <a class="btn btn-outline-secondary connector-attached-btn text-nowrap"
                                                            href="@tokenPageUrl"
                                                            target="_blank"
                                                            rel="noopener noreferrer"
@@ -202,7 +243,7 @@
                                                     else
                                                     {
                                                         <button type="button"
-                                                                class="btn btn-outline-secondary text-nowrap"
+                                                                class="btn btn-outline-secondary connector-attached-btn text-nowrap"
                                                                 title="Create a classic personal access token on GitHub"
                                                                 @onclick="ExplainTokenPageNeedsUrlAsync">
                                                             Create
@@ -311,9 +352,30 @@
     private bool? _feedMark;
     /// <summary>ProGet: what is wrong with the feed (not named yet, or not on the server), under the Feed box.</summary>
     private string? _feedMessage;
-    /// <summary>ProGet: the server's NuGet feeds from the last test, offered as suggestions in the Feed box.</summary>
+    /// <summary>ProGet: the server's NuGet feeds, loaded when the Feed dropdown is opened (or by a test), offered in the dropdown.</summary>
     private IReadOnlyList<string> _feedSuggestions = [];
+    /// <summary>ProGet: the server address and key <see cref="_feedSuggestions"/> were loaded for; another pair loads again.</summary>
+    private (string Server, string Key)? _feedsLoadedFor;
+    private bool _feedListOpen;
+    private bool _feedsLoading;
+    /// <summary>What was typed in the Feed box, narrowing the dropdown; null (opened with the button) shows every feed.</summary>
+    private string? _feedFilter;
+    /// <summary>Why the dropdown has no feeds to offer (no key yet, the key may not list feeds, the server was not found).</summary>
+    private string? _feedListNote;
+    private ElementReference _feedInput;
+    private CancellationTokenSource? _feedListCts;
     private CancellationTokenSource? _testCts;
+
+    private IReadOnlyList<string> VisibleFeeds
+    {
+        get
+        {
+            var filter = _feedFilter?.Trim();
+            return string.IsNullOrEmpty(filter)
+                ? _feedSuggestions
+                : _feedSuggestions.Where(f => f.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+    }
 
     private string ApiBaseUrlPlaceholder => Model?.ConnectorType switch
     {
@@ -338,7 +400,7 @@
         _stateModel = model;
         _autoName = model != null && Mode == ConnectorModalMode.Create ? model.ConnectorName : null;
         _typeDropdownOpen = false;
-        _feedSuggestions = [];
+        ResetFeedList();
         ClearUrlStatus();
 
         // A saved ProGet connector holds the feed endpoint; the dialog shows it as server and feed.
@@ -374,7 +436,7 @@
         Model.ConnectorType = type;
         ConnectorFormAutoFill.ApplyTypeChange(Model, previous);
         ApplyAutoName(ConnectorUrlResolver.DefaultName(type));
-        _feedSuggestions = [];
+        ResetFeedList();
         ClearUrlStatus();
     }
 
@@ -386,13 +448,171 @@
     }
 
     /// <summary>The address changed, so a result shown for the old one no longer holds; a test still running is dropped.</summary>
-    private void OnApiBaseUrlEdited() => ClearUrlStatus();
+    private void OnApiBaseUrlEdited()
+    {
+        ResetFeedList();
+        ClearUrlStatus();
+    }
 
     /// <summary>The token changed, so its mark no longer holds. The address mark stays: the endpoint is still the one that was found.</summary>
     private void OnUserTokenEdited()
     {
         _tokenMark = null;
         _tokenMessage = null;
+        ResetFeedList(); // another key may list other feeds
+    }
+
+    /// <summary>ProGet: forgets the loaded feeds (another server or key) and closes the dropdown; a load still running is dropped.</summary>
+    private void ResetFeedList()
+    {
+        CancelFeedListLoad();
+        _feedSuggestions = [];
+        _feedsLoadedFor = null;
+        _feedListOpen = false;
+        _feedsLoading = false;
+        _feedFilter = null;
+        _feedListNote = null;
+    }
+
+    private void CancelFeedListLoad()
+    {
+        var cts = _feedListCts;
+        _feedListCts = null;
+        if (cts == null)
+            return;
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private void CloseFeedList() => _feedListOpen = false;
+
+    /// <summary>The dropdown button: opens the list with every feed (loading it when needed), or closes it. The caret stays in the Feed box.</summary>
+    private async Task ToggleFeedListAsync()
+    {
+        if (_feedListOpen)
+        {
+            _feedListOpen = false;
+            return;
+        }
+
+        try
+        {
+            await _feedInput.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException or OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "Could not focus the Feed box.");
+        }
+
+        await OpenFeedListAsync();
+    }
+
+    private async Task OpenFeedListAsync()
+    {
+        _feedFilter = null;
+        _feedListOpen = true;
+        await LoadFeedsAsync();
+    }
+
+    /// <summary>Loads the server's feeds once per server address and key; the dropdown shows a loading row meanwhile.</summary>
+    private async Task LoadFeedsAsync()
+    {
+        var model = Model;
+        if (model == null)
+            return;
+
+        var source = ((model.ApiBaseUrl ?? string.Empty).Trim(), (model.UserToken ?? string.Empty).Trim());
+        if (_feedsLoading || _feedsLoadedFor == source)
+            return;
+
+        CancelFeedListLoad();
+        var cts = _feedListCts = new CancellationTokenSource();
+        _feedsLoading = true;
+        _feedListNote = null;
+        StateHasChanged();
+        try
+        {
+            var result = await EndpointTester.ListProGetFeedsAsync(source.Item1, source.Item2, cts.Token);
+            if (!ReferenceEquals(_feedListCts, cts) || !ReferenceEquals(model, _stateModel))
+                return;
+
+            _feedSuggestions = result.Feeds;
+            _feedListNote = result.Message;
+            _feedsLoadedFor = source;
+        }
+        catch (OperationCanceledException)
+        {
+            // The address, the key or the dialog changed; the list is loaded again when it is opened.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading the ProGet feed list failed unexpectedly.");
+            if (ReferenceEquals(_feedListCts, cts))
+                _feedListNote = $"The feeds could not be listed: {ex.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_feedListCts, cts))
+            {
+                _feedListCts = null;
+                _feedsLoading = false;
+                cts.Dispose();
+            }
+        }
+    }
+
+    private void SelectFeed(string feed)
+    {
+        if (Model == null)
+            return;
+        Model.FeedName = feed;
+        ClearFeedMarks();
+        _feedListOpen = false;
+    }
+
+    /// <summary>
+    /// Feed box keys: Escape closes the dropdown (and not the dialog), Down / Up open it and then walk the offered
+    /// feeds, putting each in the box.
+    /// </summary>
+    private async Task OnFeedKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (Model == null)
+            return;
+
+        if (e.Key == "Escape")
+        {
+            _feedListOpen = false;
+            return;
+        }
+
+        if (e.Key is not ("ArrowDown" or "ArrowUp"))
+            return;
+
+        if (!_feedListOpen)
+        {
+            await OpenFeedListAsync();
+            return;
+        }
+
+        var feeds = VisibleFeeds;
+        if (_feedsLoading || feeds.Count == 0)
+            return;
+
+        var current = -1;
+        for (var i = 0; i < feeds.Count; i++)
+        {
+            if (string.Equals(feeds[i], Model.FeedName?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                current = i;
+                break;
+            }
+        }
+
+        var next = e.Key == "ArrowDown"
+            ? (current + 1) % feeds.Count
+            : (current <= 0 ? feeds.Count - 1 : current - 1);
+        Model.FeedName = feeds[next];
+        ClearFeedMarks();
     }
 
     private void ClearUrlStatus()
@@ -404,6 +624,16 @@
 
     /// <summary>ProGet: the feed changed, so the feed and key marks no longer hold. The server mark stays.</summary>
     private void OnFeedEdited()
+    {
+        ClearFeedMarks();
+
+        // Typing narrows the feeds already loaded, like autocomplete; loading them is left to the dropdown button.
+        _feedFilter = Model?.FeedName;
+        if (_feedSuggestions.Count > 0)
+            _feedListOpen = VisibleFeeds.Count > 0;
+    }
+
+    private void ClearFeedMarks()
     {
         _feedMark = null;
         _feedMessage = null;
@@ -511,7 +741,13 @@
             {
                 // ProGet: the box keeps the server, the feed has its own box; the two are joined when saving.
                 model.ApiBaseUrl = result.ServerUrl;
-                _feedSuggestions = result.Feeds;
+                if (result.Feeds.Count > 0)
+                {
+                    // The test listed the feeds already; the dropdown offers them without asking again.
+                    _feedSuggestions = result.Feeds;
+                    _feedListNote = null;
+                    _feedsLoadedFor = (result.ServerUrl.Trim(), (model.UserToken ?? string.Empty).Trim());
+                }
                 if (result.EndpointFound)
                 {
                     model.FeedName = result.Feed;
@@ -644,7 +880,11 @@
         }
     }
 
-    public void Dispose() => CancelRunningTest();
+    public void Dispose()
+    {
+        CancelRunningTest();
+        CancelFeedListLoad();
+    }
 
     private bool ShouldShowUserNameField()
     {

@@ -18,6 +18,63 @@
     color: var(--error);
 }
 
+/* Test, Create and the Feed dropdown button, attached to a box: the frame is the box's own, so the button is exactly
+   as tall as the box; the fill is what sets it apart. The focus ring is drawn inside for the same reason. */
+.connector-attached-btn,
+.connector-attached-btn:focus,
+.connector-attached-btn:active {
+    border-color: var(--border-input);
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.connector-attached-btn:focus,
+.connector-attached-btn:active:focus {
+    box-shadow: inset 0 0 0 1px var(--focus-ring-outer);
+}
+
+/* The feeds of the ProGet server, under the Feed box. */
+.connector-feed-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    margin: 2px 0 0;
+    padding: 0.25rem 0;
+    list-style: none;
+    max-height: 11.5rem;
+    overflow-y: auto;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.connector-feed-list__item,
+.connector-feed-list__note {
+    padding: 0.35rem 0.75rem;
+}
+
+.connector-feed-list__item {
+    cursor: pointer;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.connector-feed-list__item:hover {
+    background-color: var(--bg-hover);
+}
+
+.connector-feed-list__item--active {
+    background-color: var(--bg-active);
+}
+
+.connector-feed-list__note {
+    font-size: 0.875em;
+    color: var(--text-secondary);
+}
+
 /* Why the address or the token failed, under its box. */
 .connector-field-error {
     margin-top: 0.25rem;
