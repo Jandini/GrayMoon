@@ -24,8 +24,14 @@
 .connector-attached-btn:focus,
 .connector-attached-btn:active {
     border-color: var(--border-input);
-    background-color: var(--bg-tertiary);
+    background-color: var(--border-hover);
     color: var(--text-primary);
+}
+
+.connector-attached-btn:hover:not(:disabled) {
+    border-color: var(--border-input);
+    background-color: var(--border-light);
+    color: #ffffff;
 }
 
 .connector-attached-btn:focus,
