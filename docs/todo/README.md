@@ -20,6 +20,7 @@ Classification (must / should / optional) and the order of work for all of these
 
 | Note | Idea | Status |
 |---|---|---|
+| [workspace-unhook-design](workspace-unhook-design.md), [workspace-unhook-implementation-plan](workspace-unhook-implementation-plan.md) | Remove GrayMoon's Git hooks when a Workspace is removed or a repository leaves one (no removal exists today), then split Add Workspace into Add, Import from disk and Restore from repository behind one split button. Design and an eight-phase plan. | Proposal; decisions D1-D6 open |
 | [changes-commit-timeline](ideas/changes-commit-timeline.md) | Commit timeline strip on the Changes page to review a Feature commit by commit across repositories (read-only "time machine"), persisted per branch, Feature contexts first. | Draft, design only |
 | [connector-token-failure-handling](ideas/connector-token-failure-handling.md) | Classify connector token failures instead of showing "unknown" errors. | Draft, analysis only |
 | [git-changes-large-changeset-scale](ideas/git-changes-large-changeset-scale.md) | Folder summaries, chunked Worker transfer, deltas for very large change sets. | Closed for now |
