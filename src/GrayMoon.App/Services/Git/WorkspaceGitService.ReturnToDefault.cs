@@ -76,8 +76,9 @@ public sealed partial class WorkspaceGitService
     /// Syncs a single repository to its default branch by calling the worker directly, so CommandOutput flows to TerminalSinkContext when called inside a background job.
     /// Persists the resulting state through <see cref="WorkspaceRepositoryStateWriter"/> but does not recompute workspace-wide stats or broadcast:
     /// the caller owns that boundary and must call <see cref="RecomputeAndBroadcastWorkspaceSyncedAsync"/> once after its whole batch, single-repository batches included.
+    /// A branch delete that failed does not fail the return: it comes back as <see cref="ReturnToDefaultOutcome.Warning"/>, which the caller must report.
     /// </summary>
-    public async Task<(bool Success, string? ErrorMessage)> ReturnToDefaultDirectAsync(
+    public async Task<ReturnToDefaultOutcome> ReturnToDefaultDirectAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
@@ -88,16 +89,16 @@ public sealed partial class WorkspaceGitService
     {
         var workspace = await _workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
-            return (false, "Workspace not found.");
+            return new ReturnToDefaultOutcome(false, "Workspace not found.");
 
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null)
-            return (false, "Repository not found.");
+            return new ReturnToDefaultOutcome(false, "Repository not found.");
 
         var wr = await _dbContext.WorkspaceRepositories
             .FirstOrDefaultAsync(x => x.WorkspaceId == workspaceId && x.RepositoryId == repositoryId, cancellationToken);
         if (wr == null)
-            return (false, "Repository is not in the given workspace.");
+            return new ReturnToDefaultOutcome(false, "Repository is not in the given workspace.");
 
         if (_connectorHealthService != null)
             await _connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
@@ -142,7 +143,7 @@ public sealed partial class WorkspaceGitService
         var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to return to default branch";
 
         if (!commandSuccess)
-            return (false, errorMessage);
+            return new ReturnToDefaultOutcome(false, errorMessage);
 
         if (syncResponse?.LocalBranches == null)
         {
@@ -160,7 +161,8 @@ public sealed partial class WorkspaceGitService
             ReconcilePullRequest = true,
         }, cancellationToken);
 
-        return (true, null);
+        return new ReturnToDefaultOutcome(true, null, ReturnToDefaultOutcome.DescribeBranchDeleteFailure(
+            repo.RepositoryName, currentBranchName, syncResponse?.RemoteBranchDeleteError, syncResponse?.LocalBranchDeleteError));
     }
 
     /// <summary>
@@ -201,5 +203,37 @@ public sealed partial class WorkspaceGitService
             BranchesProbed = branchesProbed,
             ProjectsProbed = syncResponse.Projects != null,
         };
+    }
+}
+
+/// <summary>
+/// Outcome of one repository's Return to Default. <see cref="Warning"/> is set on a success whose branch delete (remote,
+/// local or both) failed: the repository is on the default branch, and the branch the user asked to delete is still there.
+/// </summary>
+public readonly record struct ReturnToDefaultOutcome(bool Success, string? ErrorMessage, string? Warning = null)
+{
+    public void Deconstruct(out bool success, out string? errorMessage)
+    {
+        success = Success;
+        errorMessage = ErrorMessage;
+    }
+
+    /// <summary>One sentence naming the repository, the branch and what was not deleted. Null when both deletes worked.</summary>
+    public static string? DescribeBranchDeleteFailure(string? repositoryName, string branchName, string? remoteError, string? localError)
+    {
+        var remoteFailed = !string.IsNullOrWhiteSpace(remoteError);
+        var localFailed = !string.IsNullOrWhiteSpace(localError);
+        if (!remoteFailed && !localFailed)
+            return null;
+
+        var name = string.IsNullOrWhiteSpace(repositoryName) ? "Repository" : repositoryName;
+        if (remoteFailed && localFailed)
+            return $"{name}: returned to the default branch, but the remote and the local branch '{branchName}' were not deleted (remote: {Trim(remoteError)}; local: {Trim(localError)}).";
+
+        return remoteFailed
+            ? $"{name}: returned to the default branch, but the remote branch '{branchName}' was not deleted ({Trim(remoteError)})."
+            : $"{name}: returned to the default branch, but the local branch '{branchName}' was not deleted ({Trim(localError)}).";
+
+        static string Trim(string? error) => error!.Trim().TrimEnd('.');
     }
 }

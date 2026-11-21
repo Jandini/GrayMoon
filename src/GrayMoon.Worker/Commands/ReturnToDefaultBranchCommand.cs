@@ -41,11 +41,18 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepository
         // Skip hooks: a delete is still a push, so the pre-push hook would queue a PushHookSync for the branch
         // this flow is about to abandon. That job polls for a couple of seconds and then reports counts for the
         // deleted branch, landing after this command's own authoritative snapshot and overwriting it.
+        // A failed delete does not stop the return, but it is reported in the response: the caller asked for the
+        // branch to go, so it must learn that it is still there.
+        string? remoteBranchDeleteError = null;
+        string? localBranchDeleteError = null;
         if (request.DeleteRemoteBranch && !string.Equals(currentBranchName, defaultBranch, StringComparison.OrdinalIgnoreCase))
         {
             var (remoteDeleteOk, remoteDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: true, force: false, cancellationToken, skipHooks: true, bearerToken: request.BearerToken);
             if (!remoteDeleteOk)
+            {
+                remoteBranchDeleteError = string.IsNullOrWhiteSpace(remoteDeleteErr) ? "Failed to delete the remote branch" : remoteDeleteErr;
                 logger.LogWarning("Remote branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, remoteDeleteErr);
+            }
         }
 
         // Fetch to update remote-tracking refs and prune deleted remote branches
@@ -76,7 +83,10 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepository
             // Force delete (-D) only when PR is merged (set by App from current PR status). Otherwise use -d so we only delete if merged locally.
             var (localDeleteOk, localDeleteErr) = await git.DeleteBranchAsync(repoPath, currentBranchName, isRemote: false, force: request.ForceDeleteLocalBranch, cancellationToken);
             if (!localDeleteOk)
+            {
+                localBranchDeleteError = string.IsNullOrWhiteSpace(localDeleteErr) ? "Failed to delete the local branch" : localDeleteErr;
                 logger.LogWarning("Local branch delete failed for {Branch} in {RepoPath}: {Error}", currentBranchName, repoPath, localDeleteErr);
+            }
         }
 
         // Always pull after switching to default so local is up to date. Skip hooks: this orchestrated
@@ -91,7 +101,9 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepository
                 Success = false,
                 ErrorMessage = mergeConflict ? (pullError ?? "Merge conflict after pull.") : (pullError ?? "Failed to pull after switching to default branch"),
                 CurrentBranch = defaultBranch,
-                DefaultBranch = defaultBranch
+                DefaultBranch = defaultBranch,
+                RemoteBranchDeleteError = remoteBranchDeleteError,
+                LocalBranchDeleteError = localBranchDeleteError
             };
         }
 
@@ -120,7 +132,9 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepository
             DefaultBranchAhead = state.DefaultBranchAhead,
             GitVersion = state.GitVersion,
             Projects = rawProjects,
-            State = state
+            State = state,
+            RemoteBranchDeleteError = remoteBranchDeleteError,
+            LocalBranchDeleteError = localBranchDeleteError
         };
     }
 }

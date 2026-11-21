@@ -383,6 +383,92 @@ public sealed class ReturnToDefaultUnattendedBatchTests
         Assert.Contains(progress.Messages, message => message.Contains("Returned", StringComparison.Ordinal) && message.Contains("of", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A branch delete that failed used to be a line in the Worker log and nothing else: the user who asked for the
+    /// remote branch to be deleted was told the return worked. The return still completes, and the result now says
+    /// which branch is still there.
+    /// </summary>
+    [Fact]
+    public async Task A_branch_that_could_not_be_deleted_is_a_warning_on_a_completed_return()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await PrepareEligibleAsync(ctx, ctx.RepositoryId);
+        RespondReturnWithFailedRemoteDelete(ctx);
+
+        var handler = CreateHandler(ctx);
+        var batch = await handler.ReturnToDefaultUnattendedBatchAsync(
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
+
+        var result = Assert.Single(batch.Results);
+        Assert.True(result.Completed);
+        Assert.True(result.MutationCompleted);
+        Assert.Equal(FailedRemoteDeleteWarning, result.Warning);
+        Assert.Equal([FailedRemoteDeleteWarning], batch.Warnings);
+        Assert.Equal("main", (await ctx.ReadLinkAsync()).BranchName);
+    }
+
+    [Fact]
+    public async Task Return_to_default_with_options_reports_the_branch_that_could_not_be_deleted_as_a_warning()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await PrepareEligibleAsync(ctx, ctx.RepositoryId);
+        RespondReturnWithFailedRemoteDelete(ctx);
+
+        var result = await CreateHandler(ctx).ExecuteReturnToDefaultAsync(
+            ctx.WorkspaceId,
+            await ctx.GetSpecialContextIdAsync(),
+            [ctx.RepositoryId],
+            new ReturnToDefaultOptions(DeleteRemoteBranch: true, AllowForceDeleteLocalBranch: true, CloseOpenPullRequest: false),
+            null,
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.True(result.HasWarnings);
+        Assert.Equal([FailedRemoteDeleteWarning], result.Warnings);
+        Assert.Equal(FailedRemoteDeleteWarning, result.WarningSummary);
+        Assert.Equal("main", (await ctx.ReadLinkAsync()).BranchName);
+    }
+
+    [Fact]
+    public async Task Unattended_return_to_default_reports_the_branch_that_could_not_be_deleted_as_a_warning()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await PrepareEligibleAsync(ctx, ctx.RepositoryId);
+        RespondReturnWithFailedRemoteDelete(ctx);
+
+        var result = await CreateHandler(ctx).ReturnToDefaultUnattendedAsync(
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
+
+        Assert.True(result.Completed, result.AbortReason);
+        Assert.Equal([FailedRemoteDeleteWarning], result.Warnings);
+    }
+
+    [Fact]
+    public async Task A_return_whose_deletes_worked_has_no_warning()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await PrepareEligibleAsync(ctx, ctx.RepositoryId);
+        RespondReturn(ctx);
+
+        var batch = await CreateHandler(ctx).ReturnToDefaultUnattendedBatchAsync(
+            ctx.WorkspaceId, await ctx.GetSpecialContextIdAsync(), [ctx.RepositoryId], null, CancellationToken.None);
+
+        Assert.Null(Assert.Single(batch.Results).Warning);
+        Assert.Empty(batch.Warnings);
+        Assert.Empty(batch.Skipped);
+    }
+
+    private const string FailedRemoteDeleteWarning =
+        "graymoon-api: returned to the default branch, but the remote branch 'feature/x' was not deleted (remote: Permission to acme/graymoon-api denied).";
+
+    private static void RespondReturnWithFailedRemoteDelete(SyncStateTestContext ctx)
+    {
+        ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());
+        var response = ReturnResponse();
+        response.RemoteBranchDeleteError = "remote: Permission to acme/graymoon-api denied.";
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", response);
+    }
+
     private static void RespondReturn(SyncStateTestContext ctx)
     {
         ctx.WorkerBridge.Respond("RefreshBranches", RefreshBranchesOk());

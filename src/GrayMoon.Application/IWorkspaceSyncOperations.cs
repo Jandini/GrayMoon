@@ -1,9 +1,32 @@
 using GrayMoon.App.Models;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.Application;
 
-public sealed record UnattendedReturnToDefaultResult(bool Completed, string? AbortReason);
+public sealed record UnattendedReturnToDefaultResult(bool Completed, string? AbortReason)
+{
+    /// <summary>
+    /// For a completed return: one sentence per repository whose remote or local branch could not be deleted. The
+    /// repository is on the default branch; the caller reports these as a warning, never silently.
+    /// </summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>Repositories the policy left out of the return (read only, on a tag), with the reason. They were not touched.</summary>
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+}
+
+/// <summary>Wording shared by every caller that reports a Return to Default whose branch delete failed.</summary>
+public static class ReturnToDefaultWarnings
+{
+    /// <summary>One line for a toast or a response message that sums up the warnings of a run. Null without warnings.</summary>
+    public static string? Summarize(IReadOnlyList<string>? warnings) => warnings switch
+    {
+        null or { Count: 0 } => null,
+        { Count: 1 } => warnings[0],
+        _ => $"{warnings.Count} repositories returned to the default branch, but a branch was not deleted. {warnings[0]} (and {warnings.Count - 1} more)",
+    };
+}
 
 /// <summary>Why one repository in an unattended return batch did not finish. <see cref="None"/> when it completed.</summary>
 public enum UnattendedReturnFailureStage
@@ -26,7 +49,11 @@ public sealed record UnattendedReturnToDefaultRepositoryResult(
     string? AbortReason,
     UnattendedReturnFailureStage FailureStage,
     bool MutationAttempted,
-    bool MutationCompleted);
+    bool MutationCompleted)
+{
+    /// <summary>For a completed return whose remote or local branch could not be deleted: the sentence that says so.</summary>
+    public string? Warning { get; init; }
+}
 
 /// <summary>
 /// Per-repository unattended return results plus the single workspace reconciliation that follows the batch.
@@ -39,6 +66,12 @@ public sealed record UnattendedReturnToDefaultBatchResult(
     string? ReconciliationError)
 {
     public const string CancelledMessage = "Return to default branch was cancelled.";
+
+    /// <summary>Repositories the policy left out of the batch (read only, on a tag), with the reason. Their result is completed and they were not touched.</summary>
+    public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
+    /// <summary>One sentence per returned repository whose remote or local branch could not be deleted, in the order of <see cref="Results"/>.</summary>
+    public IReadOnlyList<string> Warnings => [.. Results.Where(result => result.Warning is not null).Select(result => result.Warning!)];
 }
 
 /// <summary>Per-repository facts for a Return-to-Default safety decision. Describes state and consequences, not UI.</summary>

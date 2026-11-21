@@ -297,8 +297,8 @@ public sealed partial class WorkspaceRepositories
         var jobContextId = RequireSelectedContextId();
         StartPageJob("Creating branches...", async (job, ct) =>
         {
-            var errors = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, IReadOnlyDictionary<int, string>>(svc =>
-                svc.CreateBranchesAsync(
+            var outcome = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, BranchCreationOutcome>(svc =>
+                svc.CreateBranchesWithOutcomeAsync(
                     WorkspaceId, jobContextId,
                     newBranchName,
                     baseBranch,
@@ -306,10 +306,14 @@ public sealed partial class WorkspaceRepositories
                     job.ToOperationProgress(),
                     syncState: false,
                     cancellationToken: ct));
+            var errors = outcome.ErrorsByRepositoryId;
             SafeInvoke(() =>
             {
                 ApplyRepositoryErrors(errors);
                 ClearRepositoryErrorsFor(targetRepoIds.Where(id => !errors.ContainsKey(id)));
+                // Where the branch was already there nothing was created; the existing branch was checked out.
+                if (BranchAlreadyExistedWarning.Describe(newBranchName, [.. outcome.AlreadyExistedByRepositoryId.Values]) is { } existedWarning)
+                    ToastService.ShowWarning(existedWarning);
             });
         }, new PageJobOptions
         {
@@ -340,7 +344,7 @@ public sealed partial class WorkspaceRepositories
         var jobContextId = RequireSelectedContextId();
         StartPageJob("Creating branch...", async (job, ct) =>
         {
-            var (success, err) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? Error)>(
+            var (success, err, alreadyExisted) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? Error, bool AlreadyExisted)>(
                 svc => svc.CreateSingleBranchAsync(WorkspaceId, jobContextId, repositoryId, newBranchName, baseBranch, setUpstream, ct));
 
             if (!success)
@@ -349,6 +353,13 @@ public sealed partial class WorkspaceRepositories
             }
             else
             {
+                // Nothing was created: the existing branch was checked out, and it may not be based on the chosen base.
+                if (alreadyExisted
+                    && BranchAlreadyExistedWarning.Describe(newBranchName, [repositoryName ?? string.Empty]) is { } existedWarning)
+                {
+                    SafeInvoke(() => ToastService.ShowWarning(existedWarning));
+                }
+
                 if (err != null)
                     SafeInvoke(() => SetRepositoryError(repositoryId, err));
                 else
@@ -382,13 +393,19 @@ public sealed partial class WorkspaceRepositories
         var jobContextId = RequireSelectedContextId();
         StartPageJob(isTag ? "Checking out tag..." : "Checking out branch...", async (job, ct) =>
         {
-            var (success, errMsg) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? ErrorMessage)>(
+            var (success, errMsg, warning) = await ScopedExecutor.ExecuteAsync<WorkspaceBranchHandler, (bool Success, string? ErrorMessage, string? Warning)>(
                 svc => svc.CheckoutBranchAsync(WorkspaceId, jobContextId, repositoryId, branchName, isTag, ct));
 
             SafeInvoke(() =>
             {
                 if (success)
+                {
                     ClearRepositoryError(repositoryId);
+                    // The switch is done; the warning says what beside it did not work (a read only repository whose
+                    // new branch could not be recorded in the Workspace definition).
+                    if (warning is not null)
+                        ToastService.ShowWarning(warning);
+                }
                 else
                     SetRepositoryError(repositoryId, errMsg ?? (isTag ? "Failed to checkout tag." : "Failed to checkout branch."));
             });

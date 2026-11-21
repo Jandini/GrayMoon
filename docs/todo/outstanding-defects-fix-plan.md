@@ -1,6 +1,6 @@
 # Outstanding defects: classification and order
 
-Last checked 2026-11-13. Covers every note in `docs/todo/defects/`. The items fixed in that round are removed from this plan; their behavior is in `docs/architecture/` and their notes are deleted.
+Last checked 2026-11-21. Covers every note in `docs/todo/defects/`. The items fixed in that round are removed from this plan; their behavior is in `docs/architecture/` and their notes are deleted.
 
 ## Classes
 
@@ -13,8 +13,7 @@ Last checked 2026-11-13. Covers every note in `docs/todo/defects/`. The items fi
 | Item | Note | Class | Size |
 |---|---|---|---|
 | "Pull" also pushes; Sync Commits may publish a never-pushed branch (unintended publish, same harm as the fixed Undo Push Commits bug of 2026-11-21) | [implicit-fallback-actions](defects/implicit-fallback-actions.md) (items 1, 2) | Should (high priority, validate first) | M |
-| Return to Default hides a failed branch delete; Create Branch silently switches to an existing branch | [implicit-fallback-actions](defects/implicit-fallback-actions.md) (items 3, 4) | Should | S-M |
-| Undo fix leftovers; interpolated git command lines in `GitService` | [implicit-fallback-actions](defects/implicit-fallback-actions.md) (items 5, 6) | Optional | S |
+| Interpolated git command lines in `GitService` (`CheckoutBranchAsync`, `DeleteBranchAsync`) | [implicit-fallback-actions](defects/implicit-fallback-actions.md) (item 6) | Optional | S |
 | Signing secrets still at repository level; release workflow never run | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Must (owner action) | S |
 | Missing test: context flip in the tooltip load | [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Optional | M |
 | Convention scans narrower than the rules: page-state scan, context-read scan, App folders the catch scan does not reach; five silent Worker catches listed as `OPEN` | [convention-test-coverage](defects/convention-test-coverage.md) | Optional | M |
@@ -23,7 +22,7 @@ Last checked 2026-11-13. Covers every note in `docs/todo/defects/`. The items fi
 
 ## Notes per item
 
-- **Implicit fallback actions** (added 2026-11-21, high priority): none of the six items was reproduced. Items 1 and 2 are Should but come first, because they publish commits the user did not ask to push; write the two Worker tests named in the note first and fix what reproduces. The sweep did not cover the orchestrators or the Feature operations; do that before calling the class of bug closed.
+- **Implicit fallback actions** (added 2026-11-21, high priority): items 3, 4 and 5 were fixed on 2026-11-21. None of the open items was reproduced. Items 1 and 2 are Should but come first, because they publish commits the user did not ask to push; write the two Worker tests named in the note first and fix what reproduces. The sweep did not cover the orchestrators or the Feature operations; do that before calling the class of bug closed.
 
 - **Signing secrets**: no code change. All `ESIGNER_*` uses in `GrayMoon.Desktop/.github/workflows/release.yml` are in the one `build-and-release` job, which carries the conditional `environment:`. The owner steps are in the note. It is independent of everything else and can happen at any time.
 - **Missing test**: the context-flip test needs the load extracted from the page, or a component test harness. Worth doing when that page is next refactored, not on its own. The hub-attach check is in `WorkspacePageJobDisciplineTests`; the behavior is in `04-runtime-communication-and-concurrency.md` (page jobs).

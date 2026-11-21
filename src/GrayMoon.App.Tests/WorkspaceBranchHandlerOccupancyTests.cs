@@ -153,6 +153,59 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
         probe.AssertBoundedBy(maxParallel);
     }
 
+    /// <summary>
+    /// The checkout result of a read only repository can carry a warning (its new branch could not be recorded in the
+    /// Workspace definition). The handler used to drop it, so the Repositories page never showed it.
+    /// </summary>
+    [Fact]
+    public async Task CheckoutBranchAsync_passes_on_the_warning_of_a_successful_checkout()
+    {
+        var branchOperations = new FakeWorkspaceBranchOperations
+        {
+            CheckoutResult = new CheckoutBranchApiResult(true, null) { Warning = "The Workspace definition could not be updated." },
+        };
+        var handler = CreateHandler(branchOperations, new FakeBranchOccupancyService());
+
+        var (success, error, warning) = await handler.CheckoutBranchAsync(
+            WorkspaceId, new WorkspaceFeatureContextId(1), 100, BranchName, isTag: false, CancellationToken.None);
+
+        Assert.True(success);
+        Assert.Null(error);
+        Assert.Equal("The Workspace definition could not be updated.", warning);
+    }
+
+    [Fact]
+    public async Task CheckoutBranchAsync_has_no_warning_for_a_plain_success_or_a_failure()
+    {
+        var plain = await CreateHandler(new FakeWorkspaceBranchOperations(), new FakeBranchOccupancyService())
+            .CheckoutBranchAsync(WorkspaceId, new WorkspaceFeatureContextId(1), 100, BranchName, isTag: false, CancellationToken.None);
+        var failed = await CreateHandler(
+                new FakeWorkspaceBranchOperations { CheckoutResult = new CheckoutBranchApiResult(false, "boom") { Warning = "ignored" } },
+                new FakeBranchOccupancyService())
+            .CheckoutBranchAsync(WorkspaceId, new WorkspaceFeatureContextId(1), 100, BranchName, isTag: false, CancellationToken.None);
+
+        Assert.Equal((true, null, null), plain);
+        Assert.Equal((false, "boom", null), failed);
+    }
+
+    /// <summary>New Branch on one repository: a branch that was already there is a success that says so.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CreateSingleBranchAsync_says_whether_the_branch_already_existed(bool alreadyExisted)
+    {
+        var branchOperations = new FakeWorkspaceBranchOperations
+        {
+            CreateResult = new GrayMoon.App.Models.Api.CreateBranchApiResult { Success = true, AlreadyExisted = alreadyExisted },
+        };
+        var handler = CreateHandler(branchOperations, new FakeBranchOccupancyService());
+
+        var result = await handler.CreateSingleBranchAsync(
+            WorkspaceId, new WorkspaceFeatureContextId(1), 100, BranchName, "main", setUpstream: false, CancellationToken.None);
+
+        Assert.Equal((true, null, alreadyExisted), result);
+    }
+
     private static WorkspaceBranchHandler CreateHandler(
         FakeWorkspaceBranchOperations branchOperations,
         FakeBranchOccupancyService occupancy,
@@ -237,8 +290,14 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
         public Task<BranchHttpOutcome> CheckoutAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, string? branchName, bool isTag, CancellationToken cancellationToken = default)
         {
             _attemptedRepositoryIds.Add(repositoryId);
-            return Task.FromResult(BranchHttpOutcome.Ok(new CheckoutBranchApiResult(true, null)));
+            return Task.FromResult(BranchHttpOutcome.Ok(CheckoutResult ?? new CheckoutBranchApiResult(true, null)));
         }
+
+        /// <summary>What a checkout answers. Null means a plain success.</summary>
+        public CheckoutBranchApiResult? CheckoutResult { get; init; }
+
+        /// <summary>What a create answers. Null means the fake does not support create.</summary>
+        public GrayMoon.App.Models.Api.CreateBranchApiResult? CreateResult { get; init; }
 
         public Task<BranchHttpOutcome> ReturnToDefaultAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, string? currentBranchName, bool deleteRemoteBranch, bool allowForceDeleteLocalBranch, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
@@ -250,7 +309,7 @@ public sealed class WorkspaceBranchHandlerOccupancyTests
             throw new NotSupportedException();
 
         public Task<BranchHttpOutcome> CreateBranchAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, string? newBranchName, string? baseBranch, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            CreateResult is null ? throw new NotSupportedException() : Task.FromResult(BranchHttpOutcome.Ok(CreateResult));
 
         public Task<BranchHttpOutcome> SetUpstreamAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, string? branchName, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

@@ -13,8 +13,10 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-2 small">
-                        All outgoing commits will be reset back to <code>origin</code> for the following
-                        @(Repos.Count == 1 ? "repository" : "repositories"):
+                        All outgoing commits will be undone for the following
+                        @(Repos.Count == 1 ? "repository" : "repositories"). A branch that is on the remote
+                        goes back to its <code>origin</code> branch. A branch that was never pushed goes back
+                        to where it left its base branch. Nothing is pushed.
                     </p>
                     <div class="default-branch-warning-scroll small mb-3">
                         <ul class="list-unstyled mb-0 ps-0">
@@ -28,7 +30,7 @@
                         </ul>
                     </div>
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" id="keepChangesCheck"
+                        <input class="form-check-input form-check-input-gray" type="checkbox" id="keepChangesCheck"
                                checked="@_keepChanges"
                                @onchange="OnKeepChangesChanged" />
                         <label class="form-check-label small" for="keepChangesCheck">

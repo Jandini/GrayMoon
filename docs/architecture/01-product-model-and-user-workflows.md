@@ -422,6 +422,8 @@ GrayMoon can create a branch across Workspace repositories.
 
 The branch operation can use a selected base and coordinates state persistence after checkout.
 
+When a repository already has a local branch of that name, GrayMoon checks that branch out as it is and creates nothing. The chosen base is not used there, so the branch may be older than the user expects. GrayMoon says so in a warning that names the repositories, for New Branch, Create Branches and Prepare Workspace alike.
+
 ### Switch Branch
 
 GrayMoon can switch repositories to a common branch.
@@ -865,6 +867,8 @@ whether explicit destructive confirmation is required
 The UI then asks for appropriate choices such as remote branch deletion or force deletion where the current policy permits it.
 
 Execution is separate from analysis.
+
+A branch delete that fails (the remote refuses it, or Git will not delete the local branch) does not stop the return: the repository still ends on its default branch. GrayMoon then shows a warning that names the repository and the branch that is still there, instead of reporting a plain success. Repositories that were left out because they are on a tag or read only are named as information.
 
 This pattern is important for automation because safety logic is not owned solely by the modal.
 

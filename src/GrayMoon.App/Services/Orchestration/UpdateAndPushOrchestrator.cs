@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -56,6 +57,8 @@ public sealed class UpdateAndPushOrchestrator(
         var handedLevels = new List<int>();
         int? updateStoppedAfterLevel = null;
         var laneEnded = false;
+        // What the push lane left out by policy (read only, on a tag). Set once by the lane before its first level.
+        IReadOnlyList<RepositorySkip> pushSkipped = [];
 
         // The lane has its own scope (its own DbContext): it runs concurrently with the update, which owns the caller's.
         // RunPushLaneAsync also gives every level a scope of its own, since the update rewrites rows between levels.
@@ -82,7 +85,8 @@ public sealed class UpdateAndPushOrchestrator(
                     },
                     restorePackages,
                     runId,
-                    cancellationToken);
+                    cancellationToken,
+                    onSkipped: skipped => Volatile.Write(ref pushSkipped, skipped));
             }
             finally
             {
@@ -159,7 +163,10 @@ public sealed class UpdateAndPushOrchestrator(
         }
 
         var push = BuildPushResult(
-            pushRepoErrors, pushLevelErrors, laneFault, laneReader.LastTakenLevel, laneReader.TakenCount, handedLevels, updateStoppedAfterLevel, setLevelError);
+            pushRepoErrors, pushLevelErrors, laneFault, laneReader.LastTakenLevel, laneReader.TakenCount, handedLevels, updateStoppedAfterLevel, setLevelError) with
+        {
+            Skipped = Volatile.Read(ref pushSkipped),
+        };
         var failedPushLevel = pushLevelErrors.Count == 0 ? "none" : string.Join(",", pushLevelErrors.Keys.OrderBy(level => level));
         logger.LogInformation(
             "[UpdateAndPushOrchestrator {RunId}] Workspace {WorkspaceId}: finished. UpdateSuccess={UpdateSuccess}, PushSuccess={PushSuccess}, PushedRepoCount={PushedRepoCount}, FailedPushLevel={FailedPushLevel}",

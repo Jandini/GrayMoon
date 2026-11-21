@@ -259,6 +259,7 @@ public sealed partial class WorkspaceSyncHandler(
         // Snapshot reads stay sequential on one DbContext; worker work runs in parallel with per-repo scopes.
         var workItems = new List<(int RepoId, string BranchName, bool DeleteRemote, bool ClosePr, int? PrNumber)>(ids.Count);
         var repoErrors = new ConcurrentDictionary<int, string>();
+        var repoWarnings = new ConcurrentDictionary<int, string>();
         var skippedAlreadyOnDefault = 0;
         var skippedByPolicy = new List<RepositorySkip>();
 
@@ -322,7 +323,7 @@ public sealed partial class WorkspaceSyncHandler(
                         }
                     }
 
-                    var (success, errMsg) = await repoGit.ReturnToDefaultDirectAsync(
+                    var outcome = await repoGit.ReturnToDefaultDirectAsync(
                         workspaceId,
                         contextId,
                         item.RepoId,
@@ -331,8 +332,10 @@ public sealed partial class WorkspaceSyncHandler(
                         allowForceDeleteLocalBranch: options.AllowForceDeleteLocalBranch,
                         cancellationToken);
 
-                    if (!success)
-                        repoErrors[item.RepoId] = errMsg ?? "Return to default failed.";
+                    if (!outcome.Success)
+                        repoErrors[item.RepoId] = outcome.ErrorMessage ?? "Return to default failed.";
+                    else if (outcome.Warning is { } warning)
+                        repoWarnings[item.RepoId] = warning;
                 }
                 finally
                 {
@@ -347,11 +350,26 @@ public sealed partial class WorkspaceSyncHandler(
         // One workspace-wide recompute after the whole batch (avoids N concurrent recompute races).
         await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
-        return (repoErrors.Count == 0
-            ? OperationResult.Ok()
-            : OperationResult.Fail("Return to default failed for one or more repositories.", repoErrors)) with
+        if (repoErrors.Count > 0)
+        {
+            // Warnings are only for a run that succeeded, so a branch that was not deleted in a repository that did
+            // return is written to the log here; the result names the repositories that failed.
+            foreach (var warning in repoWarnings.Values)
+                logger.LogWarning("Return to default: {Warning}", warning);
+
+            return OperationResult.Fail("Return to default failed for one or more repositories.", repoErrors) with
+            {
+                Skipped = skippedByPolicy,
+            };
+        }
+
+        // In the order the repositories were asked for, so the summary is the same on every run.
+        var warnings = ids.Where(repoWarnings.ContainsKey).Select(id => repoWarnings[id]).ToList();
+        return OperationResult.Ok() with
         {
             Skipped = skippedByPolicy,
+            Warnings = warnings.Count > 0 ? warnings : null,
+            WarningSummary = ReturnToDefaultWarnings.Summarize(warnings),
         };
     }
 
@@ -394,8 +412,16 @@ public sealed partial class WorkspaceSyncHandler(
                 .Where(r => !r.IsAlreadyOnDefault && !r.IsOnTag)
                 .ToList();
 
+            // Repositories the policy left out (on a tag, read only) are named in the result, not dropped silently.
+            var skipped = plan.Repositories
+                .Where(r => r.IsOnTag)
+                .Select(r => r.IsReference
+                    ? new RepositorySkip(r.RepositoryId, r.RepositoryName, RepositoryOperationReason.Reference, RepositoryOperationPolicy.ReferenceMessage)
+                    : new RepositorySkip(r.RepositoryId, r.RepositoryName, RepositoryOperationReason.OnTag, RepositoryOperationPolicy.OnTagMessage))
+                .ToList();
+
             if (actionable.Count == 0)
-                return new UnattendedReturnToDefaultResult(true, null);
+                return new UnattendedReturnToDefaultResult(true, null) { Skipped = skipped };
 
             await using var scope = serviceScopeFactory.CreateAsyncScope();
             var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
@@ -411,6 +437,7 @@ public sealed partial class WorkspaceSyncHandler(
             // first failure it hit.
             var returnDone = 0;
             string? firstError = null;
+            var warnings = new List<string>();
             using (var semaphore = new SemaphoreSlim(_maxConcurrent))
             {
                 var tasks = actionable.Select(async repo =>
@@ -441,19 +468,25 @@ public sealed partial class WorkspaceSyncHandler(
                 });
 
                 var results = await Task.WhenAll(tasks);
-                foreach (var (success, errMsg) in results)
+                foreach (var outcome in results)
                 {
-                    if (!success)
-                        firstError ??= errMsg ?? "Return to default failed. Return to default was aborted.";
+                    if (!outcome.Success)
+                        firstError ??= outcome.ErrorMessage ?? "Return to default failed. Return to default was aborted.";
+                    else if (outcome.Warning is { } warning)
+                        warnings.Add(warning);
                 }
             }
 
             await git.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
             if (firstError != null)
+            {
+                foreach (var warning in warnings)
+                    logger.LogWarning("Return to default: {Warning}", warning);
                 return new UnattendedReturnToDefaultResult(false, firstError);
+            }
 
-            return new UnattendedReturnToDefaultResult(true, null);
+            return new UnattendedReturnToDefaultResult(true, null) { Warnings = warnings, Skipped = skipped };
         }
         catch (OperationCanceledException)
         {

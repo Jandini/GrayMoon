@@ -38,6 +38,63 @@ public sealed class ReturnToDefaultBranchCommandTests
         Assert.Equal("matt", remoteDelete.BranchName);
     }
 
+    /// <summary>
+    /// The command used to log a failed remote delete and answer plain success, so a user who ticked "delete remote
+    /// branch" was told it worked while the branch was still on the remote.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_remote_branch_delete_is_reported_and_the_return_still_succeeds()
+    {
+        using var workspace = new TempWorkspaceRoot("ws", "repo");
+        var git = new RecordingGitService { RemoteDeleteError = "remote: Permission to acme/repo denied" };
+
+        var response = await ExecuteAsync(workspace, git, deleteRemoteBranch: true);
+
+        Assert.True(response.Success);
+        Assert.Equal("main", response.CurrentBranch);
+        Assert.Equal("remote: Permission to acme/repo denied", response.RemoteBranchDeleteError);
+        Assert.Null(response.LocalBranchDeleteError);
+    }
+
+    [Fact]
+    public async Task A_failed_local_branch_delete_is_reported_and_the_return_still_succeeds()
+    {
+        using var workspace = new TempWorkspaceRoot("ws", "repo");
+        var git = new RecordingGitService { LocalDeleteError = "error: the branch 'matt' is not fully merged" };
+
+        var response = await ExecuteAsync(workspace, git, deleteRemoteBranch: false);
+
+        Assert.True(response.Success);
+        Assert.Null(response.RemoteBranchDeleteError);
+        Assert.Equal("error: the branch 'matt' is not fully merged", response.LocalBranchDeleteError);
+    }
+
+    [Fact]
+    public async Task Deletes_that_work_report_no_delete_error()
+    {
+        using var workspace = new TempWorkspaceRoot("ws", "repo");
+
+        var response = await ExecuteAsync(workspace, new RecordingGitService(), deleteRemoteBranch: true);
+
+        Assert.True(response.Success);
+        Assert.Null(response.RemoteBranchDeleteError);
+        Assert.Null(response.LocalBranchDeleteError);
+    }
+
+    private static Task<GrayMoon.Worker.Jobs.Response.ReturnToDefaultBranchResponse> ExecuteAsync(
+        TempWorkspaceRoot workspace, RecordingGitService git, bool deleteRemoteBranch)
+        => new ReturnToDefaultBranchCommand(git, new StubRepositoryReader(), new StubRepositoryStateProbe(), NullLogger<ReturnToDefaultBranchCommand>.Instance)
+            .ExecuteAsync(new ReturnToDefaultBranchRequest
+            {
+                WorkspaceRoot = workspace.Path,
+                WorkspaceName = "ws",
+                RepositoryName = "repo",
+                CurrentBranchName = "matt",
+                BearerToken = "connector-token",
+                DeleteRemoteBranch = deleteRemoteBranch,
+                ForceDeleteLocalBranch = false,
+            });
+
     private sealed class StubRepositoryStateProbe : IRepositoryStateProbe
     {
         public Task<RepositoryStateCapture> CaptureAsync(string repoPath, RepositoryStateProbeOptions options, CancellationToken ct = default)
@@ -52,11 +109,18 @@ public sealed class ReturnToDefaultBranchCommandTests
         public sealed record DeleteCall(string BranchName, bool IsRemote, bool Force, bool SkipHooks, string? BearerToken);
 
 
+        /// <summary>What the remote delete answers. Null means it works.</summary>
+        public string? RemoteDeleteError { get; init; }
+
+        /// <summary>What the local delete answers. Null means it works.</summary>
+        public string? LocalDeleteError { get; init; }
+
         public Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(
             string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
         {
             DeleteCalls.Add(new DeleteCall(branchName, isRemote, force, skipHooks, bearerToken));
-            return Task.FromResult<(bool, string?)>((true, null));
+            var error = isRemote ? RemoteDeleteError : LocalDeleteError;
+            return Task.FromResult<(bool, string?)>((error is null, error));
         }
 
         public Task<(bool Success, string? ErrorMessage)> FetchAsync(string repoPath, bool includeTags, string? bearerToken, CancellationToken ct, bool skipHooks = false)
@@ -80,7 +144,7 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task AbortMergeAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, bool HasConflicts, IReadOnlyList<string> ConflictFiles, string? ErrorMessage)> MergeFromRemoteAsync(string repoPath, string remoteBranch, CancellationToken ct) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
+        public Task<(bool Success, string? ErrorMessage, bool AlreadyExisted)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> CheckoutTagAsync(string repoPath, string tagName, CancellationToken ct) => throw new NotImplementedException();
         public Task<(bool Success, string? ErrorMessage)> CheckoutCommitAsync(string repoPath, string commit, CancellationToken ct) => throw new NotImplementedException();
@@ -95,7 +159,7 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<(bool Success, string? Error)> CheckoutTrackingAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? Error, IReadOnlyList<string> KeptFiles)> CheckoutTrackingKeepingFilesAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
-        public Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
+        public Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, CancellationToken ct) => throw new NotImplementedException();
         public Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct) => throw new NotImplementedException();
         public Task<GrayMoon.Worker.Models.SyncHookRemovalTarget> ResolveSyncHookRemovalAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
         public GrayMoon.Worker.Models.SyncHookRemovalResult RemoveSyncHooks(GrayMoon.Worker.Models.SyncHookRemovalTarget target) => throw new NotImplementedException();

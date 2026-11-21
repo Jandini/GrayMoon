@@ -189,7 +189,8 @@ public static class WorkspaceOperationsEndpoints
         }, cancellationToken);
     }
 
-    internal static IResult MapCombined(UpdateAndPushExecutionResult r)
+    /// <param name="branchAlreadyExisted">Prepare Workspace only: the repositories where the branch was already there and was checked out as it is. Null for Update and Push.</param>
+    internal static IResult MapCombined(UpdateAndPushExecutionResult r, IReadOnlyList<string>? branchAlreadyExisted = null)
     {
         var body = new
         {
@@ -200,6 +201,7 @@ public static class WorkspaceOperationsEndpoints
             pushed = r.PushedRepoCount > 0,
             pendingApprovalId = r.PendingApprovalId,
             push = r.Push,
+            branchAlreadyExisted,
         };
         return r.Status switch
         {
@@ -246,22 +248,23 @@ public static class WorkspaceOperationsEndpoints
                     error = PrepareWorkspaceResult.BranchesStoppedMessage,
                     branchErrors = prepared.BranchErrors,
                     skipped = prepared.Skipped,
+                    branchAlreadyExisted = prepared.BranchAlreadyExisted,
                 });
             }
 
             if (prepared.Combined is { } combined)
-                return MapCombined(combined);
+                return MapCombined(combined, prepared.BranchAlreadyExisted);
 
             if (!prepared.PushPending)
             {
                 return prepared.Success
-                    ? Results.Ok(new { success = true, pushed = false, skipped = prepared.Skipped })
-                    : Results.BadRequest(new { success = false, error = "Update failed.", skipped = prepared.Skipped });
+                    ? Results.Ok(new { success = true, pushed = false, skipped = prepared.Skipped, branchAlreadyExisted = prepared.BranchAlreadyExisted })
+                    : Results.BadRequest(new { success = false, error = "Update failed.", skipped = prepared.Skipped, branchAlreadyExisted = prepared.BranchAlreadyExisted });
             }
 
             var push = await pushOperations.PushPendingAsync(workspaceId, contextId, synchronizedPush: true, progress, ct);
             return push.Success
-                ? Results.Ok(new { success = true, pushed = true, skipped = prepared.Skipped.Concat(push.Skipped).DistinctBy(skip => skip.RepositoryId) })
+                ? Results.Ok(new { success = true, pushed = true, skipped = prepared.Skipped.Concat(push.Skipped).DistinctBy(skip => skip.RepositoryId), branchAlreadyExisted = prepared.BranchAlreadyExisted })
                 : Results.BadRequest(push);
         }, cancellationToken);
     }

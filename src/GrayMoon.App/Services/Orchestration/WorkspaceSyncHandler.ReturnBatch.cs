@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Services.Queries;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -160,6 +162,7 @@ public sealed partial class WorkspaceSyncHandler
         }
 
         var eligible = new List<(int Index, ReturnToDefaultRepositoryPlan Plan)>();
+        var skippedByPolicy = new List<RepositorySkip>();
         await using (var readScope = serviceScopeFactory.CreateAsyncScope())
         {
             var query = readScope.ServiceProvider.GetRequiredService<IWorkspaceRepositoryLinkListQueryService>();
@@ -183,7 +186,15 @@ public sealed partial class WorkspaceSyncHandler
                 var plan = ClassifyRepository(dto);
                 if (plan.IsAlreadyOnDefault || plan.IsOnTag)
                 {
-                    // Already on default, or on a tag: leave untouched (tags are never part of Return to Default).
+                    // Already on default, or left out by the policy (on a tag, read only): leave untouched. A repository
+                    // the policy left out is named in the result, so the caller can say it was skipped.
+                    if (plan.IsOnTag)
+                    {
+                        var decision = RepositoryOperationPolicy.Evaluate(
+                            RepositoryOperation.ReturnToDefault, RepositoryOperationScope.Bulk, dto.ToPolicySubject(isFeatureContext: false));
+                        skippedByPolicy.Add(new RepositorySkip(repositoryId, dto.RepositoryName ?? string.Empty, decision.Reason, decision.Message ?? string.Empty));
+                    }
+
                     results[index] = Completed(repositoryId, mutationAttempted: false, mutationCompleted: false);
                     ReportSettled(true);
                     continue;
@@ -262,7 +273,7 @@ public sealed partial class WorkspaceSyncHandler
             "Unattended return batch finished WorkspaceId={WorkspaceId} ContextId={ContextId} RepositoryCount={RepositoryCount} MutationCount={MutationCount} FailedCount={FailedCount} MaxActive={MaxActive} ReconciliationAttempted={ReconciliationAttempted} Stage={Stage}",
             workspaceId, contextId.Value, orderedIds.Count, admittedMutations, failedCount, maxActive[0], reconciliationAttempted, "batch");
 
-        return Finish(results, reconciliationAttempted, reconciliationSucceeded, reconciliationError);
+        return Finish(results, reconciliationAttempted, reconciliationSucceeded, reconciliationError) with { Skipped = skippedByPolicy };
 
         async Task FetchOneAsync(int index, int repositoryId)
         {
@@ -313,7 +324,7 @@ public sealed partial class WorkspaceSyncHandler
 
                 await using var repoScope = serviceScopeFactory.CreateAsyncScope();
                 var repoGit = repoScope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var (success, errorMessage) = await repoGit.ReturnToDefaultDirectAsync(
+                var outcome = await repoGit.ReturnToDefaultDirectAsync(
                     workspaceId,
                     contextId,
                     plan.RepositoryId,
@@ -322,9 +333,9 @@ public sealed partial class WorkspaceSyncHandler
                     allowForceDeleteLocalBranch: true,
                     cancellationToken);
 
-                results[index] = success
-                    ? Completed(plan.RepositoryId, mutationAttempted: true, mutationCompleted: true)
-                    : Failed(plan.RepositoryId, errorMessage ?? "Return to default failed.", UnattendedReturnFailureStage.Execution, mutationAttempted: true, mutationCompleted: false);
+                results[index] = outcome.Success
+                    ? Completed(plan.RepositoryId, mutationAttempted: true, mutationCompleted: true) with { Warning = outcome.Warning }
+                    : Failed(plan.RepositoryId, outcome.ErrorMessage ?? "Return to default failed.", UnattendedReturnFailureStage.Execution, mutationAttempted: true, mutationCompleted: false);
             }
             catch (OperationCanceledException)
             {

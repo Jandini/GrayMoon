@@ -118,6 +118,10 @@ public sealed class CreateBranchResponse
 
     [JsonPropertyName("fetchError")]
     public string? FetchError { get; set; }
+
+    /// <summary>True when a local branch of that name was already there: it was checked out as it is and the requested base was not used.</summary>
+    [JsonPropertyName("alreadyExisted")]
+    public bool AlreadyExisted { get; set; }
 }
 
 /// <summary>Worker DeleteBranch response (camelCase).</summary>
@@ -191,7 +195,23 @@ public sealed class ReturnToDefaultBranchResponse
     /// <summary>Authoritative post-checkout state with per-group probe markers. Null from workers that predate this field.</summary>
     [JsonPropertyName("state")]
     public GrayMoon.Abstractions.Notifications.RepositoryStateSnapshot? State { get; set; }
+
+    /// <summary>Set when the remote branch delete was asked for and failed; the return itself carried on.</summary>
+    [JsonPropertyName("remoteBranchDeleteError")]
+    public string? RemoteBranchDeleteError { get; set; }
+
+    /// <summary>Set when the local branch delete failed; the return itself carried on.</summary>
+    [JsonPropertyName("localBranchDeleteError")]
+    public string? LocalBranchDeleteError { get; set; }
 }
+
+/// <summary>
+/// API response for POST /api/branches/return-to-default (camelCase). <see cref="Warning"/> is set on a success whose
+/// remote or local branch could not be deleted: the repository is on the default branch and the branch is still there.
+/// </summary>
+public sealed record ReturnToDefaultApiResult(
+    [property: JsonPropertyName("success")] bool Success,
+    [property: JsonPropertyName("warning")] string? Warning);
 
 /// <summary>API response for POST /api/branches/delete (camelCase).</summary>
 public sealed class DeleteBranchApiResult
@@ -211,6 +231,13 @@ public sealed class CreateBranchApiResult
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+
+    /// <summary>
+    /// True on a success that created nothing: a local branch of that name was already there and was checked out as
+    /// it is, so the requested base was not used. Always false for set-upstream.
+    /// </summary>
+    [JsonPropertyName("alreadyExisted")]
+    public bool AlreadyExisted { get; set; }
 }
 
 /// <summary>Worker StageAndCommit response (camelCase).</summary>

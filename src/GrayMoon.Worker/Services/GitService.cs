@@ -622,10 +622,27 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false)
+    public async Task<(bool Success, string? ErrorMessage, bool AlreadyExisted)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(newBranchName) || string.IsNullOrWhiteSpace(baseBranchName))
-            return (false, "Invalid repository path or branch name");
+            return (false, "Invalid repository path or branch name", false);
+
+        var hooksArgs = GetHooksConfigArgs(skipHooks);
+
+        // A branch of that name is already there: it is checked out as it is, the requested base is not used, and
+        // the caller is told through AlreadyExisted so it can say so. Decided before the create, so a create that
+        // fails for any other reason (a bad base, local changes in the way) is a failure and never ends on another branch.
+        if (await reader.RefExistsAsync(repoPath, $"refs/heads/{newBranchName}", ct))
+        {
+            logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out the existing branch, base {BaseBranch} is not used.", newBranchName, repoPath, baseBranchName);
+            var (coExit, coOut, coErr) = await runner.RunAsync("git", [.. hooksArgs, "checkout", newBranchName, "--"], repoPath, null, ct);
+            if (coExit != 0)
+            {
+                logger.LogError("Git checkout of existing branch failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, newBranchName, coExit);
+                return (false, CombineOutput(coOut, coErr), true);
+            }
+            return (true, null, true);
+        }
 
         var trimmedBase = baseBranchName.Trim();
         var startPoint = trimmedBase;
@@ -636,28 +653,15 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (await reader.RefExistsAsync(repoPath, remoteCandidate, ct))
             startPoint = remoteCandidate;
 
-        var hooksPrefix = GetHooksConfigPrefix(skipHooks);
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout -b {newBranchName} --no-track {startPoint}", repoPath, ct);
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", [.. hooksArgs, "checkout", "-b", newBranchName, "--no-track", startPoint, "--"], repoPath, null, ct);
         if (exitCode != 0)
         {
-            if (await reader.RefExistsAsync(repoPath, $"refs/heads/{newBranchName}", ct))
-            {
-                logger.LogWarning("Branch {Branch} already exists in {RepoPath}; checking out existing branch.", newBranchName, repoPath);
-                var (coExit, coOut, coErr) = await runner.RunAsync("git", $"{hooksPrefix}checkout {newBranchName}", repoPath, ct);
-                if (coExit != 0)
-                {
-                    logger.LogError("Git checkout of existing branch failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, newBranchName, coExit);
-                    return (false, CombineOutput(coOut, coErr));
-                }
-                return (true, null);
-            }
             logger.LogError("Git create branch failed for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}, ExitCode={ExitCode}", repoPath, newBranchName, baseBranchName, exitCode);
-            return (false, CombineOutput(stdout, stderr));
+            return (false, CombineOutput(stdout, stderr), false);
         }
 
         logger.LogInformation("Git branch created for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}", repoPath, newBranchName, baseBranchName);
-        return (true, null);
+        return (true, null, false);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
@@ -1059,7 +1063,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct)
+    public async Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");

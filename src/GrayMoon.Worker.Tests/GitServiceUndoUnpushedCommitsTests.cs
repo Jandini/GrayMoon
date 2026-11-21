@@ -40,7 +40,7 @@ public sealed class GitServiceUndoUnpushedCommitsTests : IDisposable
         Git("checkout -b feature/x");
         CommitFile("design.md", "the work\n");
 
-        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: true, bearerToken: null, CancellationToken.None);
+        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: true, CancellationToken.None);
 
         Assert.True(success, error);
         Assert.Equal(_mainSha, Head());
@@ -57,7 +57,7 @@ public sealed class GitServiceUndoUnpushedCommitsTests : IDisposable
         Git("add -A");
         Git("commit -m change");
 
-        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: false, bearerToken: null, CancellationToken.None);
+        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: false, CancellationToken.None);
 
         Assert.True(success, error);
         Assert.Equal(_mainSha, Head());
@@ -76,7 +76,7 @@ public sealed class GitServiceUndoUnpushedCommitsTests : IDisposable
         await _git.SetDivergenceBaseBranchAsync(_repo, "parent", CancellationToken.None);
         CommitFile("feature.txt", "feature work\n");
 
-        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: true, bearerToken: null, CancellationToken.None);
+        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: true, CancellationToken.None);
 
         Assert.True(success, error);
         Assert.Equal(parentSha, Head());
@@ -94,7 +94,7 @@ public sealed class GitServiceUndoUnpushedCommitsTests : IDisposable
         var pushedSha = Head();
         CommitFile("local.txt", "local\n");
 
-        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: true, bearerToken: null, CancellationToken.None);
+        var (success, error) = await _git.ResetToRemoteAsync(_repo, "feature/x", keepChanges: true, CancellationToken.None);
 
         Assert.True(success, error);
         Assert.Equal(pushedSha, Head());

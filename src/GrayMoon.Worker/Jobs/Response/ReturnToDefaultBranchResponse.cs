@@ -54,4 +54,12 @@ public sealed class ReturnToDefaultBranchResponse
     /// <summary>Authoritative post-checkout state with per-group probe markers. Null from workers that predate this field.</summary>
     [JsonPropertyName("state")]
     public RepositoryStateSnapshot? State { get; set; }
+
+    /// <summary>Set when the remote branch delete was asked for and failed. The return itself carried on; the branch is still on the remote.</summary>
+    [JsonPropertyName("remoteBranchDeleteError")]
+    public string? RemoteBranchDeleteError { get; set; }
+
+    /// <summary>Set when the local branch delete failed. The return itself carried on; the branch is still in the repository.</summary>
+    [JsonPropertyName("localBranchDeleteError")]
+    public string? LocalBranchDeleteError { get; set; }
 }

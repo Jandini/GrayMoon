@@ -89,6 +89,7 @@ public sealed class SyncCharacterizationTests
 
         Assert.True(result.Success, result.Error);
         Assert.Empty(Calls(ctx, "ReturnToDefaultBranch"));
+        AssertSkippedOnTag(ctx, result.Skipped);
         Assert.Equal(Tag, (await ctx.ReadLinkAsync()).CheckedOutTag);
     }
 
@@ -104,6 +105,7 @@ public sealed class SyncCharacterizationTests
         Assert.True(result.Completed);
         Assert.Null(result.AbortReason);
         Assert.Empty(Calls(ctx, "ReturnToDefaultBranch"));
+        AssertSkippedOnTag(ctx, result.Skipped);
     }
 
     [Fact]
@@ -119,6 +121,16 @@ public sealed class SyncCharacterizationTests
         Assert.True(repo.Completed);
         Assert.False(repo.MutationAttempted);
         Assert.Empty(Calls(ctx, "ReturnToDefaultBranch"));
+        AssertSkippedOnTag(ctx, batch.Skipped);
+    }
+
+    /// <summary>The repository that was left out is named in the result with the reason, not dropped silently.</summary>
+    private static void AssertSkippedOnTag(SyncStateTestContext ctx, IReadOnlyList<GrayMoon.Application.Repositories.Policy.RepositorySkip> skipped)
+    {
+        var skip = Assert.Single(skipped);
+        Assert.Equal(ctx.RepositoryId, skip.RepositoryId);
+        Assert.Equal(GrayMoon.Application.Repositories.Policy.RepositoryOperationReason.OnTag, skip.Reason);
+        Assert.False(string.IsNullOrWhiteSpace(skip.RepositoryName));
     }
 
     private static async Task UndoPushAsync(SyncStateTestContext ctx, WorkspaceFeatureContextId contextId)
