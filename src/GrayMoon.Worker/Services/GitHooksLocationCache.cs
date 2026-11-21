@@ -81,6 +81,9 @@ internal sealed class GitHooksLocationCache
         return (location, GitHooksLocationSource.NativeUncacheable);
     }
 
+    /// <summary>Drops the remembered location, so the next call asks git again.</summary>
+    public void Forget(string repoPath) => _entries.TryRemove(NormalizeKey(repoPath), out _);
+
     private static string NormalizeKey(string repoPath)
     {
         try { return Path.TrimEndingDirectorySeparator(Path.GetFullPath(repoPath)); }

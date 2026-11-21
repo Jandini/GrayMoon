@@ -71,6 +71,18 @@ public static class WorkerHubMethods
     /// <summary>App → Worker: roll back the Workspace root of a failed restore; deletes only an empty folder or a clean clone of the restored repository.</summary>
     public const string DiscardWorkspaceRoot = "DiscardWorkspaceRoot";
 
+    /// <summary>App → Worker: repositories leave a Workspace; release the Worker's file watchers on their folders and remove the Git hooks GrayMoon installed there. Deletes nothing else.</summary>
+    public const string DetachRepositories = "DetachRepositories";
+
+    /// <summary>App → Worker: list the repository folders the Worker holds file watchers on, for one Workspace or for all.</summary>
+    public const string GetGitChangesMonitoring = "GetGitChangesMonitoring";
+
+    /// <summary>App → Worker: list the folders directly under the workspace root (candidates for Import from disk).</summary>
+    public const string ListWorkspaceRootFolders = "ListWorkspaceRootFolders";
+
+    /// <summary>App → Worker: read-only look at one folder under the workspace root: its Git repositories, their origins and its Workspace definition file.</summary>
+    public const string InspectWorkspaceFolder = "InspectWorkspaceFolder";
+
     /// <summary>App → Worker: write one text file inside a repository working tree (atomic, UTF-8 without BOM, optionally only when the content changed).</summary>
     public const string WriteRepositoryFile = "WriteRepositoryFile";
 

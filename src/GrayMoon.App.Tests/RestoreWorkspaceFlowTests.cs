@@ -372,7 +372,7 @@ public sealed class RestoreWorkspaceFlowTests
     [Fact]
     public void Restore_dialog_uses_the_large_modal_and_a_soft_validation_callout()
     {
-        Assert.Equal("modal-dialog modal-lg modal-dialog-centered", RestoreWorkspaceModal.DialogCssClass);
+        Assert.Equal("modal-dialog modal-lg modal-dialog-centered gm-workspace-dialog", RestoreWorkspaceModal.DialogCssClass);
         Assert.Contains("restore-validation-error", RestoreWorkspaceModal.ValidationCalloutClass, StringComparison.Ordinal);
         Assert.Contains("gm-callout--error", RestoreWorkspaceModal.ValidationCalloutClass, StringComparison.Ordinal);
     }

@@ -13,10 +13,6 @@
                     <button type="button" class="btn-close" @onclick="OnCancel"></button>
                 </div>
                 <div class="modal-body">
-                    @if (DirectoryAlreadyExists)
-                    {
-                        <div class="gm-callout gm-callout--warning mb-3" role="alert">@ExistingWorkspaceFolder.Callout(FolderIsWorkspaceRepository, WorkspaceRepositoryImported, ExistingRepositoryCount)</div>
-                    }
 
                     @if (ErrorMessage != null)
                     {
@@ -209,10 +205,7 @@
     [Parameter] public string WorkspaceName { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> WorkspaceNameChanged { get; set; }
     [Parameter] public string WorkspacePath { get; set; } = string.Empty;
-    [Parameter] public bool DirectoryAlreadyExists { get; set; }
-    [Parameter] public int ExistingRepositoryCount { get; set; }
-    [Parameter] public bool FolderIsWorkspaceRepository { get; set; }
-    [Parameter] public bool WorkspaceRepositoryImported { get; set; }
+
     [Parameter] public bool IsNameDisabled { get; set; }
     [Parameter] public string? NameDisabledHint { get; set; }
     [Parameter] public bool IsSaving { get; set; }

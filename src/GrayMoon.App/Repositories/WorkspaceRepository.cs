@@ -168,39 +168,8 @@ public sealed class WorkspaceRepository(
         await transaction.CommitAsync();
     }
 
-    public async Task DeleteAsync(int workspaceId)
-    {
-        var workspace = await _dbContext.Workspaces
-            .FirstOrDefaultAsync(item => item.WorkspaceId == workspaceId);
-
-        if (workspace == null)
-        {
-            return;
-        }
-
-        // Feature folders, worktrees and branches stay on disk. Removing the Workspace only drops
-        // GrayMoon's record of them. Clear the self-reference first so ON DELETE RESTRICT on
-        // BaseWorkspaceFeatureId cannot block the cascade.
-        var featureCount = await _dbContext.WorkspaceFeatures.CountAsync(f => f.WorkspaceId == workspaceId);
-        if (featureCount > 0)
-        {
-            var basedOnAnother = await _dbContext.WorkspaceFeatures
-                .Where(f => f.WorkspaceId == workspaceId && f.BaseWorkspaceFeatureId != null)
-                .ToListAsync();
-            foreach (var feature in basedOnAnother)
-                feature.BaseWorkspaceFeatureId = null;
-            if (basedOnAnother.Count > 0)
-                await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Persistence: dropping Feature tracking for deleted Workspace. WorkspaceId={WorkspaceId}, Name={Name}, FeatureCount={FeatureCount}. Folders on disk are left in place.",
-                workspaceId, workspace.Name, featureCount);
-        }
-
-        _dbContext.Workspaces.Remove(workspace);
-        await _dbContext.SaveChangesAsync();
-        _logger.LogInformation("Persistence: saved Workspace. Action=Delete, WorkspaceId={WorkspaceId}, Name={Name}", workspaceId, workspace.Name);
-    }
+    // A Workspace is removed through IWorkspaceRepositoryOperations.RemoveWorkspaceAsync, never here: its folders are
+    // detached first (the Worker releases its watchers and removes GrayMoon's Git hooks), and the row goes only after that.
 
     public async Task UpdateSyncMetadataAsync(int workspaceId, DateTime lastSyncedAt, bool isInSync)
     {
@@ -564,17 +533,21 @@ public sealed class WorkspaceRepository(
         await transaction.CommitAsync();
     }
 
-    /// <summary>
-    /// Does the actual repository-membership swap. Never opens its own transaction, so it can run
-    /// either on its own (via <see cref="ReplaceRepositoriesAsync"/>) or inside a caller's existing
-    /// transaction (<see cref="UpdateAsync"/>, so a membership failure rolls back a rename too).
-    /// </summary>
-    private async Task ReplaceRepositoriesCoreAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds)
+    /// <summary>What a membership save would change. The one copy of the rule: <see cref="ReplaceRepositoriesCoreAsync"/> applies it and <see cref="GetSourceLinkIdsToRemoveAsync"/> previews it.</summary>
+    private sealed record MembershipPlan(
+        List<WorkspaceRepositoryLink> Current,
+        HashSet<int> ValidSet,
+        List<int> InvalidIds,
+        List<WorkspaceRepositoryLink> ToRemove,
+        List<int> ToAdd,
+        bool Unchanged);
+
+    private static async Task<MembershipPlan> PlanMembershipAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds, CancellationToken cancellationToken = default)
     {
         var current = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         var requestedIds = repositoryIds.Distinct().ToHashSet();
 
@@ -582,16 +555,9 @@ public sealed class WorkspaceRepository(
             .AsNoTracking()
             .Where(r => requestedIds.Contains(r.RepositoryId))
             .Select(r => r.RepositoryId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         var validSet = validRepoIds.ToHashSet();
-
         var invalidIds = requestedIds.Except(validSet).ToList();
-        if (invalidIds.Count > 0)
-        {
-            _logger.LogWarning(
-                "ReplaceRepositories: WorkspaceId={WorkspaceId}, {InvalidCount} repository ID(s) requested by UI no longer exist in the database and will be skipped. StaleIds=[{StaleIds}]",
-                workspaceId, invalidIds.Count, string.Join(", ", invalidIds));
-        }
 
         // A Workspace-role link is never part of membership replacement: it is never removed here, and its
         // repository is never added again as a Source.
@@ -606,9 +572,68 @@ public sealed class WorkspaceRepository(
             .Select(wr => wr.RepositoryId)
             .ToHashSet();
 
+        var toRemove = current
+            .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && !validSet.Contains(wr.RepositoryId))
+            .ToList();
+        var toAdd = validSet.Except(existingRepoIds).ToList();
+        return new MembershipPlan(current, validSet, invalidIds, toRemove, toAdd, existingRepoIds.SetEquals(validSet));
+    }
+
+    /// <summary>
+    /// The Source links that <see cref="UpdateAsync"/> with the same arguments would remove, by link id. Throws the
+    /// same <see cref="InvalidOperationException"/> that <see cref="UpdateAsync"/> would for a taken name, a missing
+    /// Workspace, or a change that Features block, so a caller can refuse before it touches anything on disk.
+    /// </summary>
+    public async Task<IReadOnlyList<int>> GetSourceLinkIdsToRemoveAsync(
+        int workspaceId,
+        string name,
+        IReadOnlyCollection<int> repositoryIds,
+        string? rootPath,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeName(name);
+        var normalizedRootPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath.Trim();
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        if (await NameExistsAsync(db, normalized, workspaceId))
+            throw new InvalidOperationException("Workspace name already exists.");
+
+        var workspace = await db.Workspaces.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.WorkspaceId == workspaceId, cancellationToken)
+            ?? throw new InvalidOperationException("Workspace not found.");
+
+        var hasFeatures = await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId, cancellationToken);
+        var nameChanged = !string.Equals(workspace.Name, normalized, StringComparison.Ordinal);
+        var rootPathChanged = !string.Equals(workspace.RootPath, normalizedRootPath, StringComparison.Ordinal);
+        if ((nameChanged || rootPathChanged) && hasFeatures)
+            throw new InvalidOperationException("Rename and root changes are not possible while Features exist. Remove Features first.");
+
+        var plan = await PlanMembershipAsync(db, workspaceId, repositoryIds, cancellationToken);
+        if (plan.Unchanged)
+            return [];
+        if (hasFeatures)
+            throw new InvalidOperationException(MembershipBlockedWhileFeaturesExist);
+        return plan.ToRemove.Select(wr => wr.WorkspaceRepositoryId).ToList();
+    }
+
+    /// <summary>
+    /// Does the actual repository-membership swap. Never opens its own transaction, so it can run
+    /// either on its own (via <see cref="ReplaceRepositoriesAsync"/>) or inside a caller's existing
+    /// transaction (<see cref="UpdateAsync"/>, so a membership failure rolls back a rename too).
+    /// </summary>
+    private async Task ReplaceRepositoriesCoreAsync(AppDbContext db, int workspaceId, IReadOnlyCollection<int> repositoryIds)
+    {
+        var plan = await PlanMembershipAsync(db, workspaceId, repositoryIds);
+        if (plan.InvalidIds.Count > 0)
+        {
+            _logger.LogWarning(
+                "ReplaceRepositories: WorkspaceId={WorkspaceId}, {InvalidCount} repository ID(s) requested by UI no longer exist in the database and will be skipped. StaleIds=[{StaleIds}]",
+                workspaceId, plan.InvalidIds.Count, string.Join(", ", plan.InvalidIds));
+        }
+
         // An unchanged membership set is a no-op: a save that does not actually add or remove any
         // repository must never be blocked by the Features-exist guard below.
-        if (existingRepoIds.SetEquals(validSet))
+        if (plan.Unchanged)
             return;
 
         // A Feature is created with one worktree per repository that belonged to the Workspace at
@@ -617,10 +642,10 @@ public sealed class WorkspaceRepository(
         if (await db.WorkspaceFeatures.AnyAsync(f => f.WorkspaceId == workspaceId))
             throw new InvalidOperationException(MembershipBlockedWhileFeaturesExist);
 
-        var toRemove = current
-            .Where(wr => wr.Role != WorkspaceRepositoryRole.Workspace && !validSet.Contains(wr.RepositoryId))
-            .ToList();
-        var toAdd = validSet.Except(existingRepoIds).ToList();
+        var current = plan.Current;
+        var validSet = plan.ValidSet;
+        var toRemove = plan.ToRemove;
+        var toAdd = plan.ToAdd;
 
         _logger.LogDebug(
             "ReplaceRepositories: WorkspaceId={WorkspaceId}, CurrentLinks={CurrentLinks}, ToRemove={ToRemoveCount} [{ToRemoveIds}], ToAdd={ToAddCount} [{ToAddIds}]",

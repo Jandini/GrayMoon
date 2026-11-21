@@ -150,6 +150,14 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid GetAiProviders args"),
             WorkerHubMethods.GenerateAiText => JsonSerializer.Deserialize<GenerateAiTextRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GenerateAiText args"),
+            WorkerHubMethods.DetachRepositories => JsonSerializer.Deserialize<DetachRepositoriesRequest>(json, options)
+                ?? throw new ArgumentException("Invalid DetachRepositories args"),
+            WorkerHubMethods.GetGitChangesMonitoring => JsonSerializer.Deserialize<GetGitChangesMonitoringRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetGitChangesMonitoring args"),
+            WorkerHubMethods.ListWorkspaceRootFolders => JsonSerializer.Deserialize<ListWorkspaceRootFoldersRequest>(json, options)
+                ?? throw new ArgumentException("Invalid ListWorkspaceRootFolders args"),
+            WorkerHubMethods.InspectWorkspaceFolder => JsonSerializer.Deserialize<InspectWorkspaceFolderRequest>(json, options)
+                ?? throw new ArgumentException("Invalid InspectWorkspaceFolder args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };
     }

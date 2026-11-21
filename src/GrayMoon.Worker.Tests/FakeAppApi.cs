@@ -170,5 +170,12 @@ internal sealed class FakeWorkspaceCapabilityProvider(RepositoryOperationCapabil
 
     public void Remember(int workspaceId, RepositoryOperationCapabilities? capabilities) { }
 
-    public void Invalidate(int workspaceId) { }
+    /// <summary>What the App is taken to answer for "does this workspace exist".</summary>
+    public bool WorkspaceGone { get; set; }
+
+    public List<int> Invalidated { get; } = [];
+
+    public Task<bool> IsWorkspaceGoneAsync(int workspaceId, CancellationToken cancellationToken = default) => Task.FromResult(WorkspaceGone);
+
+    public void Invalidate(int workspaceId) => Invalidated.Add(workspaceId);
 }

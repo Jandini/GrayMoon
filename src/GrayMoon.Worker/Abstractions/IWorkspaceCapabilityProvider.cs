@@ -33,6 +33,13 @@ public interface IWorkspaceCapabilityProvider
     /// </summary>
     void Remember(int workspaceId, RepositoryOperationCapabilities? capabilities);
 
+    /// <summary>
+    /// True only when the App answered that <paramref name="workspaceId"/> does not exist (HTTP 404). An App that
+    /// cannot be asked, or any other failure, is false: "could not ask" is never treated as "gone". A workspace
+    /// whose capabilities are cached is not gone and costs no HTTP.
+    /// </summary>
+    Task<bool> IsWorkspaceGoneAsync(int workspaceId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
     /// <summary>Drops the cached capabilities for one workspace, so the next resolution refetches them.</summary>
     void Invalidate(int workspaceId);
 }

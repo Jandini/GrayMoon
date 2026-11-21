@@ -80,7 +80,7 @@ public interface IGitService
     Task SetDivergenceBaseBranchAsync(string repoPath, string? divergenceBaseBranch, CancellationToken ct);
     /// <summary>Stages the given paths (relative to repo root) and creates a commit with the given message. Returns (success, committed, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for add and commit (orchestrated flows such as dependency update that persist state themselves).</summary>
     Task<(bool Success, bool Committed, string? ErrorMessage)> StageAndCommitAsync(string repoPath, IReadOnlyList<string> pathsToStage, string commitMessage, CancellationToken ct, bool skipHooks = false);
-    /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist, pushes it upstream first using <paramref name="bearerToken"/>. Returns (success, errorMessage).</summary>
+    /// <summary>Resets the current branch to origin/<paramref name="branchName"/>. When <paramref name="keepChanges"/> is true uses --mixed (changes remain in working tree); otherwise --hard. If the remote branch does not exist (never pushed), resets to the merge base with the ref its outgoing commits are counted against (<see cref="IGitRepositoryReader.GetNoUpstreamCompareRefAsync"/>) and fails without changing anything when there is none. Never contacts the remote; <paramref name="bearerToken"/> is unused. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct);
     /// <summary>Runs <c>git clone &lt;url&gt; .</c> inside <paramref name="targetDir"/> (an empty directory), so the repository root is that directory. Failure carries a sanitized message.</summary>
     Task<GitCloneResult> CloneIntoAsync(string targetDir, string cloneUrl, string? bearerToken, CancellationToken ct);
@@ -111,6 +111,19 @@ public interface IGitService
     /// is a directory.
     /// </summary>
     Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct);
+
+    /// <summary>
+    /// Asks git where the repository keeps the hooks GrayMoon installed, before they are removed. Runs git, so it is
+    /// called before an exclusive claim covers the folder. A missing folder and a folder without <c>.git</c> are
+    /// settled as successes.
+    /// </summary>
+    Task<SyncHookRemovalTarget> ResolveSyncHookRemovalAsync(string repoPath, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes GrayMoon's sync hooks from the resolved hooks folders and renames the user's own replaced hooks back.
+    /// Only files that carry GrayMoon's marker are deleted. File work only, no process.
+    /// </summary>
+    SyncHookRemovalResult RemoveSyncHooks(SyncHookRemovalTarget target);
 
 
 

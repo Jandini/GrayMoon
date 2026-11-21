@@ -14,7 +14,38 @@ public interface IWorkspaceRepositoryOperations
     /// </summary>
     Task<OperationResult> EnableWorkspaceRepositoryAsync(int workspaceId, int repositoryId, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default, string? setupBranchName = null);
 
-    /// <summary>Removes the Workspace-role link only. Never deletes files or .git.</summary>
+    /// <summary>
+    /// Removes a Workspace from GrayMoon. Needs a connected Worker: under the Workspace's structural lock the Worker
+    /// lets go of its file watchers on the repository folders and removes the Git hooks GrayMoon installed there, and
+    /// only then the Workspace row goes. Refused while the Workspace has Features. Nothing else on disk is touched.
+    /// On failure nothing is deleted: <c>Error</c> says what was not done and <c>RepoErrors</c> names each repository
+    /// and file that stopped it. <c>Warnings</c> after a success tell what was put back (the user's own hooks).
+    /// </summary>
+    Task<OperationResult> RemoveWorkspaceAsync(int workspaceId, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Names of the Workspace's Features, ordered. Remove Workspace is refused while this is not empty.</summary>
+    Task<IReadOnlyList<string>> GetFeatureNamesAsync(int workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves name, root, profile and the Source repository list of a Workspace. When the save removes a Source
+    /// repository, its folder is detached first (Worker required, structural lock) exactly as in
+    /// <see cref="RemoveWorkspaceAsync"/>, and a folder that cannot be cleaned stops the save. A save that removes
+    /// nothing needs neither. A refusal (name taken, Features exist) is returned as a failure, not thrown.
+    /// </summary>
+    Task<OperationResult> SaveWorkspaceAsync(
+        int workspaceId,
+        string name,
+        IReadOnlyCollection<int> repositoryIds,
+        string? rootPath,
+        WorkspaceType? type = null,
+        WorkspaceVersioningMode? versioningMode = null,
+        WorkspaceCiProvider? ciProvider = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes the Workspace-role link. The Worker first removes GrayMoon's Git hooks from the Workspace folder and
+    /// lets go of its watcher there (Worker required, structural lock). Never deletes files or .git.
+    /// </summary>
     Task<OperationResult> DisableWorkspaceRepositoryAsync(int workspaceId, CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -107,5 +107,7 @@ public sealed class DeleteBranchCommandTests
         public Task<(bool Success, string? Error)> SetUnbornHeadAsync(string repoPath, string branch, CancellationToken ct) => throw new NotSupportedException();
         public Task<(bool Success, string? ErrorMessage)> ResetToRemoteAsync(string repoPath, string branchName, bool keepChanges, string? bearerToken, CancellationToken ct) => throw new NotImplementedException();
         public Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct) => throw new NotImplementedException();
+        public Task<GrayMoon.Worker.Models.SyncHookRemovalTarget> ResolveSyncHookRemovalAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
+        public GrayMoon.Worker.Models.SyncHookRemovalResult RemoveSyncHooks(GrayMoon.Worker.Models.SyncHookRemovalTarget target) => throw new NotImplementedException();
     }
 }

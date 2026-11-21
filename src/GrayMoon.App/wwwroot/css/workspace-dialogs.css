@@ -1,0 +1,56 @@
+/* Dialogs that bring a Workspace into GrayMoon: Restore from repository and Import from disk. Both use these, so
+   they live here once (moved from RestoreWorkspaceModal.razor.css). The dialog root carries gm-workspace-dialog. */
+
+:root .gm-workspace-dialog.modal-dialog.modal-dialog-centered {
+    display: flex;
+    align-items: center;
+    min-height: calc(100% - 2rem);
+    margin: 1rem auto;
+}
+
+:root .gm-workspace-dialog .modal-content {
+    width: 100%;
+    max-height: calc(var(--modal-vh) - 2rem);
+}
+
+:root .gm-workspace-dialog .modal-body {
+    overflow-y: auto;
+}
+
+:root .restore-preview {
+    background-color: var(--bg-input, #3c3c3c);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 0.25rem;
+    color: var(--text-primary);
+}
+
+:root .restore-validation-error {
+    background: rgba(244, 135, 113, 0.12);
+    color: var(--text-primary);
+    border: 1px solid rgba(244, 135, 113, 0.35);
+    box-shadow: none;
+    border-radius: 0.25rem;
+}
+
+:root .restore-missing-list {
+    max-height: 9rem;
+    overflow-y: auto;
+    padding-left: 1.25rem;
+}
+
+:root .restore-preview-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 1.5rem;
+    row-gap: 0.15rem;
+}
+
+:root .restore-preview-grid dt {
+    font-weight: normal;
+    white-space: nowrap;
+    color: var(--text-secondary, #858585);
+}
+
+:root .restore-preview-grid dd {
+    margin: 0;
+}

@@ -340,6 +340,16 @@ runs on the thread pool while the dispatcher may be rendering the page.
    message naming the path and the cause. Do not log and continue, and do not
    let the raw exception end the process. Skip a backup of a missing or empty
    file. [17]
+6. **Detach a folder before its Workspace link row is deleted.** The link
+   rows are the only record of which folders GrayMoon manages. Any path that
+   deletes a Workspace or a Workspace link first calls
+   `WorkspaceRepositoryDetacher` (the Worker releases its file watchers and
+   removes GrayMoon's Git hooks, `DetachRepositories`) under the structural
+   lock, and deletes only when that succeeded for every repository. A missing
+   folder is a success; a hook file that cannot be removed stops the operation
+   with the file named. On the Worker only `GitSyncHooks` writes or deletes a
+   hook file, and only files with GrayMoon's marker.
+   `WorkspaceLinkDeletionConventionTests` lists the files that may delete.
 
 ### Failures, cancellation and waiting
 

@@ -665,6 +665,10 @@ Also: batch mutations and call `SaveChanges` once (never in a loop); keep `Works
 
 Provider-specific hosting behavior (fork parent, pull request lookup across fork and upstream) sits behind `IGitProvider`, resolved per connector with `IGitProviderResolver` (same pattern as `WorkspaceCiProviderResolver`; `NoGitProvider` for unsupported connectors). Add GitLab or Azure DevOps by implementing `IGitProvider`, registering it in the resolver and DI, and extending repository sync to fill `IsFork` / `ParentCloneUrl`. Persistence, composition (`PullRequestInfo.Compose`) and UI stay provider-neutral. Own-repository-only actions (merge, close, edit, review) must guard on `IsInParentRepository`.
 
+## 20G. Ending GrayMoon's management of a folder
+
+A code path that deletes a Workspace or a Workspace link row first calls `WorkspaceRepositoryDetacher` (App, `Services/Workspaces`) under the Workspace's structural lock, and deletes only when the summary succeeded. Pass the row delete as `whileDetached` so it runs before Git Changes monitoring resumes. Turn a failure into text with `DetachFailureText.ToFailure`; do not write a second set of messages. Pages do not call the detacher: they call `IWorkspaceRepositoryOperations` (`RemoveWorkspaceAsync`, `SaveWorkspaceAsync`, `DisableWorkspaceRepositoryAsync`). A new file that deletes these rows has to be added to `WorkspaceLinkDeletionConventionTests` with the reason. On the Worker, hook files are written and deleted only by `GitSyncHooks`.
+
 ## 21. Test expectations
 
 Every architectural change should include tests at the narrowest appropriate layer.

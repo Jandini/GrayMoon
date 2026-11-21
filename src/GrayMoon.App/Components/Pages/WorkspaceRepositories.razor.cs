@@ -15,6 +15,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Parameter] public int WorkspaceId { get; set; }
     [Parameter, PageQuery("context")] public int? ContextQuery { get; set; }
     [Inject] private IWorkspacePageService WorkspacePageService { get; set; } = default!;
+    [Inject] private GrayMoon.Application.Workspaces.IWorkspaceRepositoryOperations WorkspaceRepositoryOperations { get; set; } = default!;
     [Inject] private WorkspaceOperationOutcomeStore OperationOutcomes { get; set; } = default!;
     [Inject] private IServiceScopeFactory ServiceScopeFactory { get; set; } = default!;
     [Inject] private NavigationManager NavigationManager { get; set; } = default!;

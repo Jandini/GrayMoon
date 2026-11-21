@@ -13,15 +13,15 @@ It is intentionally practical. A developer should be able to find the responsibl
 ```text
 list Workspaces
 search
-create (Add Workspace)
-restore from a Workspace repository ("Restore from repository")
+create a new, empty Workspace (Add Workspace)
+restore from a Workspace repository (Add Workspace menu: "Restore from repository")
+import a folder that is already on disk (Add Workspace menu: "Import from disk")
 edit name/path
 choose the Workspace profile
 choose, change or remove the Workspace repository
 set default
-delete (also with Features, after an acknowledgement)
+remove (refused while the Workspace has Features; GrayMoon's Git hooks are removed from the repositories)
 select repositories
-import/use existing local repositories
 ```
 
 ### Primary implementation areas
@@ -90,13 +90,55 @@ Fetch next to the picker runs RepositoryService.RefreshRepositoriesAsync (Worksp
   under the page LoadingOverlay, GitHub request log in the overlay terminal;
   the selection follows a rename merge (MergedRepositoryIdMap) and clears when the repository is gone
 Add Workspace offers "None" (the Workspace repository is optional); Restore has no "None"
+Import from disk uses the same picker for its Folder field (no Fetch)
 ```
 
-When the Add Workspace folder already exists, the modal inspects it: a folder that is already a Git repository whose origin matches an imported repository auto-selects that repository as the Workspace repository, and nested repositories found on disk are offered for import (`TrySuggestImportsAsync`, matched by origin URL). Adopting an existing Workspace repository imports its `versionFiles` (`ImportVersionFilesAsync`) instead of rewriting `graymoon.json`.
+The Workspaces page header has one split button (`wwwroot/css/split-button.css`): **Add Workspace**, and a chevron that opens a menu with **Restore from repository** and **Import from disk**. The three paths do not overlap:
+
+| | Folder before | Definition comes from | Clones |
+|---|---|---|---|
+| Add Workspace | none or empty | the dialog | the Workspace repository, if chosen; Sources at Sync |
+| Import from disk | exists with repositories | the folder's `graymoon.json`, or the dialog when it has none | only Sources that are missing on disk |
+| Restore from repository | none or empty | the remote repository | everything |
+
+Add Workspace only adds. While the name is typed the modal asks the Worker for the folder's state (`WorkspaceService.GetDirectoryStateAsync`, the check Restore uses) and `ExistingWorkspaceFolder.AddBlockedReason` decides: a folder that exists and is not empty shows "This folder already exists and is not empty. Use Import from disk to add it as a Workspace." and Save stays disabled. A folder that could not be checked is blocked too; it is never assumed to be free. The check runs again right before the Workspace is created.
 
 ### Deleting a Workspace
 
-The Remove Workspace dialog removes only the GrayMoon Workspace; repositories on disk stay untouched. When the Workspace has Features, the dialog shows "Removing this workspace loses track of its Features. Folders on disk are left in place." and the delete button stays disabled until the acknowledgement checkbox is ticked. The delete drops tracking only (`WorkspaceRepository.DeleteAsync`, which clears `BaseWorkspaceFeatureId` first); no worktree, branch or folder is touched.
+Remove Workspace removes the GrayMoon Workspace and the Git hooks GrayMoon installed in its repositories. Repositories, folders, branches and everything else on disk stay. It goes through `IWorkspaceRepositoryOperations.RemoveWorkspaceAsync`:
+
+```text
+1  Worker connected and version-matched?   no  -> refused, nothing changed (the dialog disables Remove and says why)
+2  Workspace structural lock               held -> refused "Another operation is running in this workspace..."
+3  Workspace has Features?                 yes -> refused "This workspace has N Features: a, b. Remove the Features first..."
+4  DetachRepositories for every link (04, section 7): the Worker releases its file watchers on the folders,
+   removes GrayMoon's hooks and puts the user's own replaced hooks back
+5  any repository Failed                   -> nothing is deleted; the dialog stays open with one line per repository
+6  delete the Workspace row (cascades), while Git Changes monitoring of the Workspace is still paused
+```
+
+A missing folder, a folder that is not a repository and a repository without GrayMoon hooks are successes. Only a real problem stops the removal (a hook file that cannot be deleted, the user's own hook that cannot be renamed back, a folder the Worker cannot let go of, Git unable to read the repository), and the message names the repository, the file and what to do (`DetachFailureText`). The repositories that were already cleaned get their hooks back on the next Sync if the Workspace is kept. After a success a toast says which repositories got the user's own hooks back.
+
+The same detach runs before every other path that ends GrayMoon's management of a folder, with the same messages: removing a Source repository in the Repositories dialog or settings (`SaveWorkspaceAsync`; a save that removes nothing needs neither the Worker nor the lock), disabling the Workspace repository (`DisableWorkspaceRepositoryAsync`), a Source that becomes the Workspace repository (its old folder; a failure there is a warning, the move stands), a rolled-back restore or import, and a link undone after a lost attach answer. `WorkspaceLinkDeletionConventionTests` fails when Workspace or link rows are deleted anywhere else.
+
+### Import from disk
+
+`IWorkspaceImportOperations` (`WorkspaceRepositoryOperations.Import.cs`), dialog `ImportWorkspaceModal` (rules in `ImportWorkspaceFlow`). Shaped like Restore: read-only preflight, preview, one operation with rollback, result panel, then the normal full Sync.
+
+```text
+Folder          picker of the folders under the workspace root that are not a Workspace (Worker ListWorkspaceRootFolders);
+                the Workspace is named like its folder
+Preflight       Worker InspectWorkspaceFolder (reads only): root repository and origin, child repositories and origins,
+                the text of graymoon.json; origins are matched to the imported repositories (RepositoryUrlIdentity)
+```
+
+| Folder | Import |
+|---|---|
+| Git repository with a valid `graymoon.json` | The file decides profile, Source repositories, read only flags and version files (`RestoreDefinitionEvaluator`, the code Restore uses), read from disk as it is now. The root is adopted as the Workspace repository, never cloned over. Sources on disk are linked as they are (no checkout, reset or pull); listed Sources that are missing are cloned by the Sync; repositories on disk that the file does not list stay unmanaged and are shown. `graymoon.json` is rewritten only under Restore's rule. |
+| Folder that is not a Git repository | The user picks the profile. Child repositories whose origin matches an imported repository are linked. Nothing is written into the folder. |
+| Git repository without `graymoon.json` | As the row above for the children. The root repository is not linked and nothing is written into it; the preview says it can be chosen in settings afterwards. |
+
+Refused before anything is created: the Workspace repository is not imported into GrayMoon ("Import it through Connectors, then import this folder."), an invalid definition, a newer schema, an unknown profile, a name that is already a Workspace, a folder with no repository GrayMoon knows. A repository in a folder whose name is not the repository's name is not linked and the preview says why. A failure after the Workspace row was created takes it back: the hooks the adopt wrote (detach), then the rows. The folder's content is never deleted or changed, and `DiscardWorkspaceRoot` is never sent. The hooks are written by the Sync at the end, with the new Workspace's ids.
 
 ### Workspace repository
 
@@ -150,7 +192,7 @@ A Source repository of the Workspace can be chosen (`WorkspaceModal.BuildWorkspa
 
 Only a fresh attach (not an adopt) then writes the managed `.gitignore` section and `graymoon.json` through `WriteRepositoryFile`. When the dialog passed a setup branch (`EnableWorkspaceRepositoryAsync(..., setupBranchName)`, the Repo tab's **New Branch** field, default `WorkspaceSetupBranch.DefaultName` = `graymoon/workspace-setup`), the files are written on that new branch: the name is validated (`WorkspaceSetupBranch.Validate`) before the lock is taken, the remote branches are read through the connector (`IRemoteRepositoryBranchReader`) before anything is linked or cloned and a name that exists there (ignoring case) fails with nothing changed, and after the attach the existing `CreateBranch` Worker command creates the branch from the branch the attach checked out. The files are written only when the Worker reports HEAD on the new branch; otherwise the operation fails, nothing is written, and the link and the clone stay (removing the link would make a retry adopt the folder without a branch). No setup branch is created for an adopted folder or a repository with no commits. GrayMoon does not commit or push the branch. A remote with more branches than the connector reads (`RemoteBranchList.Truncated`) is only checked against the ones that were read. An adopted folder keeps its `graymoon.json`, because rewriting it from the database would drop version files and repositories not imported yet. On a fresh attach a failed `.gitignore` or definition write fails the operation with a message but keeps the link and the attached repository; the drift banner repairs it. Enable then scans Git Changes for the repository so the Changes dot updates. Worker commands carry `WorkspaceRepositoryName` so `WorkerRepositoryPaths.Resolve` maps the Workspace repository to the Workspace root and every other repository to a nested folder.
 
-**Restore** (Workspaces page "Restore from repository", dialog title "Restore Workspace") is two steps.
+**Restore** (Workspaces page, **Restore from repository** in the **Add Workspace** menu, dialog title "Restore Workspace") is two steps.
 
 `PreflightRestoreAsync` reads `graymoon.json` from the selected branch through the GitHub contents API (`?ref=`; the default branch when no branch is given) (no Worker, no clone, no database change), validates it (a missing file, invalid JSON, a newer schema and unknown profile values are blocking errors) and previews the profile, the Source repository count and the connectors and repositories missing on this computer. Choosing a repository clears the previous preview immediately and lists its remote branches (`IRemoteRepositoryBranchReader`, paginated, default first; a list over 2000 branches is flagged `Truncated`, never cut silently); the provider's default branch is selected, and only then, and after each committed branch choice (never while typing or filtering), is one manifest preflight started. A late answer for an earlier repository or branch is dropped. Restore stays disabled while that read is in progress, and is enabled only when the preflight is valid and the name, the folder and the Worker are all OK.
 
@@ -827,6 +869,8 @@ WorkspaceUndoPushHandler
 Worker undo/reset command path
 ```
 
+The Worker (`UndoPushCommand`, `GitService.ResetToRemoteAsync`) runs `git reset --mixed` (keep changes) or `--hard` to `origin/<branch>`. When that ref does not exist because the branch was never pushed, the target is `git merge-base <compare ref> HEAD`, where the compare ref is the one the outgoing count uses (`IGitRepositoryReader.GetNoUpstreamCompareRefAsync`: the Feature divergence base as a local branch, otherwise the default origin branch). With no compare ref or no common commit the undo fails and changes nothing. The command never pushes or fetches.
+
 ---
 
 ## 14. Return to Default
@@ -993,7 +1037,7 @@ Version file configurations are stored in `graymoon.json` as `versionFiles`. Aft
 
 ```text
 a Sync includes the Workspace repository in the special context (ImportVersionFilesFromDefinitionAsync)
-an existing Workspace folder is adopted in Add Workspace (ImportVersionFilesAsync)
+a folder with a definition is imported with Import from disk (MergeVersionFilesIntoDatabaseAsync)
 a Workspace is restored (MergeVersionFilesIntoDatabaseAsync)
 ```
 

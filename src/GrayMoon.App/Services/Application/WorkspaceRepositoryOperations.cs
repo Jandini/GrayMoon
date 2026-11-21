@@ -27,7 +27,7 @@ namespace GrayMoon.App.Services.Application;
 /// per-feature question: the App/Worker version lock (<see cref="WorkerVersionPolicy"/>) decides whether the Worker
 /// may run commands at all.
 /// </summary>
-public sealed class WorkspaceRepositoryOperations(
+public sealed partial class WorkspaceRepositoryOperations(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IWorkerBridge workerBridge,
     IRemoteWorkspaceManifestReader remoteManifestReader,
@@ -40,7 +40,9 @@ public sealed class WorkspaceRepositoryOperations(
     WorkspaceRepositoryEntity workspaceRepository,
     WorkspaceService workspaceService,
     IGitChangesWorkspaceScanner gitChangesScanner,
-    ILogger<WorkspaceRepositoryOperations> logger) : IWorkspaceRepositoryOperations
+    WorkspaceRepositoryDetacher detacher,
+    ILogger<WorkspaceRepositoryOperations> logger,
+    GrayMoon.App.Services.Policy.ReferenceImportGuard? referenceImportGuard = null) : IWorkspaceRepositoryOperations, IWorkspaceImportOperations
 {
     internal const string NonEmptyFolderMessage =
         "This folder already contains files. Choose another Workspace name or move the existing files.";
@@ -93,7 +95,8 @@ public sealed class WorkspaceRepositoryOperations(
         return result;
     }
 
-    public async Task<OperationResult> DisableWorkspaceRepositoryAsync(int workspaceId, CancellationToken cancellationToken = default)
+    /// <summary>The database half of disabling; the caller has already detached the folder (see <see cref="DisableWorkspaceRepositoryAsync"/>).</summary>
+    private async Task<OperationResult> DisableLinkRowsAsync(int workspaceId, CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -106,7 +109,7 @@ public sealed class WorkspaceRepositoryOperations(
         if (link is null)
             return OperationResult.Fail("This Workspace has no Workspace repository.");
 
-        // Database only: the files and .git on disk are never touched.
+        // Database only. The hooks and watchers were already taken off the folder; its files and .git are never touched.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(
             db, [link.WorkspaceRepositoryId], [link.RepositoryId], workspaceId, cancellationToken);
@@ -277,6 +280,8 @@ public sealed class WorkspaceRepositoryOperations(
             notes.Add(KeptFilesMessage(attach.KeptFiles, attach.KeptFileCount));
         if (sourceLinkId is not null)
             notes.Add(MovedFromSourceMessage(attach.RepositoryName ?? "The repository"));
+        if (attach.MovedSourceWarning is { } movedSourceWarning)
+            notes.Add(movedSourceWarning);
         return notes.Count == 0
             ? OperationResult.Ok()
             : OperationResult.Ok() with { Warnings = notes, WarningSummary = string.Join(" ", notes) };
@@ -441,12 +446,20 @@ public sealed class WorkspaceRepositoryOperations(
         string? branchName,
         RestoreContext context,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool adoptExisting = false)
     {
+        // Import from disk adopts the repository that is already in the folder; Restore clones into an empty one.
+        var done = adoptExisting ? "Workspace imported" : "Workspace restored";
         var attach = await LinkAndAttachAsync(
-            workspaceId, repositoryId, progress, cancellationToken, requireEmptyRoot: true, attachMessage: "Cloning Workspace repository...", branchName: branchName);
+            workspaceId, repositoryId, progress, cancellationToken,
+            requireEmptyRoot: !adoptExisting,
+            attachMessage: adoptExisting ? "Adopting Workspace repository..." : "Cloning Workspace repository...",
+            branchName: branchName);
         if (!attach.Success)
-            return (null, attach.Error ?? "Cloning the Workspace repository failed.");
+            return (null, attach.Error ?? (adoptExisting ? "Adopting the Workspace repository failed." : "Cloning the Workspace repository failed."));
+        if (adoptExisting && !attach.AdoptedExisting)
+            return (null, "The folder is no longer the Workspace repository it was when it was checked.");
 
         // D14 step 3: the remote branch may have changed since the preflight, so the local copy is validated again.
         var (_, args) = await GetSpecialContextArgsAsync(workspaceId, cancellationToken);
@@ -498,14 +511,14 @@ public sealed class WorkspaceRepositoryOperations(
         var gitIgnore = await manifestService.WriteManagedGitIgnoreAsync(workspaceId, cancellationToken);
         if (!gitIgnore.Success)
         {
-            warning = $"Workspace restored, but .gitignore could not be updated: {gitIgnore.Error}";
+            warning = $"{done}, but .gitignore could not be updated: {gitIgnore.Error}";
         }
         else if (skippedVersionFiles.Count == 0
                  && await IsDefinitionRewriteRequiredAsync(workspaceId, plan, localContent!, cancellationToken))
         {
             var written = await manifestService.WriteAuthoritativeManifestAsync(workspaceId, cancellationToken);
             if (!written.Success)
-                warning = $"Workspace restored, but the Workspace definition could not be written: {written.Error}";
+                warning = $"{done}, but the Workspace definition could not be written: {written.Error}";
         }
 
         return (new RestoreWorkspaceResult
@@ -559,6 +572,21 @@ public sealed class WorkspaceRepositoryOperations(
     private async Task<string?> RollbackRestoreAsync(int workspaceId, string cloneUrl, bool folderExisted)
     {
         var residue = new List<string>();
+
+        // The attach wrote hooks into the root. They go first, while the links still say which folders were managed;
+        // when the folder is deleted below they go with it anyway.
+        try
+        {
+            var detached = await detacher.DetachAsync(workspaceId, null, workspaceRemoved: true, cancellationToken: CancellationToken.None);
+            if (!detached.Success)
+                residue.Add(DetachResidue(detached));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Restore rollback could not remove the Git hooks. WorkspaceId={WorkspaceId}", workspaceId);
+            residue.Add($"The Git hooks GrayMoon installed could not be removed: {ex.Message}");
+        }
+
         try
         {
             var (_, args) = await GetSpecialContextArgsAsync(workspaceId, CancellationToken.None);
@@ -728,15 +756,17 @@ public sealed class WorkspaceRepositoryOperations(
             throw;
         }
 
+        string? movedSourceWarning = null;
         if (error is null && attached is not null)
         {
             if (sourceLinkId is not null)
-                await ReplaceMovedSourceLinkAsync(workspaceRepositoryId, repositoryId, workspaceId);
+                movedSourceWarning = await DetachAndReplaceMovedSourceAsync(workspaceRepositoryId, repositoryId, repositoryName, workspaceId);
 
             return new LinkAttachResult(true, null, attached.AdoptedExisting, repositoryName, attached.Branch, attached.IsUnborn)
             {
                 KeptFiles = attached.KeptFiles ?? [],
                 KeptFileCount = attached.KeptFileCount,
+                MovedSourceWarning = movedSourceWarning,
             };
         }
 
@@ -797,6 +827,9 @@ public sealed class WorkspaceRepositoryOperations(
         public IReadOnlyList<string> KeptFiles { get; init; } = [];
         public int KeptFileCount { get; init; }
 
+        /// <summary>Set when the old folder of a moved Source repository still carries GrayMoon's hooks.</summary>
+        public string? MovedSourceWarning { get; init; }
+
         public static LinkAttachResult Failed(string error) => new(false, error, false);
     }
 
@@ -844,6 +877,10 @@ public sealed class WorkspaceRepositoryOperations(
 
     private async Task RemoveLinkAsync(int workspaceRepositoryId, int repositoryId, int workspaceId)
     {
+        // Normally the attach failed before it wrote hooks; this covers an attach that finished on the Worker while
+        // its answer was lost. The link goes either way: it was only just added and holds no state.
+        await DetachQuietlyAsync(workspaceId, [workspaceRepositoryId]);
+
         // Rollback must still run when the operation itself was cancelled.
         await using var db = await dbContextFactory.CreateDbContextAsync();
         await WorkspaceRepositoryLinkCleanup.DeleteDependentsAsync(db, [workspaceRepositoryId], [repositoryId], workspaceId);

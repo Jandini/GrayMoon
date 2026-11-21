@@ -205,6 +205,11 @@ builder.Services.AddSingleton<ICommandHandler<EnsureGitChangesWatchersRequest, E
         builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<DiscardWorkspaceRootRequest, DiscardWorkspaceRootResponse>, DiscardWorkspaceRootCommand>();
         builder.Services.AddSingleton<ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse>, WriteRepositoryFileCommand>();
+        builder.Services.AddSingleton<IGitChangesMonitoring>(sp => sp.GetRequiredService<GitRepositoryWatcherManager>());
+        builder.Services.AddSingleton<ICommandHandler<DetachRepositoriesRequest, DetachRepositoriesResponse>, DetachRepositoriesCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitChangesMonitoringRequest, GetGitChangesMonitoringResponse>, GetGitChangesMonitoringCommand>();
+        builder.Services.AddSingleton<ICommandHandler<ListWorkspaceRootFoldersRequest, ListWorkspaceRootFoldersResponse>, ListWorkspaceRootFoldersCommand>();
+        builder.Services.AddSingleton<ICommandHandler<InspectWorkspaceFolderRequest, InspectWorkspaceFolderResponse>, InspectWorkspaceFolderCommand>();
         builder.Services.AddSingleton<CodeGraphCli>();
         builder.Services.AddSingleton<ICommandHandler<InitCodeGraphRequest, InitCodeGraphResponse>, InitCodeGraphCommand>();
         builder.Services.AddSingleton<ICommandHandler<UninitCodeGraphRequest, UninitCodeGraphResponse>, UninitCodeGraphCommand>();
