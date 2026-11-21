@@ -10,6 +10,7 @@ Classification (must / should / optional) and the order of work for all of these
 
 | Note | Open work | Status |
 |---|---|---|
+| [implicit-fallback-actions](defects/implicit-fallback-actions.md) | **High priority.** Operations that do something other than what was asked, found after Undo Push Commits pushed a never-pushed branch (2026-11-21, fixed). Open: "Pull" also pushes; Sync Commits may publish a never-pushed branch; Return to Default hides a failed branch delete; Create Branch silently switches to an existing branch. Orchestrators and Feature operations not swept yet. | Original bug fixed; six items open, to investigate and validate |
 | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) | Worker `index.lock` retry and timeout tiers (Phase 3 items C, E, F, needs a repro first); run correlation id. The dirty-submodule failure is built. | Data-loss bug fixed; hardening open |
 | [convention-test-coverage](defects/convention-test-coverage.md) | The convention tests check fewer fields, folders and pages than the rules name; five silent catches in the Worker are listed as open. | Partly built |
 | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Desktop: move the signing secrets to the `production` environment and run the release workflow from a branch and a stable tag. | Owner action |
@@ -20,7 +21,8 @@ Classification (must / should / optional) and the order of work for all of these
 
 | Note | Idea | Status |
 |---|---|---|
-| [workspace-unhook-design](workspace-unhook-design.md), [workspace-unhook-implementation-plan](workspace-unhook-implementation-plan.md) | Remove GrayMoon's Git hooks when a Workspace is removed or a repository leaves one (no removal exists today), then split Add Workspace into Add, Import from disk and Restore from repository behind one split button. Design and an eight-phase plan. | Proposal; decisions D1-D6 open |
+| [workspace-unhook-design](workspace-unhook-design.md), [workspace-unhook-implementation-plan](workspace-unhook-implementation-plan.md) | Remove GrayMoon's Git hooks when a Workspace is removed or a repository leaves one (no removal exists today), then split Add Workspace into Add, Import from disk and Restore from repository behind one split button. Design and an eight-phase plan. | Proposal; decisions made 2026-11-21, not started |
+| [skip-push-of-unchanged-new-branch](ideas/skip-push-of-unchanged-new-branch.md) | Bulk push and the orchestrators leave out a repository on a new, never-pushed branch with no commits, unless another repository depends on it (its package must be built under the new branch version). A click on the repository's own badge still pushes it. | Idea only; full code analysis required |
 | [changes-commit-timeline](ideas/changes-commit-timeline.md) | Commit timeline strip on the Changes page to review a Feature commit by commit across repositories (read-only "time machine"), persisted per branch, Feature contexts first. | Draft, design only |
 | [connector-token-failure-handling](ideas/connector-token-failure-handling.md) | Classify connector token failures instead of showing "unknown" errors. | Draft, analysis only |
 | [git-changes-large-changeset-scale](ideas/git-changes-large-changeset-scale.md) | Folder summaries, chunked Worker transfer, deltas for very large change sets. | Closed for now |

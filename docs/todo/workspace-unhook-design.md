@@ -87,7 +87,7 @@ Not goals:
 
 - Deleting repositories, folders, branches or worktrees. Remove Workspace still leaves everything else on disk.
 - Removing the other things GrayMoon wrote: `graymoon.json`, the managed `.gitignore` section, `codegraph.json`, the `graymoon-divergence-base` file in a Git directory, `core.longpaths`, global `safe.directory` entries. They do nothing once GrayMoon is gone, and an import reuses them.
-- Releasing the Worker's file watchers when a repository leaves a Workspace. That is `defects/removed-repository-folder-locked-by-watchers.md`; it needs a repro first. The seam built here is where it will plug in (4.5).
+- Closing handles that other programs hold on a folder (an IDE, a terminal, CodeGraph). The Worker lets go of its own file watchers (4.10); it never touches programs it did not start.
 
 ## 3. Rules the design follows
 
@@ -148,11 +148,11 @@ Install renames a foreign `post-commit` to `post-commit.replaced-by-graymoon`, o
 
 `File.Move` keeps the Unix mode, so a restored hook is executable as before.
 
-### 4.4 Worker: command `RemoveSyncHooks`
+### 4.4 Worker: command `DetachRepositories`
 
 One command for a set of repositories of one Workspace, so Remove Workspace is one round trip.
 
-Request (`RemoveSyncHooksRequest : WorkspaceCommandRequest`):
+Request (`DetachRepositoriesRequest : WorkspaceCommandRequest`):
 
 | Field | Meaning |
 |---|---|
@@ -170,15 +170,15 @@ It ships with the matching App, as every Worker command does; no capability flag
 
 ### 4.5 App: one seam
 
-New internal service `WorkspaceSyncHookRemover` (`src/GrayMoon.App/Services/Workspaces/`):
+New internal service `WorkspaceRepositoryDetacher` (`src/GrayMoon.App/Services/Workspaces/`):
 
 ```
-RemoveAsync(workspaceId, links | all, workspaceRemoved, ct) -> SyncHookRemovalSummary
+DetachAsync(workspaceId, links | all, workspaceRemoved, ct) -> SyncHookRemovalSummary
 ```
 
-It reads the links and repository names, resolves the special Workspace context's Worker arguments (`IWorkspaceContextPathResolver.GetWorkerArgsAsync`), sends one `RemoveSyncHooks`, and maps the answer. It deletes nothing in the database. It is the only App code that sends this command.
+It reads the links and repository names, resolves the special Workspace context's Worker arguments (`IWorkspaceContextPathResolver.GetWorkerArgsAsync`), sends one `DetachRepositories`, and maps the answer. It deletes nothing in the database. It is the only App code that sends this command.
 
-Every path in 1.3 calls it **before** its rows go. This seam is also where the watcher release from the watcher defect will be sent once that work is confirmed: "these repositories leave this Workspace" is exactly the signal that note says is missing.
+Every path in 1.3 calls it **before** its rows go. The same call makes the Worker let go of its file watchers on those folders (4.10): "these repositories leave this Workspace" is the one signal for both.
 
 ### 4.6 App: Remove Workspace (U1)
 
@@ -189,7 +189,9 @@ New facade method `IWorkspaceRepositoryOperations.RemoveWorkspaceAsync(workspace
 2  TryStartStructural(workspaceId, "remove-workspace")
                                               refused -> fail "a Workspace operation is already running"
 3  Workspace still exists?                    no -> success (already removed)
-4  WorkspaceSyncHookRemover.RemoveAsync(all links, workspaceRemoved: true)
+3a Workspace has Features (or one being removed)?
+                                              yes -> fail "Remove the Features first", nothing changed (D2a)
+4  WorkspaceRepositoryDetacher.DetachAsync(all links, workspaceRemoved: true)
                                               any Failed -> fail, list repository + file, nothing deleted
 5  Delete the rows (today's DeleteAsync logic, on a factory context)
 6  Result: success, with notes (hooks put back; replaced files left over)
@@ -208,15 +210,44 @@ Dialog changes (`Workspaces.razor`):
 - Failure: the dialog stays open with the error and the list of repositories and files; Remove can be pressed again.
 - Success with notes: a toast per kind of note (for example "Your own hooks were put back in 2 repositories").
 
+**Messages.** A failed removal must tell the user three things: that nothing was removed from GrayMoon, which folder stopped it and why, and what to do. The text is built in one place (`DetachFailureText`, App) from the Worker's per-repository result, so the Remove dialog, the Repositories dialog and the settings dialog say the same thing.
+
+Headline, always:
+
+> The workspace was not removed. GrayMoon could not finish cleaning up 1 of 12 repositories. Fix the problem below and press Remove again.
+
+One entry per failed repository, with the repository name, the full path, and one of these reasons:
+
+| Cause | Text |
+|---|---|
+| Hook file cannot be deleted | "GrayMoon.Core: the Git hook file `C:\...\.git\hooks\post-commit` could not be deleted (access denied). Close programs that use this repository, or check the file's permissions." |
+| Your own hook cannot be put back | "GrayMoon.Core: your own hook `post-commit.replaced-by-graymoon` could not be renamed back to `post-commit` (the file is in use). GrayMoon's hook is already gone; rename the file yourself or close the program that has it open." |
+| The Worker cannot let go of the folder | "GrayMoon.Core: the Worker is still working in `C:\...\GrayMoon.Core` and could not stop in time. Wait a moment and press Remove again." |
+| Git could not answer | "GrayMoon.Core: Git could not read this repository (`<first line of git's message>`). If the folder is no longer a repository you want to keep, delete or repair it." |
+
+Under the list, when some repositories were already cleaned: "The other 11 repositories are already cleaned up. They get their hooks back on the next Sync if you keep the workspace."
+
+Before anything is tried:
+
+| Situation | Text |
+|---|---|
+| Worker not connected | "The GrayMoon Worker is not running. Start it to remove this workspace: it has to remove the Git hooks from the repositories." |
+| Worker version mismatch | "Update the GrayMoon Worker before removing this workspace." with the **Update Worker** button the Restore dialog has. |
+| Another operation holds the Workspace | "Another operation is running in this workspace (<its name>). Wait for it to finish and press Remove again." |
+
+After a success, only when there is something to tell: "Your own Git hooks were put back in 2 repositories: A, B." and "Older replaced hook files were left in 1 repository: A (`post-commit.replaced-by-graymoon-20260114093000`)."
+
+The same headline pattern is used for the other paths, with the object changed ("The repository was not removed from the workspace.", "The Workspace repository was not disabled.").
+
 ### 4.7 App: the other unlink paths
 
 | Path | Change |
 |---|---|
-| U2 membership | New facade method `SetSourceRepositoriesAsync` (and the combined rename + membership save used by settings). It computes the links that will be removed with the same rule `ReplaceRepositoriesCoreAsync` uses (extracted so there is one copy), and when that set is not empty: Worker check, structural lock, `RemoveAsync(those links)`, then `WorkspaceRepository.UpdateAsync`. A failed removal stops the save. The three page call sites move to the facade. A save that removes nothing needs no Worker and no lock, as today. |
-| U3 disable | `DisableWorkspaceRepositoryAsync` takes the structural lock and calls `RemoveAsync` for the Workspace-role link before its transaction. The Source repositories under the root have their own `.git` and are not touched. |
-| U4 Source -> Workspace repository | After the attach succeeded and before `ReplaceMovedSourceLinkAsync`: `RemoveSyncHooks` for the old Source folder. The request passes `workspaceRepositoryName: null` for this call so the name resolves to `<root>/<name>`, not to the root (which now holds the new checkout with fresh hooks). A failure here does not undo the move (the attach is done); it is returned as a warning that names the file, next to the existing "folder was left on disk" note. |
-| U5 restore rollback | `RollbackRestoreAsync` calls `RemoveAsync` first, then `DiscardWorkspaceRoot`, then deletes the rows. Rollback never throws; a failed removal is added to the residue text it already returns. |
-| U6 lost attach answer | `UndoLinkAsync` / `RemoveLinkAsync` call `RemoveAsync` for the link before deleting it. Normally the answer is `NothingToRemove`. |
+| U2 membership | New facade method `SetSourceRepositoriesAsync` (and the combined rename + membership save used by settings). It computes the links that will be removed with the same rule `ReplaceRepositoriesCoreAsync` uses (extracted so there is one copy), and when that set is not empty: Worker check, structural lock, `DetachAsync(those links)`, then `WorkspaceRepository.UpdateAsync`. A failed removal stops the save. The three page call sites move to the facade. A save that removes nothing needs no Worker and no lock, as today. |
+| U3 disable | `DisableWorkspaceRepositoryAsync` takes the structural lock and calls `DetachAsync` for the Workspace-role link before its transaction. The Source repositories under the root have their own `.git` and are not touched. |
+| U4 Source -> Workspace repository | After the attach succeeded and before `ReplaceMovedSourceLinkAsync`: `DetachRepositories` for the old Source folder. The request passes `workspaceRepositoryName: null` for this call so the name resolves to `<root>/<name>`, not to the root (which now holds the new checkout with fresh hooks). A failure here does not undo the move (the attach is done); it is returned as a warning that names the file, next to the existing "folder was left on disk" note. |
+| U5 restore rollback | `RollbackRestoreAsync` calls `DetachAsync` first, then `DiscardWorkspaceRoot`, then deletes the rows. Rollback never throws; a failed removal is added to the residue text it already returns. |
+| U6 lost attach answer | `UndoLinkAsync` / `RemoveLinkAsync` call `DetachAsync` for the link before deleting it. Normally the answer is `NothingToRemove`. |
 
 A convention test fails when code deletes `WorkspaceRepositories` or `Workspaces` rows outside the classes that go through the seam (4.9).
 
@@ -231,13 +262,58 @@ This is needed apart from removal at unlink time, because hooks orphaned before 
 
 ### 4.9 Hooks orphaned before this change
 
-Workspaces removed with today's code left their hooks. The database no longer knows those folders, so removal at unlink time cannot reach them. Three things cover them:
+Workspaces removed with today's code left their hooks. The database no longer knows those folders, so removal at unlink time cannot reach them. Two things limit what they cost:
 
 1. An import of such a folder (Part 2) ends with a Sync, which rewrites the hooks with the new ids.
 2. 4.8 stops the wasted work the moment such a hook fires.
-3. **Reaping (recommended, decision D4).** When a hook job is dropped because the App answered 404 for its Workspace, the Worker removes the GrayMoon hooks in that repository whose embedded `workspaceId` is the dead id. Here the id is compared, because the folder may meanwhile belong to another Workspace. The 404 is an authenticated, definite answer from the App the Worker serves, so this cannot fire on a network error.
+Nothing else is done for them (decision D4, 2026-11-21). The Worker does not delete hooks on its own: a file is only ever removed as part of an operation the user started. An orphaned hook therefore stays on disk and keeps calling the Worker; with 4.8 each call costs one lookup and one log line. A user who wants them gone imports the folder and removes the Workspace again, or deletes the five files by hand.
 
-A repository that was removed from a Workspace which still exists (U2 before this change) is not caught by a Workspace-level 404. Covering it needs a per-repository answer (`GET /workspaces/{id}/repositories/{repositoryId}/capabilities`, 404 when the link is gone) and a Worker cache keyed by both ids. That is described in the plan as an optional last step; the cost of leaving it out is one dropped snapshot per Git command in such a folder, as today.
+A repository that was removed from a Workspace which still exists (U2 before this change) is not caught by a Workspace-level 404: its jobs still run and the App drops the snapshot, as today. That is accepted.
+
+### 4.10 Worker: file watchers let go of the folders (added 2026-11-21)
+
+**Today.** For the Changes page the Worker keeps one `GitRepositoryWatcher` per repository path (`GitRepositoryWatcherManager`): a recursive `FileSystemWatcher` on the working tree and one on the Git directory. Both hold an open directory handle. `GitChangesRepositoryRegistry` records which Workspace and repository each path belongs to. An entry leaves only when its deadline passes (10 minutes idle by default, plus up to 30 s for the sweeper), when an exclusive removal claim covers its folder (`IRepositoryAccess.AcquireExclusiveAsync`, used by Remove Feature), or at shutdown. The manager's own comment says the Worker "has no direct signal for this repository/workspace was deleted". Two things follow:
+
+- The Worker cannot be asked what it is watching. The App only sees two counters in a log line.
+- After Remove Workspace the watchers stay for about 10 minutes. The folders cannot be deleted or moved in that time, and the App's `GitChangesWatcherKeeper` can renew them as long as a tab still counts the Workspace as active.
+
+**The interface.** `IGitChangesMonitoring`, implemented by `GitRepositoryWatcherManager` with the registry:
+
+```
+GetMonitored(workspaceId?) -> MonitoredRepository[]   { path, workspaceId, repositoryId, healthy, leaseCount, expiresAt }
+```
+
+It is the one answer to "which Workspaces is the Worker monitoring, and which folders". It includes Feature worktree paths, because they are registered under the same Workspace id. A read-only command `GetGitChangesMonitoring` (read pool) exposes it to the App.
+
+**Release is part of `DetachRepositories`, not a second round trip.** A check from the App followed by a separate release would leave a gap in which a queued status scan or a keeper renewal creates the watcher again. So the Worker does both in one command, in this order:
+
+```
+1  Paths = the requested repository folders
+           + when workspaceRemoved: every path GetMonitored(workspaceId) returns (this adds the Feature worktrees)
+2  Exclusive claim on those paths (IRepositoryAccess.AcquireExclusiveAsync)
+     - releases every watcher on or under them and prunes the status tracker, snapshot cache and registry
+     - cancels the Worker's own readers there at once, gives its writers the grace period, then stops them
+     - while the claim is held, Acquire and Touch answer UnderRemoval: nothing can start watching again
+3  Remove the hooks (4.2), inside the claim
+4  Check: GetMonitored returns no entry on or under those paths; any left -> Failed
+5  Lift the claim
+```
+
+The claim is the mechanism Remove Feature already uses to make the Worker let go of a folder; nothing new is invented for it. It deletes nothing. A claim that cannot clear the Worker's own holders throws `RepositoryAccessException`, which is a `Failed` result for the command and, by D2, stops the removal.
+
+The response gains `releasedWatchers[]` (the paths that were being watched), so the App can log and show what was let go.
+
+**The App side, so nothing asks for the watchers again.** `WorkspaceRepositoryDetacher`:
+
+1. Pauses monitoring for every context of the Workspace through `IWorkspaceGitChangesMonitoringPause`, the switch Remove Feature uses. The keeper skips paused contexts.
+2. Sends `DetachRepositories`.
+3. On success the caller deletes the rows; the contexts no longer exist, so there is nothing left to renew. On failure the pause is lifted and the next keeper tick puts the watchers back, because the Workspace is still there.
+
+For the paths where the Workspace stays (U2-U4) only the repositories that leave are paused and claimed; the rest keep their watchers.
+
+**Still to confirm (plan, Phase 0).** When a Workspace has a Workspace repository, its watcher is recursive from the Workspace root and so also sees every Source folder under it. For U2 (a Source is removed, the Workspace stays) that root watcher stays alive. Whether it blocks deleting the removed subfolder has to be measured; this is the repro the watcher defect note asks for. It does not affect Remove Workspace, where the root watcher is released too.
+
+This section replaces the fix plan in `defects/removed-repository-folder-locked-by-watchers.md`. That note is deleted when this ships.
 
 ## 5. Part 2 design - Add, Import, Restore
 
@@ -311,6 +387,15 @@ Three folder shapes:
 
 A folder with no Git repository at all cannot be imported; the preflight says so.
 
+Shape A in detail (the folder is a Workspace with `graymoon.json`):
+
+- The definition is read from the file on disk as it is now, on whatever branch is checked out, committed or not. Restore reads the remote branch instead; Import trusts the folder.
+- The root repository must already be in GrayMoon's catalog (matched by its origin URL). If it is not, the preflight stops: "The Workspace repository `<origin>` is not imported into GrayMoon. Import it through Connectors, then import this folder." The dialog has the same **Open Connectors** button as Restore.
+- A newer schema, an unknown profile or invalid JSON stops the preflight with the evaluator's message, as in Restore. The file is never changed by a failed preflight.
+- Repositories already on disk are linked as they are: no checkout, no reset, no pull. A recorded tag or commit in the definition is applied only to a repository the Sync has to clone, which is today's rule for a pin.
+- A Source the definition marks read only that holds commits existing only on this machine is kept writable and reported (`ReferenceImportGuard`).
+- `graymoon.json` is left byte for byte unless the definition is complete on this machine and its canonical form differs (Restore's rule). The `.gitignore` section is brought up to date.
+
 **Operation.**
 
 ```
@@ -325,7 +410,7 @@ A folder with no Git repository at all cannot be imported; the preflight says so
 8  Sync (installs hooks with the new ids, replacing any stale GrayMoon hooks)
 ```
 
-A failure in steps 3-7 rolls back: `WorkspaceSyncHookRemover.RemoveAsync` for what was linked (the attach wrote hooks), then the rows. **Nothing on disk is deleted**; the folder was there before the import and stays as it was. A failed or cancelled Sync does not undo the import; it is reported in the result panel with a retry hint, as in Restore.
+A failure in steps 3-7 rolls back: `WorkspaceRepositoryDetacher.DetachAsync` for what was linked (the attach wrote hooks), then the rows. **Nothing on disk is deleted**; the folder was there before the import and stays as it was. A failed or cancelled Sync does not undo the import; it is reported in the result panel with a retry hint, as in Restore.
 
 ### 5.5 Restore from repository
 
@@ -344,12 +429,14 @@ After Part 2 the three paths do not overlap:
 | # | Decision | Recommendation | Why |
 |---|---|---|---|
 | D0 | Which paths unhook. | **Decided 2026-11-21: all six (U1-U6).** No link row is deleted without unhooking first. Import from disk hooks the repositories again through its Sync. | The hooks left by any of the six behave the same; one rule is easier to hold than a list of exceptions. |
-| D1 | Remove Workspace needs a connected, version-matched Worker. | Yes | The hooks are on the Worker's disk. Add, Restore and Enable already need the Worker. The alternative, a queue of pending removals replayed later, is a second path with its own failure states. |
-| D2 | A hook that cannot be removed stops the removal. | Yes | The rows are the only record of the folders. A missing folder or repository is not a failure, so the block only happens on a real file error, which the message names. |
-| D3 | The user's replaced hook is renamed back. | Yes | It undoes what install did. With several replaced files the newest is restored and the rest are reported. |
-| D4 | The Worker reaps hooks whose Workspace the App answers 404 for. | Yes | It is the only way to reach hooks orphaned before this change. Id-matched and gated on a definite answer. |
-| D5 | Import shape C does not link the root repository. | Yes | A repository without a definition is not known to be a Workspace repository; guessing would write `graymoon.json` and `.gitignore` into someone's repository. |
-| D6 | Membership changes that remove a repository need the Worker and the structural lock. | Yes | Same reason as D1. Saves that only add or rename are unaffected. |
+| D1 | Remove Workspace needs a connected, version-matched Worker. | **Decided 2026-11-21: yes.** | The hooks are on the Worker's disk. Add, Restore and Enable already need the Worker. The alternative, a queue of pending removals replayed later, is a second path with its own failure states. |
+| D1a | Watcher check and release happen inside the one `DetachRepositories` command (4.10), not as two round trips. | **Decided 2026-11-21: yes.** | A separate check can be stale by the time the release runs. |
+| D2 | A folder that cannot be detached (hook file or the Worker's own handles) stops the removal; nothing is deleted in the database. The message names the repository, the file and what to do (4.6, "Messages"). | **Decided 2026-11-21: yes.** | The rows are the only record of the folders. A missing folder or repository is not a failure, so the block only happens on a real file error, which the message names. |
+| D2a | Remove Workspace is refused while the Workspace has Features (including one whose removal is still running). The acknowledgement checkbox is removed. Message: "This workspace has 3 Features: a, b, c. Remove the Features first, then remove the workspace." | **Decided 2026-11-21: yes.** | Same rule as rename, root change and membership. No worktree is left that Git lists and GrayMoon does not know. Consequence: 4.6 gains a Features check as its first step after the lock, the Feature-loss text and `acknowledgeFeatureLoss` state leave `Workspaces.razor`, and the Feature self-reference clean-up in the row delete is no longer reached. In 4.10 the Workspace's monitored paths are then only its repository folders. |
+| D3 | The user's replaced hook is renamed back. | **Decided 2026-11-21: yes; with several replaced files the newest is restored and the others are left and named in the success message.** | It undoes what install did. With several replaced files the newest is restored and the rest are reported. |
+| D4 | The Worker reaps hooks whose Workspace the App answers 404 for. | **Decided 2026-11-21: no.** Orphans from before this change stay; the Worker only drops their jobs (4.8). | No file is deleted without a user action; no extra risk for folders shared between two GrayMoon databases. |
+| D5 | Import shape C does not link the root repository. | **Decided 2026-11-21: yes.** | A repository without a definition is not known to be a Workspace repository; guessing would write `graymoon.json` and `.gitignore` into someone's repository. |
+| D6 | Membership changes that remove a repository need the Worker and the structural lock. | **Decided 2026-11-21: yes** (follows from D0 and D1). | Same reason as D1. Saves that only add or rename are unaffected. |
 
 ## 7. Edge cases
 
@@ -364,7 +451,7 @@ After Part 2 the three paths do not overlap:
 | Worker restarts between removal and row delete | Removal already happened on disk; the retry answers `NothingToRemove` and the rows go. |
 | Two tabs press Remove | The second is refused by the structural lock, or finds the Workspace gone and succeeds. |
 | Sync running when Remove is pressed | The structural lock refuses the removal until the Sync ends. |
-| Docker App and Desktop App used against the same folder at different times | Ids of the other database are dead here. 4.8 drops their jobs; D4 reaps them. |
+| Docker App and Desktop App used against the same folder at different times | Ids of the other database are dead here. 4.8 drops their jobs; the hook files are left alone. |
 
 ## 8. Tests the design requires
 
@@ -383,7 +470,7 @@ Worker (`GitScenarios`, `TestDirectory.Delete`):
 
 App (`CreateSchemaAsync`, seeded rows that a failure could destroy):
 
-- Remove Workspace sends `RemoveSyncHooks` for every link, including the Workspace-role link, before any row is deleted;
+- Remove Workspace sends `DetachRepositories` for every link, including the Workspace-role link, before any row is deleted;
 - a `Failed` repository: no row deleted, seeded links, Features and context rows all still there;
 - Worker unavailable: nothing sent, nothing deleted;
 - lock refused: nothing sent, nothing deleted;
@@ -396,8 +483,6 @@ Part 2: `ImportWorkspaceFlow` tests mirroring `RestoreWorkspaceFlowTests`; opera
 ## 9. Follow-ups named here, not built here
 
 - **R6**: report the hook install outcome in the Sync response and show it on the repository row ("live updates off: <reason>").
-- **Watcher release** at the same seam, after the repro the watcher defect note asks for.
-- **Per-repository registration check** (end of 4.9).
 
 ## 10. Documents to update when this ships
 
@@ -405,7 +490,7 @@ Part 2: `ImportWorkspaceFlow` tests mirroring `RestoreWorkspaceFlowTests`; opera
 - `docs/architecture/02-system-architecture.md`: Worker services (`GitSyncHooks`), hook listener policy, the two new commands.
 - `docs/architecture/04-runtime-communication-and-concurrency.md`: section 7 (removal, 404 handling), the structural lock list, the command pool table.
 - `docs/architecture/05-user-capability-reference.md`: Remove Workspace, removing a repository, Import from disk, the header menu.
-- `docs/architecture/06-developer-extension-guide.md`: "a new unlink path goes through `WorkspaceSyncHookRemover`".
+- `docs/architecture/06-developer-extension-guide.md`: "a new unlink path goes through `WorkspaceRepositoryDetacher`".
 - `GrayMoon/AGENTS.md` "Destructive and merge operations": the unhook-before-unlink rule.
 - `GrayMoon/CLAUDE.md`: Worker to App sync paragraph, command name list.
 - Wiki: `Restore-Workspace.md`, `Getting-Started.md` (the Add Workspace screenshots show the old dialog).
