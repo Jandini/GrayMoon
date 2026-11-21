@@ -173,6 +173,15 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         return (probe.Outgoing, probe.Incoming, probe.HasUpstream);
     }
 
+    public async Task<string?> GetNoUpstreamCompareRefAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return null;
+
+        var divergenceLocal = await GetDivergenceLocalBranchAsync(repoPath, ct);
+        return await ResolveNoUpstreamCompareRefAsync(repoPath, null, divergenceLocal, null, ct);
+    }
+
     public async Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))

@@ -17,6 +17,7 @@ internal sealed class StubRepositoryReader : IGitRepositoryReader
     public Task<string?> GetUpstreamRefAsync(string repoPath, string branchName, CancellationToken ct) => throw new NotImplementedException();
     public Task<string?> GetRemoteOriginUrlAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
     public Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
+    public Task<string?> GetNoUpstreamCompareRefAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
     public Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false) => throw new NotImplementedException();
     public Task<(int? DefaultBehind, int? DefaultAhead, string? DefaultBranchName)> GetCommitCountsVsDefaultAsync(string repoPath, string? defaultBranchOriginRef, CancellationToken ct) => throw new NotImplementedException();
     public Task<IReadOnlyList<string>> GetLocalBranchesAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();

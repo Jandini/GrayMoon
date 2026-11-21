@@ -45,6 +45,13 @@ public interface IGitRepositoryReader
     /// </summary>
     Task<(int? Outgoing, int? Incoming, bool HasUpstream)> GetCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
 
+    /// <summary>
+    /// The ref <see cref="GetCommitCountsAsync"/> counts outgoing commits against when the branch has no usable
+    /// upstream: the Feature divergence base as a local branch when it exists, otherwise the default origin
+    /// branch. Null when neither can be resolved.
+    /// </summary>
+    Task<string?> GetNoUpstreamCompareRefAsync(string repoPath, CancellationToken ct);
+
     /// <summary>Same work as <see cref="GetCommitCountsAsync"/> but also reports whether the counts and the upstream flag could be determined at all, so callers can leave persisted values alone instead of overwriting them with nulls after a failed git command.</summary>
     Task<CommitCountsProbeResult> ProbeCommitCountsAsync(string repoPath, string branchName, string? defaultBranchOriginRef, CancellationToken ct, bool skipUpstreamCheck = false);
 

@@ -827,6 +827,8 @@ WorkspaceUndoPushHandler
 Worker undo/reset command path
 ```
 
+The Worker (`UndoPushCommand`, `GitService.ResetToRemoteAsync`) runs `git reset --mixed` (keep changes) or `--hard` to `origin/<branch>`. When that ref does not exist because the branch was never pushed, the target is `git merge-base <compare ref> HEAD`, where the compare ref is the one the outgoing count uses (`IGitRepositoryReader.GetNoUpstreamCompareRefAsync`: the Feature divergence base as a local branch, otherwise the default origin branch). With no compare ref or no common commit the undo fails and changes nothing. The command never pushes or fetches.
+
 ---
 
 ## 14. Return to Default

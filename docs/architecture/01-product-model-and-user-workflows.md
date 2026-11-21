@@ -630,6 +630,8 @@ GrayMoon can undo outgoing commits across applicable repositories.
 
 The user chooses whether to keep the reverted changes in the working tree.
 
+A branch that is on the remote is reset to its `origin` ref. A branch that was never pushed (a new Feature branch, for example) has no such ref: it is reset to the commit where it left the branch its outgoing commits are counted against - the Feature's parent branch, otherwise the default branch. Undo never pushes and never contacts the remote.
+
 The operation is safety-sensitive and updates persisted repository state afterward.
 
 ---

@@ -1065,26 +1065,40 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
 
-        if (!await reader.RefExistsAsync(repoPath, $"origin/{branchName}", ct))
+        // A branch that was never pushed has no origin ref to go back to. Its outgoing commits are counted against
+        // the no-upstream compare ref, so the undo goes back to where the branch left that ref. Never push here:
+        // pushing first would publish the very commits being undone and leave the reset with nothing to do.
+        var target = $"origin/{branchName}";
+        if (!await reader.RefExistsAsync(repoPath, target, ct))
         {
-            logger.LogInformation("Remote ref origin/{BranchName} not found in {RepoPath} - pushing branch upstream first", branchName, repoPath);
-            var (pushOk, pushErr) = await PushAsync(repoPath, branchName, bearerToken, setTracking: true, ct: ct);
-            if (!pushOk)
-                return (false, pushErr ?? "Failed to push branch upstream before reset");
+            var compareRef = await reader.GetNoUpstreamCompareRefAsync(repoPath, ct);
+            if (string.IsNullOrWhiteSpace(compareRef))
+                return (false, $"Branch '{branchName}' was never pushed and no base branch was found to undo to. Nothing was changed.");
+
+            var (baseExit, baseOut, baseErr) = await runner.RunAsync(
+                "git", ["merge-base", "--end-of-options", compareRef, "HEAD"], repoPath, null, ct, GitLockIntent.Read);
+            var mergeBase = (baseOut ?? "").Trim();
+            if (baseExit != 0 || mergeBase.Length == 0)
+            {
+                logger.LogError("Git merge-base {CompareRef} HEAD failed for {RepoPath}. ExitCode={ExitCode}, Stderr={Stderr}", compareRef, repoPath, baseExit, baseErr);
+                return (false, $"Branch '{branchName}' was never pushed and has no common commit with '{compareRef}'. Nothing was changed.");
+            }
+
+            logger.LogInformation("Remote ref origin/{BranchName} not found in {RepoPath} - undoing to merge base {MergeBase} with {CompareRef}", branchName, repoPath, mergeBase, compareRef);
+            target = mergeBase;
         }
 
         var mode = keepChanges ? "--mixed" : "--hard";
-        var target = $"origin/{branchName}";
-        var args = $"reset {mode} {target}";
+        string[] args = ["reset", mode, target];
 
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, repoPath, ct);
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, repoPath, null, ct);
         sw.Stop();
         if (exitCode != 0)
         {
             var combined = CombineOutput(stdout, stderr) ?? "";
             logger.LogError("Git reset failed in {ElapsedMs}ms for {RepoPath}. Args={Args}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}",
-                sw.ElapsedMilliseconds, repoPath, args, exitCode, stdout, stderr);
+                sw.ElapsedMilliseconds, repoPath, string.Join(' ', args), exitCode, stdout, stderr);
             return (false, combined);
         }
 
