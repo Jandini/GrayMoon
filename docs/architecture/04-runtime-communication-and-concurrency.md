@@ -493,6 +493,38 @@ GrayMoon's own commits and pulls run with `skipHooks` (`-c core.hooksPath=` empt
 
 Remove Feature and Feature rollback send `skipHooks` on `DeleteBranch` (local `git branch -d` / `-D` and the remote lease push). Those deletes run in the main checkouts and the App removes the persisted branch rows itself; with hooks on, every delete queued a sync notification for a checkout it had not changed. A branch delete from Switch Branch still runs with hooks. The fetch that precedes a lease delete is not covered by `skipHooks`.
 
+### Hook removal and detaching repositories
+
+`GitSyncHooks` (Worker) is the single owner of the sync hooks: marker text, the five hook names, the scripts, install (`InstallAsync`) and removal. `HookRepositoryPathPolicy` reads the marker and names from it. Install and removal of one hooks folder take the same per-folder gate.
+
+Removal for one repository (`ResolveRemovalTargetAsync`, then `Remove`):
+
+```text
+1  folder missing -> NotFound; no .git -> NotARepository            (both successes)
+2  git rev-parse --git-common-dir --git-path hooks, never cached     failure -> Failed (GitFailed)
+3  candidate folders: <common>/hooks, plus the resolved hooks folder when it is inside the common directory
+   (hooks written before core.hooksPath was set are still in the first); never a folder outside the common directory
+4  per hook name: not GrayMoon's (no marker) -> left alone; GrayMoon's -> deleted, then the newest
+   <name>.replaced-by-graymoon[-yyyyMMddHHmmss] is renamed back and older ones are reported
+5  verify no GrayMoon hook is left; drop the hooks location cache entry
+```
+
+The App never asks for hook removal alone. `WorkspaceRepositoryDetacher` (App) sends one `DetachRepositories` (main pool) for the repositories that leave a Workspace, and every path that deletes a Workspace link row calls it first (05, "Deleting a Workspace"). The Worker does it in one command so nothing can start watching a folder again in between:
+
+```text
+1  resolve each repository path (WorkerRepositoryPaths.Resolve) and ask git where its hooks are   (before the claim)
+2  paths = those folders, plus, when workspaceRemoved, every folder IGitChangesMonitoring reports for the Workspace
+3  IRepositoryAccess.AcquireExclusiveAsync(paths): file watchers on or under them are released (and the status
+   tracker, snapshot cache and registry pruned), the Worker's own readers are cancelled, writers get the grace period;
+   while the claim is held Acquire and Touch answer UnderRemoval
+4  inside the claim: a folder still watched -> Failed (WorkerBusy); otherwise remove the hooks (file work only)
+5  lift the claim; when workspaceRemoved and nothing failed, drop the Workspace's capability cache entry
+```
+
+The claim is the mechanism Remove Feature uses; here it deletes nothing. A repository that fails does not stop the others, so a retry finishes the job. `IGitChangesMonitoring.GetMonitored(workspaceId)` (implemented by `GitRepositoryWatcherManager` with `GitChangesRepositoryRegistry`) is the answer to "which folders does the Worker watch, for which Workspace"; the read-only command `GetGitChangesMonitoring` exposes it. On the App side the detacher pauses Git Changes monitoring for every context of the Workspace (`IWorkspaceGitChangesMonitoringPause`) from before the command until the caller's row delete has run, so `GitChangesWatcherKeeper` cannot renew a watcher that was just released; on failure the pause is lifted and the next tick puts the watchers back. A Workspace repository's watcher is recursive from the Workspace folder and stays when one Source leaves; it does not keep that Source's folder locked (`DetachRepositoriesCommandTests`).
+
+A hook of a Workspace that no longer exists is dropped before any work: `IWorkspaceCapabilityProvider.IsWorkspaceGoneAsync` is true only for an HTTP 404 from `GET /workspaces/{id}/capabilities` (never for an unreachable App, a 401 or a 5xx, and never cached), and `HookSyncDispatcher` then logs one Information line and runs no git, GitVersion or project scan. The hook file stays: the Worker deletes a hook only as part of an operation the user started.
+
 ### Stale hook snapshots
 
 `WorkerSyncNotificationQueue` is serial, and a full snapshot costs a dependency recompute, so a burst of hooks can hold a snapshot for minutes. Nothing in the snapshot says when it was captured. The App therefore compares two readings of its own monotonic clock (`RepositoryStateFreshness.Now`):

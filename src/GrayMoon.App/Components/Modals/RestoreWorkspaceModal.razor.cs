@@ -24,7 +24,7 @@ public sealed partial class RestoreWorkspaceModal : ComponentBase, IDisposable
 {
     public const string FetchRepositoriesError = "Failed to fetch repositories. Please try again later.";
 
-    public const string DialogCssClass = "modal-dialog modal-lg modal-dialog-centered";
+    public const string DialogCssClass = "modal-dialog modal-lg modal-dialog-centered gm-workspace-dialog";
 
     public const string ValidationCalloutClass = "gm-callout gm-callout--error restore-validation-error";
 

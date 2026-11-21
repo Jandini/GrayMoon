@@ -311,7 +311,8 @@
             _saving = true;
             _error = null;
             Logger.LogInformation("User edited workspace {WorkspaceName}", _name);
-            await WorkspaceRepository.UpdateAsync(
+            // Through the facade: a save that removes a repository cleans its folder (hooks, watchers) first.
+            var saved = await WorkspaceRepositoryOperations.SaveWorkspaceAsync(
                 workspaceId,
                 _name,
                 _repositoryIds,
@@ -319,6 +320,12 @@
                 _type,
                 _useGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
                 _useGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
+            if (!saved.Success)
+            {
+                _error = GrayMoon.App.Services.Workspaces.DetachFailureText.Flatten(saved);
+                return;
+            }
+
             stored = true;
 
             var repositoryIdBeforeSave = _originalRepositoryId;

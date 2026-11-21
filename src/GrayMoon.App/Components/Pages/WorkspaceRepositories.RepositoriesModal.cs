@@ -73,11 +73,22 @@ public sealed partial class WorkspaceRepositories
 
         try
         {
-            await WorkspacePageService.WorkspaceRepository.UpdateAsync(
+            // Through the facade: a repository that leaves the Workspace has its folder cleaned (hooks, watchers) first.
+            var saved = await WorkspaceRepositoryOperations.SaveWorkspaceAsync(
                 WorkspaceId,
                 workspace?.Name ?? string.Empty,
                 ids,
                 workspace?.RootPath);
+            if (!saved.Success)
+            {
+                _repositoriesModal.IsSaving = false;
+                _repositoriesModal.ErrorMessage = GrayMoon.App.Services.Workspaces.DetachFailureText.Flatten(saved);
+                StateHasChanged();
+                return;
+            }
+
+            foreach (var note in saved.Warnings ?? [])
+                ToastService.Show(note);
             // Membership changed: keep the managed .gitignore section and the Workspace definition in step (D12).
             var definitionError = await ManifestService.SyncDefinitionToDiskAsync(WorkspaceId);
             if (definitionError is not null)

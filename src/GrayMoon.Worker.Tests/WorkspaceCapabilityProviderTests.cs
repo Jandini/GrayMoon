@@ -21,6 +21,53 @@ public sealed class WorkspaceCapabilityProviderTests
             NullLogger<WorkspaceCapabilityProvider>.Instance);
 
     [Fact]
+    public async Task A_404_from_the_app_means_the_workspace_is_gone_and_is_asked_again_every_time()
+    {
+        using var app = new FakeAppApi { StatusCode = 404 };
+        var provider = Create(app.BaseUrl);
+
+        Assert.True(await provider.IsWorkspaceGoneAsync(42));
+        Assert.True(await provider.IsWorkspaceGoneAsync(42));
+
+        // "Gone" is never cached: a workspace with that id can exist later.
+        Assert.Equal(2, app.Requests.Count);
+    }
+
+    [Theory]
+    [InlineData(500)]
+    [InlineData(401)]
+    public async Task A_failure_that_is_not_a_404_is_not_gone(int statusCode)
+    {
+        using var app = new FakeAppApi { StatusCode = statusCode };
+        var provider = Create(app.BaseUrl);
+
+        Assert.False(await provider.IsWorkspaceGoneAsync(42));
+    }
+
+    [Fact]
+    public async Task An_unreachable_app_is_not_gone()
+    {
+        var provider = Create($"http://127.0.0.1:{FakeAppApi.FindClosedPort()}");
+
+        Assert.False(await provider.IsWorkspaceGoneAsync(42));
+    }
+
+    [Fact]
+    public async Task A_workspace_that_exists_is_not_gone_and_its_answer_serves_the_hook_without_a_second_call()
+    {
+        using var app = new FakeAppApi();
+        app.RespondWith(calculateVersion: false, discoverProjects: false);
+        var provider = Create(app.BaseUrl);
+
+        Assert.False(await provider.IsWorkspaceGoneAsync(42));
+        var capabilities = await provider.GetAsync(42);
+        Assert.False(await provider.IsWorkspaceGoneAsync(42));
+
+        Assert.False(capabilities.ShouldCalculateVersion);
+        Assert.Single(app.Requests);
+    }
+
+    [Fact]
     public async Task Cold_cache_resolves_capabilities_from_the_app_endpoint()
     {
         using var app = new FakeAppApi();

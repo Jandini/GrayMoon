@@ -112,6 +112,19 @@ public interface IGitService
     /// </summary>
     Task WriteSyncHooksAsync(string repoPath, int workspaceId, int repositoryId, CancellationToken ct);
 
+    /// <summary>
+    /// Asks git where the repository keeps the hooks GrayMoon installed, before they are removed. Runs git, so it is
+    /// called before an exclusive claim covers the folder. A missing folder and a folder without <c>.git</c> are
+    /// settled as successes.
+    /// </summary>
+    Task<SyncHookRemovalTarget> ResolveSyncHookRemovalAsync(string repoPath, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes GrayMoon's sync hooks from the resolved hooks folders and renames the user's own replaced hooks back.
+    /// Only files that carry GrayMoon's marker are deleted. File work only, no process.
+    /// </summary>
+    SyncHookRemovalResult RemoveSyncHooks(SyncHookRemovalTarget target);
+
 
 
 

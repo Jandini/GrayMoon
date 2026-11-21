@@ -850,20 +850,6 @@ select:disabled,
     color: #fff;
 }
 
-/* Remove Workspace: Features stay on disk, but GrayMoon stops tracking them. */
-.workspace-remove-features-frame {
-    border: 1px solid var(--border-light);
-    border-radius: 0.375rem;
-    padding: 0.75rem 1rem;
-}
-
-/* Bootstrap's unchecked checkbox is white. Keep this one gray until it is checked. */
-.workspace-remove-features-frame .form-check-input:not(:checked) {
-    background-color: var(--bg-input);
-    border-color: var(--border-light);
-    background-image: none;
-}
-
 /* Bootstrap's unchecked checkbox/radio is white on the dark theme. Put .form-check-input-gray
    next to .form-check-input on every new checkbox or radio so it is gray until checked. */
 .form-check-input.form-check-input-gray:not(:checked) {

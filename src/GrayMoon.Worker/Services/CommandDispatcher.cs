@@ -62,6 +62,10 @@ public sealed class CommandDispatcher(
     ICommandHandler<CollectGitEvidenceRequest, CollectGitEvidenceResponse> collectGitEvidenceCommand,
     ICommandHandler<GetAiProvidersRequest, GetAiProvidersResponse> getAiProvidersCommand,
     ICommandHandler<GenerateAiTextRequest, GenerateAiTextResponse> generateAiTextCommand,
+    ICommandHandler<DetachRepositoriesRequest, DetachRepositoriesResponse> detachRepositoriesCommand,
+    ICommandHandler<GetGitChangesMonitoringRequest, GetGitChangesMonitoringResponse> getGitChangesMonitoringCommand,
+    ICommandHandler<ListWorkspaceRootFoldersRequest, ListWorkspaceRootFoldersResponse> listWorkspaceRootFoldersCommand,
+    ICommandHandler<InspectWorkspaceFolderRequest, InspectWorkspaceFolderResponse> inspectWorkspaceFolderCommand,
     IWorkspaceCapabilityProvider capabilityProvider) : ICommandDispatcher
     {
     private readonly IReadOnlyDictionary<string, Func<object, CancellationToken, Task<object?>>> _executors = new Dictionary<string, Func<object, CancellationToken, Task<object?>>>(StringComparer.Ordinal)
@@ -122,6 +126,10 @@ public sealed class CommandDispatcher(
         [WorkerHubMethods.CollectGitEvidence] = async (req, ct) => await collectGitEvidenceCommand.ExecuteAsync((CollectGitEvidenceRequest)req, ct),
         [WorkerHubMethods.GetAiProviders] = async (req, ct) => await getAiProvidersCommand.ExecuteAsync((GetAiProvidersRequest)req, ct),
         [WorkerHubMethods.GenerateAiText] = async (req, ct) => await generateAiTextCommand.ExecuteAsync((GenerateAiTextRequest)req, ct),
+        [WorkerHubMethods.DetachRepositories] = async (req, ct) => await detachRepositoriesCommand.ExecuteAsync((DetachRepositoriesRequest)req, ct),
+        [WorkerHubMethods.GetGitChangesMonitoring] = async (req, ct) => await getGitChangesMonitoringCommand.ExecuteAsync((GetGitChangesMonitoringRequest)req, ct),
+        [WorkerHubMethods.ListWorkspaceRootFolders] = async (req, ct) => await listWorkspaceRootFoldersCommand.ExecuteAsync((ListWorkspaceRootFoldersRequest)req, ct),
+        [WorkerHubMethods.InspectWorkspaceFolder] = async (req, ct) => await inspectWorkspaceFolderCommand.ExecuteAsync((InspectWorkspaceFolderRequest)req, ct),
     };
 
     public Task<object?> ExecuteAsync(string commandName, object request, CancellationToken cancellationToken = default)

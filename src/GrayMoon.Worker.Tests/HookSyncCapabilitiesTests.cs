@@ -136,6 +136,29 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
         Assert.Null(raw);
     }
 
+    [Theory]
+    [InlineData(NotifyHookKind.Commit)]
+    [InlineData(NotifyHookKind.Checkout)]
+    [InlineData(NotifyHookKind.Merge)]
+    [InlineData(NotifyHookKind.Push)]
+    [InlineData(NotifyHookKind.Refs)]
+    public async Task A_hook_of_a_workspace_the_app_no_longer_has_is_dropped_before_any_work_and_its_files_stay(NotifyHookKind hookKind)
+    {
+        var repo = await CloneCommittedRepositoryAsync();
+        await _git.WriteSyncHooksAsync(repo, 1, 1, CancellationToken.None);
+        var harness = NewHarness(RepositoryOperationCapabilities.For(calculateVersion: true, discoverProjects: true));
+        harness.Capabilities.WorkspaceGone = true;
+
+        await harness.Dispatcher.ExecuteAsync(NewJob(repo, hookKind));
+
+        // No capability lookup, no version provider, no project scan: nothing ran for the removed workspace.
+        Assert.Equal(0, harness.Capabilities.Calls);
+        Assert.Equal(0, harness.ProjectScanner.FindCalls);
+        Assert.Equal(0, harness.VersionProviders.VersionCalls);
+        // The Worker deletes a hook only as part of an operation the user started.
+        Assert.True(File.Exists(Path.Combine(repo, ".git", "hooks", "post-commit")));
+    }
+
     private sealed record Harness(
         HookSyncDispatcher Dispatcher,
         CountingCsProjFileService ProjectScanner,
@@ -156,7 +179,8 @@ public sealed class HookSyncCapabilitiesTests : IDisposable
             new CommitHookSyncCommand(probe, capabilityProvider, hubProvider, NullLogger<CommitHookSyncCommand>.Instance),
             new MergeHookSyncCommand(probe, capabilityProvider, hubProvider, NullLogger<MergeHookSyncCommand>.Instance),
             new PushHookSyncCommand(_reader, probe, capabilityProvider, hubProvider, NullLogger<PushHookSyncCommand>.Instance),
-            new RefsHookSyncCommand(_reader, hubProvider, NullLogger<RefsHookSyncCommand>.Instance, TimeSpan.Zero));
+            new RefsHookSyncCommand(_reader, hubProvider, NullLogger<RefsHookSyncCommand>.Instance, TimeSpan.Zero),
+            capabilityProvider);
 
         return new Harness(dispatcher, projectScanner, versionProviders, capabilityProvider);
     }

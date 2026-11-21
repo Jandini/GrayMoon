@@ -5,36 +5,29 @@ namespace GrayMoon.App.Tests;
 public sealed class ExistingWorkspaceFolderTests
 {
     [Fact]
-    public void Callout_counts_child_repositories_when_the_folder_is_not_a_workspace_repository()
+    public void Add_can_use_a_folder_that_does_not_exist_or_is_empty()
     {
-        Assert.Equal(
-            "The workspace directory exists with 1 repository.",
-            ExistingWorkspaceFolder.Callout(isWorkspaceRepository: false, workspaceRepositoryImported: false, repositoryCount: 1));
-        Assert.Equal(
-            "The workspace directory exists with 2 repositories.",
-            ExistingWorkspaceFolder.Callout(isWorkspaceRepository: false, workspaceRepositoryImported: false, repositoryCount: 2));
+        Assert.Null(ExistingWorkspaceFolder.AddBlockedReason(new WorkspaceDirectoryState(false, null, null)));
+        Assert.Null(ExistingWorkspaceFolder.AddBlockedReason(new WorkspaceDirectoryState(true, true, null)));
     }
 
     [Fact]
-    public void Callout_says_the_folder_is_a_workspace_repository()
+    public void Add_refuses_a_folder_with_content_and_points_to_import_from_disk()
     {
-        Assert.Equal(
-            "The workspace directory exists and is a workspace repository.",
-            ExistingWorkspaceFolder.Callout(isWorkspaceRepository: true, workspaceRepositoryImported: true, repositoryCount: 0));
-        Assert.Equal(
-            "The workspace directory exists and is a workspace repository, with 3 repositories.",
-            ExistingWorkspaceFolder.Callout(isWorkspaceRepository: true, workspaceRepositoryImported: true, repositoryCount: 3));
+        var reason = ExistingWorkspaceFolder.AddBlockedReason(new WorkspaceDirectoryState(true, false, null));
+
+        Assert.Equal(ExistingWorkspaceFolder.NotEmptyMessage, reason);
+        Assert.Contains("Import from disk", reason);
     }
 
     [Fact]
-    public void Callout_says_when_the_workspace_repository_is_not_imported()
+    public void Add_refuses_a_folder_that_could_not_be_checked_instead_of_assuming_it_is_free()
     {
-        Assert.Equal(
-            "The workspace directory exists and is a workspace repository that is not imported yet.",
-            ExistingWorkspaceFolder.Callout(isWorkspaceRepository: true, workspaceRepositoryImported: false, repositoryCount: 0));
-        Assert.Equal(
-            "The workspace directory exists and is a workspace repository that is not imported yet, with 1 repository.",
-            ExistingWorkspaceFolder.Callout(isWorkspaceRepository: true, workspaceRepositoryImported: false, repositoryCount: 1));
+        var unknownEmptiness = ExistingWorkspaceFolder.AddBlockedReason(new WorkspaceDirectoryState(true, null, null));
+        var workerError = ExistingWorkspaceFolder.AddBlockedReason(new WorkspaceDirectoryState(false, null, "The Worker timed out."));
+
+        Assert.Equal(ExistingWorkspaceFolder.NotEmptyMessage, unknownEmptiness);
+        Assert.Equal("Could not check the Workspace folder: The Worker timed out.", workerError);
     }
 
     [Fact]

@@ -1,0 +1,40 @@
+/* Split button: a main action with a chevron that opens a small menu (Workspaces page: Add Workspace).
+   This is the shared home for the pattern. The Actions page and the Repositories header still carry their own
+   scoped copies of the toggle rules; move them here (and delete them there) when those components are next changed. */
+
+:root .gm-split-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+:root .gm-split-toggle::after {
+    vertical-align: middle;
+    margin-left: 0;
+}
+
+/* Same-colored main button and chevron: keep the seam between them visible. */
+:root .btn-group > .btn-primary + .btn-primary.gm-split-toggle {
+    border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Catches the click outside the open menu. Below the menu, above the page. */
+:root .gm-split-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1050;
+}
+
+:root .gm-split-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: auto;
+    margin-top: 0.25rem;
+    z-index: 1051;
+}
+
+:root .gm-split-menu .dropdown-item {
+    white-space: nowrap;
+}

@@ -420,6 +420,8 @@ WorkspaceFeatureOperations          Create / Repair / Remove Feature orchestrati
 WorkspaceFeatureContextResolver     special Workspace context lookup/creation, context info
 WorkspaceContextPathResolver        per-context repository paths
 WorkspaceHookContextAttributor      maps reported repository paths to contexts
+WorkspaceRepositoryDetacher         (Services/Workspaces) "these repositories leave this Workspace": pauses monitoring,
+                                    sends DetachRepositories, reports per repository; called before any link row is deleted
 WorkspaceSelectedFeatureContextService / WorkspaceContextNavigationService   ?context=<id> and the remembered selection
 WorkspaceBranchOccupancyService     which branches are checked out by a Feature or other worktree
 WorkspaceExternalWorktreeOperations cleanup of external (non-Feature) worktrees
@@ -735,7 +737,9 @@ IGitRepositoryReader -> GitCliRepositoryReader
     default origin ref, origin URL, HEAD); always the read lane, --no-optional-locks
 IGitService -> GitService
     clone, fetch, pull, push, checkout, branch, tag, commit, merge, reset, init, remotes,
-    origin HEAD repair, divergence base, safe.directory, sync hooks, stage+commit, GitVersion
+    origin HEAD repair, divergence base, safe.directory, stage+commit, GitVersion; forwards sync hooks to GitSyncHooks
+GitSyncHooks
+    the single owner of GrayMoon's sync hooks: marker, hook names, scripts, install, removal (04, section 7)
 IGitWorktreeService -> GitWorktreeService
     list / create / remove / inspect worktrees (native git only)
 ILocalGitSnapshotReader -> LibGit2SharpLocalGitSnapshotReader
@@ -743,6 +747,7 @@ ILocalGitSnapshotReader -> LibGit2SharpLocalGitSnapshotReader
 IGitIgnoreService -> LibGit2SharpGitIgnoreService
 IRepositoryConfigurationInitializer -> RepositoryConfigurationInitializer   (writes local core.longpaths)
 GitVersionResultCache, GitHooksLocationCache
+IGitChangesMonitoring -> GitRepositoryWatcherManager                 which folders are watched, for which Workspace
 IRepositoryGitChangesService -> GitCliRepositoryGitChangesService   (Git Changes feature contract)
 IRepositoryAccess -> RepositoryAccess                                (section 10B)
 ```

@@ -595,7 +595,8 @@ internal sealed class FakeFeatureContextResolver(bool isSpecialWorkspace = true)
         });
 
     public Task<IReadOnlyList<WorkspaceFeatureContextInfo>> ListForWorkspaceAsync(int workspaceId, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+        Task.FromResult<IReadOnlyList<WorkspaceFeatureContextInfo>>(
+            [new WorkspaceFeatureContextInfo { ContextId = new WorkspaceFeatureContextId(1), WorkspaceId = workspaceId, IsSpecialWorkspace = isSpecialWorkspace }]);
 }
 
 /// <summary>Path resolver that reads the Workspace-role repository name from the database like the real one.</summary>

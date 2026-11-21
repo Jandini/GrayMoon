@@ -25,7 +25,6 @@
 @using GrayMoon.App.Services.Workspaces
 @using GrayMoon.Application
 @using GrayMoon.Application.Features
-@inject IWorkspaceFeatureOperations FeatureOperations
 @using GrayMoon.App.Services.Ui
 @using GrayMoon.App.Services.Jobs
 @using GrayMoon.App.Services.Worker
@@ -36,7 +35,6 @@
 @inject HostInfoCache HostInfo
 @inject NavigationManager Navigation
 @inject IToastService ToastService
-@inject GrayMoon.App.Services.Policy.ReferenceImportGuard ReferenceImportGuard
 @using GrayMoon.App.Data
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<AppDbContext> DbContextFactory
@@ -77,12 +75,36 @@
                                        OnCommandKeyDown="OnSearchKeyDown"
                                        OnClear="ClearSearchFilter" />
                 </div>
-                <button class="btn btn-outline-primary text-nowrap flex-shrink-0" @onclick="ShowRestoreModalAsync">
-                    Restore from repository
-                </button>
-                <button class="btn btn-primary flex-shrink-0" @onclick="ShowCreateModalAsync">
-                    Add Workspace
-                </button>
+                @* One split button: Add Workspace only adds a new Workspace; the chevron holds the two other ways in. *@
+                <div class="btn-group position-relative flex-shrink-0" @onkeydown="HandleAddMenuKeyDown">
+                    <button type="button" class="btn btn-primary text-nowrap" @onclick="ShowCreateModalAsync">
+                        Add Workspace
+                    </button>
+                    <button type="button"
+                            class="btn btn-primary dropdown-toggle dropdown-toggle-split gm-split-toggle"
+                            aria-label="More ways to add a workspace"
+                            aria-haspopup="menu"
+                            aria-expanded="@(_addMenuOpen ? "true" : "false")"
+                            @onclick="ToggleAddMenu">
+                        <span class="visually-hidden">More ways to add a workspace</span>
+                    </button>
+                    @if (_addMenuOpen)
+                    {
+                        <div class="gm-split-backdrop" @onclick="CloseAddMenu"></div>
+                        <ul class="dropdown-menu show shadow gm-split-menu" role="menu">
+                            <li>
+                                <button class="dropdown-item text-nowrap" type="button" role="menuitem" @onclick="ChooseRestoreAsync">
+                                    Restore from repository
+                                </button>
+                            </li>
+                            <li>
+                                <button class="dropdown-item text-nowrap" type="button" role="menuitem" @onclick="ChooseImport">
+                                    Import from disk
+                                </button>
+                            </li>
+                        </ul>
+                    }
+                </div>
             </div>
         </div>
         @if (errorMessage != null)
@@ -198,10 +220,6 @@
                WorkspaceName="@workspaceName"
                WorkspaceNameChanged="@OnWorkspaceNameChangedAsync"
                WorkspacePath="@GetWorkspacePath()"
-               DirectoryAlreadyExists="@(editingWorkspaceId == null && directoryExists)"
-               ExistingRepositoryCount="@existingRepositoryCount"
-               FolderIsWorkspaceRepository="@folderIsWorkspaceRepository"
-               WorkspaceRepositoryImported="@folderWorkspaceRepositoryImported"
                IsNameDisabled="@(editingWorkspaceId != null && editingWorkspaceHasFeatures)"
                NameDisabledHint="@(editingWorkspaceHasFeatures ? "Rename and root changes are not possible while Features exist. Remove Features first." : null)"
                Type="@editorType"
@@ -228,8 +246,8 @@
                FetchDisabled="@(!hasConnectors || isPersisting)"
                IsSaving="@isSaving"
                IsCheckingDirectory="@isLoadingDirectoryInfo"
-               ErrorMessage="@editorErrorMessage"
-               SaveDisabled="@EditorSaveDisabled"
+               ErrorMessage="@(editorErrorMessage ?? AddFolderBlockedMessage)"
+               SaveDisabled="@(EditorSaveDisabled || AddFolderBlockedMessage is not null)"
                OnSave="@SaveWorkspaceAsync"
                OnCancel="@CloseEditorModal" />
 
@@ -242,11 +260,9 @@
                         OnFetchRepositories="FetchRepositoriesAsync"
                         FetchDisabled="@(!hasConnectors || isPersisting)" />
 
-<WorkspaceImportModal IsVisible="@showImportModal"
-                      MatchingCount="@importMatchingCount"
-                      ImportsVersionFiles="@adoptedExistingWorkspaceRepository"
-                      OnConfirm="@ConfirmImportAsync"
-                      OnCancel="@CancelImportAsync" />
+<ImportWorkspaceModal IsVisible="@showImportFromDiskModal"
+                      OnCancel="@CloseImportFromDiskModal"
+                      OnImported="@OnWorkspaceRestoredAsync" />
 
 <WorkspaceRepositoriesModal IsVisible="@showRepositoriesModal"
                             Title="@($"Select repositories for {repositoriesModalWorkspaceName}")"
@@ -275,18 +291,35 @@
                 </div>
                 <div class="modal-body">
                     <p class="mb-2">Remove workspace <strong>@workspaceToDelete?.Name</strong>?</p>
-                    <p class="mb-0 text-muted">Only the GrayMoon workspace will be removed. Repositories on disk will stay untouched.</p>
-                    @if (deleteRequiresFeatureAcknowledgement)
+                    <p class="mb-0 text-muted">Only the GrayMoon workspace is removed. Repositories and folders on disk stay. GrayMoon removes the Git hooks it installed in them.</p>
+                    @if (deleteFeaturesMessage is not null)
                     {
-                        <div class="workspace-remove-features-frame mt-3 mb-0" role="status">
-                            <p class="mb-2">Removing this workspace loses track of its Features. Folders on disk are left in place.</p>
-                            <div class="form-check mb-0">
-                                <input class="form-check-input" type="checkbox" id="acknowledge-remove-workspace-features"
-                                       @bind="acknowledgeFeatureLoss" disabled="@isDeleting" />
-                                <label class="form-check-label text-break" for="acknowledge-remove-workspace-features">
-                                    @FeatureLossAcknowledgementLabel
-                                </label>
-                            </div>
+                        <div class="gm-callout gm-callout--warning mt-3 mb-0" role="alert">@deleteFeaturesMessage</div>
+                    }
+                    else if (IsWorkerVersionMismatch)
+                    {
+                        <div class="gm-callout gm-callout--error mt-3 mb-0" role="alert">
+                            <div class="mb-2">Update the GrayMoon Worker before removing this workspace.</div>
+                            <button type="button" class="btn btn-sm btn-outline-dark text-nowrap" @onclick="OpenWorkerPage">Update Worker</button>
+                        </div>
+                    }
+                    else if (DeleteWorkerUnavailable is not null)
+                    {
+                        <div class="gm-callout gm-callout--error mt-3 mb-0" role="alert">The GrayMoon Worker is not running. Start it to remove this workspace: it has to remove the Git hooks from the repositories.</div>
+                    }
+                    @if (deleteErrorMessage is not null)
+                    {
+                        <div class="gm-callout gm-callout--error mt-3 mb-0" role="alert">
+                            <div>@deleteErrorMessage</div>
+                            @if (deleteRepositoryErrors.Count > 0)
+                            {
+                                <ul class="small mb-0 mt-2 ps-3 text-break">
+                                    @foreach (var line in deleteRepositoryErrors)
+                                    {
+                                        <li>@line</li>
+                                    }
+                                </ul>
+                            }
                         </div>
                     }
                 </div>
@@ -393,25 +426,36 @@
 
     /// <summary>A folder that already is the chosen repository is adopted as it is, so it gets no setup branch.</summary>
     private bool EditorNeedsSetupBranch => WorkspaceModal.NeedsSetupBranch(
-        editorWorkspaceRepositoryId, editingWorkspaceRepositoryOriginalId, detectedWorkspaceRepositoryId);
+        editorWorkspaceRepositoryId, editingWorkspaceRepositoryOriginalId);
     private IReadOnlyList<RepositoryPickerChoice> editorWorkspaceRepositoryChoices = Array.Empty<RepositoryPickerChoice>();
     private HashSet<int> editorSourceRepositoryIds = new();
     private RestoreWorkspaceModal? _restoreModal;
     private const string WorkspaceRepositoryFeaturesExistMessage = "Rename and root changes are not possible while Features exist. Remove Features first.";
     private bool deleteFeatureCheckPending;
-    private bool deleteRequiresFeatureAcknowledgement;
-    private bool acknowledgeFeatureLoss;
-    private string? featureStorageRootForDelete;
+
+    /// <summary>Set while the Workspace has Features: Remove is refused until they are removed.</summary>
+    private string? deleteFeaturesMessage;
+    private string? deleteErrorMessage;
+    private IReadOnlyList<string> deleteRepositoryErrors = [];
+
+    /// <summary>Removing a Workspace removes Git hooks on the Worker's disk, so it needs the Worker.</summary>
+    private string? DeleteWorkerUnavailable => WorkerBridge.GetUnavailableReason();
+
+    private bool IsWorkerVersionMismatch => WorkerConnectionTracker.State == WorkerConnectionState.VersionMismatch;
 
     private bool DeleteConfirmDisabled =>
         isDeleting
         || deleteFeatureCheckPending
-        || (deleteRequiresFeatureAcknowledgement && !acknowledgeFeatureLoss);
+        || deleteFeaturesMessage is not null
+        || DeleteWorkerUnavailable is not null;
 
-    private string FeatureLossAcknowledgementLabel =>
-        string.IsNullOrWhiteSpace(featureStorageRootForDelete)
-            ? "I am aware of the existing features for this workspace. I want to remove this workspace."
-            : $"I am aware of the existing features in {featureStorageRootForDelete}. I want to remove this workspace.";
+    private bool _addMenuOpen;
+    private bool showImportFromDiskModal;
+
+    /// <summary>Why Add Workspace cannot use the folder of the typed name (it exists and is not empty); null when it can.</summary>
+    private string? folderBlockedMessage;
+
+    private string? AddFolderBlockedMessage => editingWorkspaceId == null ? folderBlockedMessage : null;
     private HashSet<int> editingWorkspaceRepositoryIds = new();
     private int? editorRepositoryIdBeforeSave;
     private WorkspaceModel? workspaceToDelete;
@@ -420,22 +464,11 @@
     private int? fetchedRepositoryCount;
     private CancellationTokenSource? _fetchRepositoriesCts;
     private JobTerminalBuffer? _fetchTerminal;
-    private bool directoryExists;
-    private int existingRepositoryCount;
-    private bool folderIsWorkspaceRepository;
-    private bool folderWorkspaceRepositoryImported;
-    private int? detectedWorkspaceRepositoryId;
-    private int? _autoSelectedWorkspaceRepositoryId;
-    private bool adoptedExistingWorkspaceRepository;
-    private IReadOnlyList<WorkspaceOnDiskRepository> existingRepositoryInfos = [];
     private CancellationTokenSource? _directoryInfoCts;
     private CancellationTokenSource? _directoryInfoDebounceCts;
     private bool isLoadingDirectoryInfo;
     private bool isDirectoryInfoDirty;
     private int _directoryInfoRequestId;
-    private bool showImportModal;
-    private int importMatchingCount;
-    private List<int> importRepositoryIds = new();
     private bool _disposed;
 
     protected override void OnInitialized()
@@ -545,10 +578,7 @@
         await RefreshConnectorAvailabilityAsync();
         editorTitle = "Add Workspace";
         workspaceName = string.Empty;
-        directoryExists = false;
-        existingRepositoryCount = 0;
-        ResetExistingFolderState(clearAutoSelection: true);
-        adoptedExistingWorkspaceRepository = false;
+        folderBlockedMessage = null;
         isDirectoryInfoDirty = false;
         isLoadingDirectoryInfo = false;
 
@@ -627,6 +657,32 @@
     }
 
     private void CloseRestoreModal() => showRestoreModal = false;
+
+    private void ToggleAddMenu() => _addMenuOpen = !_addMenuOpen;
+
+    private void CloseAddMenu() => _addMenuOpen = false;
+
+    private void HandleAddMenuKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            _addMenuOpen = false;
+    }
+
+    private async Task ChooseRestoreAsync()
+    {
+        _addMenuOpen = false;
+        await ShowRestoreModalAsync();
+    }
+
+    private void ChooseImport()
+    {
+        _addMenuOpen = false;
+        showImportFromDiskModal = true;
+    }
+
+    private void CloseImportFromDiskModal() => showImportFromDiskModal = false;
+
+    private void OpenWorkerPage() => Navigation.NavigateTo("worker");
 
     private async Task OnWorkspaceRestoredAsync()
     {
@@ -722,10 +778,17 @@
 
         try
         {
-            if (editingWorkspaceId == null && (isDirectoryInfoDirty || isLoadingDirectoryInfo))
+            // Add only adds: the folder is checked again right before anything is created, so a folder that was
+            // filled meanwhile is refused. A folder with content is the job of Import from disk.
+            if (editingWorkspaceId == null)
             {
                 _directoryInfoDebounceCts?.Cancel();
                 await LoadDirectoryInfoAsync();
+                if (folderBlockedMessage is not null)
+                {
+                    editorErrorMessage = folderBlockedMessage;
+                    return;
+                }
             }
 
             // Before anything is created: a bad branch name keeps the dialog open with nothing changed.
@@ -750,8 +813,6 @@
                     editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
                 editingWorkspaceId = workspace.WorkspaceId;
 
-                var adoptingExistingRepository = detectedWorkspaceRepositoryId is int detectedId
-                    && editorWorkspaceRepositoryId == detectedId;
                 var createWorkspaceRepositoryError = await ApplyWorkspaceRepositoryChangeAsync(workspace.WorkspaceId);
                 if (createWorkspaceRepositoryError is not null)
                 {
@@ -759,19 +820,11 @@
                     ToastService.ShowError(createWorkspaceRepositoryError);
                     return;
                 }
-
-                adoptedExistingWorkspaceRepository = adoptingExistingRepository;
-
-                if (existingRepositoryCount > 0)
-                    await TrySuggestImportsAsync(workspace.WorkspaceId, workspace.Name);
-
-                if (!showImportModal && adoptedExistingWorkspaceRepository)
-                    await ImportVersionFilesAsync(workspace.WorkspaceId);
             }
             else
             {
                 Logger.LogInformation("User edited workspace {WorkspaceName}", workspaceName);
-                await WorkspaceRepository.UpdateAsync(
+                var saved = await WorkspaceRepositoryOperations.SaveWorkspaceAsync(
                     editingWorkspaceId.Value,
                     workspaceName,
                     editingWorkspaceRepositoryIds,
@@ -779,6 +832,12 @@
                     editorType,
                     editorUseGitVersion ? WorkspaceVersioningMode.GitVersion : WorkspaceVersioningMode.None,
                     editorUseGitHubActions ? WorkspaceCiProvider.GitHubActions : WorkspaceCiProvider.None);
+                if (!saved.Success)
+                {
+                    editorErrorMessage = DetachFailureText.Flatten(saved);
+                    return;
+                }
+
                 await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
                 await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
 
@@ -812,11 +871,8 @@
                 }
             }
 
-            if (!showImportModal)
-            {
-                CloseEditorModal();
-                await LoadWorkspacesAsync();
-            }
+            CloseEditorModal();
+            await LoadWorkspacesAsync();
         }
         catch (Exception ex)
         {
@@ -855,7 +911,17 @@
         try
         {
             Logger.LogInformation("User added {Count} repositories to workspace {WorkspaceName}", selectedRepositoryIds.Count, repositoriesModalWorkspaceName);
-            await WorkspaceRepository.UpdateAsync(editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds, editingWorkspaceRootPath);
+            // Through the facade: a repository that leaves the Workspace has its folder cleaned (hooks, watchers) first.
+            var saved = await WorkspaceRepositoryOperations.SaveWorkspaceAsync(
+                editingWorkspaceId.Value, repositoriesModalWorkspaceName, selectedRepositoryIds, editingWorkspaceRootPath);
+            if (!saved.Success)
+            {
+                repositoriesModalErrorMessage = DetachFailureText.Flatten(saved);
+                return;
+            }
+
+            foreach (var note in saved.Warnings ?? [])
+                ToastService.Show(note);
             await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
             await PendingActionsService.RefreshAsync(editingWorkspaceId.Value, WorkspaceRepository, WorkspaceProjectRepository);
 
@@ -892,23 +958,27 @@
     private async Task ShowDeleteModal(WorkspaceModel workspace)
     {
         workspaceToDelete = workspace;
-        deleteRequiresFeatureAcknowledgement = false;
-        acknowledgeFeatureLoss = false;
-        featureStorageRootForDelete = null;
+        deleteFeaturesMessage = null;
+        deleteErrorMessage = null;
+        deleteRepositoryErrors = [];
         deleteFeatureCheckPending = true;
         showDeleteModal = true;
 
         try
         {
-            var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
+            var features = await WorkspaceRepositoryOperations.GetFeatureNamesAsync(workspace.WorkspaceId);
             if (!showDeleteModal || workspaceToDelete != workspace)
                 return;
 
+            // A Workspace with Features is not removed: the Features go first (their worktrees are theirs to remove).
             if (features.Count > 0)
-            {
-                deleteRequiresFeatureAcknowledgement = true;
-                featureStorageRootForDelete = await ResolveFeatureStorageRootForDeleteAsync(workspace);
-            }
+                deleteFeaturesMessage = GrayMoon.App.Services.Application.WorkspaceRepositoryOperations.FeaturesExistOnRemoveMessage(features);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not read the Features of workspace {WorkspaceId}", workspace.WorkspaceId);
+            if (workspaceToDelete == workspace)
+                deleteErrorMessage = "The workspace's Features could not be read. Close this dialog and try again.";
         }
         finally
         {
@@ -917,26 +987,13 @@
         }
     }
 
-    private async Task<string?> ResolveFeatureStorageRootForDeleteAsync(WorkspaceModel workspace)
-    {
-        var header = await WorkspaceRepository.GetHeaderAsync(workspace.WorkspaceId);
-        if (!string.IsNullOrWhiteSpace(header?.ManagedFeatureStorageRoot))
-            return header.ManagedFeatureStorageRoot;
-
-        var storageRoot = await WorkspaceService.ResolveFeatureStorageRootPathAsync();
-        if (string.IsNullOrWhiteSpace(storageRoot))
-            return null;
-
-        return WorkerPath.Combine(storageRoot, workspace.Name, "features");
-    }
-
     private void CloseDeleteModal()
     {
         showDeleteModal = false;
         workspaceToDelete = null;
-        deleteRequiresFeatureAcknowledgement = false;
-        acknowledgeFeatureLoss = false;
-        featureStorageRootForDelete = null;
+        deleteFeaturesMessage = null;
+        deleteErrorMessage = null;
+        deleteRepositoryErrors = [];
         deleteFeatureCheckPending = false;
     }
 
@@ -944,7 +1001,8 @@
     {
         if (e.Key == "Escape")
         {
-            CloseDeleteModal();
+            if (!isDeleting)
+                CloseDeleteModal();
         }
         else if (ModalKeyboard.IsPlainEnter(e) && !DeleteConfirmDisabled)
         {
@@ -955,38 +1013,40 @@
     private async Task DeleteWorkspaceAsync()
     {
         var workspace = workspaceToDelete;
-        if (workspace == null || isDeleting || deleteFeatureCheckPending)
-            return;
-
-        if (!deleteRequiresFeatureAcknowledgement)
-        {
-            var features = await FeatureOperations.ListFeaturesAsync(workspace.WorkspaceId);
-            if (workspaceToDelete != workspace)
-                return;
-
-            if (features.Count > 0)
-            {
-                deleteRequiresFeatureAcknowledgement = true;
-                featureStorageRootForDelete = await ResolveFeatureStorageRootForDeleteAsync(workspace);
-                return;
-            }
-        }
-
-        if (workspaceToDelete != workspace || (deleteRequiresFeatureAcknowledgement && !acknowledgeFeatureLoss))
+        if (workspace == null || DeleteConfirmDisabled)
             return;
 
         try
         {
             isDeleting = true;
-            Logger.LogInformation("User deleted workspace {WorkspaceName}", workspace.Name);
-            await WorkspaceRepository.DeleteAsync(workspace.WorkspaceId);
+            deleteErrorMessage = null;
+            deleteRepositoryErrors = [];
+            Logger.LogInformation("User asked to remove workspace {WorkspaceName}", workspace.Name);
+
+            // The operation checks Features and the Worker again under the Workspace lock, removes the Git hooks from
+            // every repository, and deletes the Workspace only when that worked for all of them.
+            var result = await WorkspaceRepositoryOperations.RemoveWorkspaceAsync(workspace.WorkspaceId);
+            if (workspaceToDelete != workspace)
+                return;
+
+            if (!result.Success)
+            {
+                deleteErrorMessage = result.Error ?? "The workspace was not removed.";
+                deleteRepositoryErrors = result.RepoErrors is { Count: > 0 } repositoryErrors
+                    ? repositoryErrors.OrderBy(error => error.Key).Select(error => error.Value).ToList()
+                    : [];
+                return;
+            }
+
+            foreach (var note in result.Warnings ?? [])
+                ToastService.Show(note);
             CloseDeleteModal();
             await LoadWorkspacesAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error deleting workspace");
-            errorMessage = "Failed to delete workspace. Please try again later.";
+            Logger.LogError(ex, "Error removing workspace");
+            deleteErrorMessage = $"The workspace was not removed. {ex.Message}";
         }
         finally
         {
@@ -1185,9 +1245,7 @@
 
         if (string.IsNullOrWhiteSpace(workspaceName))
         {
-            directoryExists = false;
-            existingRepositoryCount = 0;
-            ResetExistingFolderState(clearAutoSelection: true);
+            folderBlockedMessage = null;
             isLoadingDirectoryInfo = false;
             isDirectoryInfoDirty = false;
             StateHasChanged();
@@ -1202,25 +1260,17 @@
         try
         {
             isLoadingDirectoryInfo = true;
-            var existsTask = WorkspaceService.DirectoryExistsAsync(workspaceName, editingWorkspaceRootPath, ct);
-            var infosTask = WorkspaceService.GetWorkspaceRepositoryInfosAsync(workspaceName, editingWorkspaceRootPath, ct);
-            directoryExists = await existsTask;
-            var onDisk = await infosTask;
-            existingRepositoryInfos = onDisk.Repositories;
-            existingRepositoryCount = onDisk.Repositories.Count;
-            folderIsWorkspaceRepository = onDisk.WorkspaceRepository is not null;
-            await ApplyDetectedWorkspaceRepositoryAsync(onDisk.WorkspaceRepository?.OriginUrl, ct);
+            var state = await WorkspaceService.GetDirectoryStateAsync(workspaceName, editingWorkspaceRootPath, ct);
+            if (requestId == _directoryInfoRequestId)
+                folderBlockedMessage = ExistingWorkspaceFolder.AddBlockedReason(state);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.LogDebug(ex, "Failed to load directory info for {WorkspaceName}", workspaceName);
+            // A folder that could not be checked is never treated as free: Add would then write into it unseen.
+            Logger.LogWarning(ex, "Failed to check the folder for {WorkspaceName}", workspaceName);
             if (requestId == _directoryInfoRequestId)
-            {
-                directoryExists = false;
-                existingRepositoryCount = 0;
-                ResetExistingFolderState(clearAutoSelection: true);
-            }
+                folderBlockedMessage = ExistingWorkspaceFolder.CheckFailedMessage;
         }
         finally
         {
@@ -1230,137 +1280,6 @@
                 isDirectoryInfoDirty = false;
                 await InvokeAsync(StateHasChanged);
             }
-        }
-    }
-
-    private async Task ApplyDetectedWorkspaceRepositoryAsync(string? originUrl, CancellationToken cancellationToken)
-    {
-        int? matched = null;
-        if (!string.IsNullOrWhiteSpace(originUrl))
-        {
-            await using var db = await DbContextFactory.CreateDbContextAsync(cancellationToken);
-            var rows = await db.Repositories.AsNoTracking()
-                .Select(r => new { r.RepositoryId, r.CloneUrl })
-                .ToListAsync(cancellationToken);
-            matched = ExistingWorkspaceFolder.MatchRepositoryId(
-                originUrl, rows.Select(r => (r.RepositoryId, r.CloneUrl)));
-        }
-
-        var selectable = matched is int id && editorWorkspaceRepositoryChoices.Any(c => c.RepositoryId == id)
-            ? matched
-            : null;
-        detectedWorkspaceRepositoryId = matched;
-        folderWorkspaceRepositoryImported = selectable is not null;
-
-        if (selectable is int selected && (editorWorkspaceRepositoryId is null || editorWorkspaceRepositoryId == _autoSelectedWorkspaceRepositoryId))
-        {
-            editorWorkspaceRepositoryId = selected;
-            _autoSelectedWorkspaceRepositoryId = selected;
-            return;
-        }
-
-        if (selectable is null && editorWorkspaceRepositoryId == _autoSelectedWorkspaceRepositoryId)
-        {
-            editorWorkspaceRepositoryId = null;
-            _autoSelectedWorkspaceRepositoryId = null;
-        }
-    }
-
-    private void ResetExistingFolderState(bool clearAutoSelection)
-    {
-        folderIsWorkspaceRepository = false;
-        folderWorkspaceRepositoryImported = false;
-        detectedWorkspaceRepositoryId = null;
-        existingRepositoryInfos = [];
-        if (clearAutoSelection && editorWorkspaceRepositoryId == _autoSelectedWorkspaceRepositoryId)
-            editorWorkspaceRepositoryId = null;
-        _autoSelectedWorkspaceRepositoryId = null;
-    }
-
-    private async Task ImportVersionFilesAsync(int workspaceId)
-    {
-        var merged = await ManifestService.MergeVersionFilesFromDefinitionAsync(workspaceId);
-        if (!merged.Success)
-            ToastService.ShowError(merged.Error ?? "Could not import version files.");
-    }
-
-    private async Task TrySuggestImportsAsync(int workspaceId, string workspaceName)
-    {
-        try
-        {
-            var infos = existingRepositoryInfos;
-            if (infos.Count == 0)
-                return;
-
-            var urls = infos
-                .Select(i => i.OriginUrl)
-                .Where(u => !string.IsNullOrWhiteSpace(u))
-                .Select(u => u!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (urls.Count == 0)
-                return;
-
-            await using var db = await DbContextFactory.CreateDbContextAsync();
-            var rows = await db.Repositories.AsNoTracking()
-                .Select(r => new { r.RepositoryId, r.CloneUrl })
-                .ToListAsync();
-            var catalog = rows.Select(r => (r.RepositoryId, r.CloneUrl)).ToList();
-
-            var matchedIds = new HashSet<int>();
-            foreach (var url in urls)
-            {
-                var repoId = ExistingWorkspaceFolder.MatchRepositoryId(url, catalog);
-                if (repoId is int id && id != detectedWorkspaceRepositoryId)
-                    matchedIds.Add(id);
-            }
-
-            if (matchedIds.Count == 0)
-                return;
-
-            importRepositoryIds = matchedIds.ToList();
-            importMatchingCount = importRepositoryIds.Count;
-            showImportModal = true;
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogDebug(ex, "Failed to suggest imports for workspace {WorkspaceName}", workspaceName);
-        }
-    }
-
-    private async Task ConfirmImportAsync()
-    {
-        if (editingWorkspaceId is null || importRepositoryIds.Count == 0)
-        {
-            showImportModal = false;
-            CloseEditorModal();
-            await LoadWorkspacesAsync();
-            return;
-        }
-
-        try
-        {
-            await WorkspaceRepository.AddRepositoriesAsync(editingWorkspaceId.Value, importRepositoryIds);
-            // These folders already exist and may hold commits that are only on this machine: one that would start
-            // read-only with such commits is kept writable.
-            foreach (var warning in await ReferenceImportGuard.ApplyAsync(editingWorkspaceId.Value, importRepositoryIds))
-                ToastService.ShowWarning(warning);
-            if (adoptedExistingWorkspaceRepository)
-                await ImportVersionFilesAsync(editingWorkspaceId.Value);
-            else
-                await SyncWorkspaceDefinitionAsync(editingWorkspaceId.Value);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to import repositories into workspace {WorkspaceId}", editingWorkspaceId);
-        }
-        finally
-        {
-            showImportModal = false;
-            CloseEditorModal();
-            await LoadWorkspacesAsync();
         }
     }
 
@@ -1452,13 +1371,5 @@
         var error = await ManifestService.SyncDefinitionToDiskAsync(workspaceId);
         if (error is not null)
             ToastService.ShowError(error);
-    }
-
-    private async Task CancelImportAsync()
-    {
-        showImportModal = false;
-        CloseEditorModal();
-        await LoadWorkspacesAsync();
-        await InvokeAsync(StateHasChanged);
     }
 }

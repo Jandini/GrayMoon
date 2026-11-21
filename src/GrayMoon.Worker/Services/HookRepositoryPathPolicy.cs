@@ -19,15 +19,15 @@ namespace GrayMoon.Worker.Services;
 /// </remarks>
 public sealed class HookRepositoryPathPolicy(KnownWorkspaceRoots knownRoots)
 {
-    // The marker GitService writes at the top of every hook it installs. Persisted in users' hook files; the text
-    // must stay equal to GitService.GrayMoonHookMarker (HookRepositoryPathPolicyTests installs real hooks to prove it).
-    private const string GrayMoonHookMarker = "# Created by GrayMoon.Agent";
+    // The marker and hook names have one definition, in GitSyncHooks. Persisted in users' hook files; the text
+    // must never change (HookRepositoryPathPolicyTests installs real hooks and checks they are recognized).
+    private const string GrayMoonHookMarker = GitSyncHooks.Marker;
 
     private const int MaxPointerFileBytes = 4 * 1024;
     private const int MaxHookFileBytes = 64 * 1024;
 
     private static readonly string[] SyncHookNames =
-        ["post-commit", "post-checkout", "post-merge", "pre-push", "reference-transaction"];
+        GitSyncHooks.HookNames;
 
     /// <summary>Null when the path may be scanned; otherwise why it was refused (for the log, never sent to the caller).</summary>
     public string? GetRejectionReason(string? repositoryPath, int workspaceId, int repositoryId)

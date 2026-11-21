@@ -1015,6 +1015,18 @@ internal sealed class OperationsFixture : IAsyncDisposable
 
     public List<int> GitChangesScans { get; } = [];
 
+    public GrayMoon.App.Services.GitChanges.WorkspaceGitChangesMonitoringPause MonitoringPause { get; } = new();
+
+    /// <summary>The Workspace lock the operations run under, so a test can hold it.</summary>
+    public WorkspaceOperationRunner Lock { get; } = new(NullLogger<WorkspaceOperationRunner>.Instance);
+
+    /// <summary>Stores the workspace root the Import operations read (the fixture's folder is C:\work\ws).</summary>
+    public async Task ConfigureRootAsync()
+    {
+        await using var db = new AppDbContext(_seed.Options);
+        await new AppSettingRepository(db).SetValueAsync(AppSettingRepository.WorkspaceRootPathKey, ManifestTestFixture.WorkspaceRoot);
+    }
+
     public WorkspaceRepositoryOperations Operations { get; }
 
     private OperationsFixture(ManifestTestFixture seed)
@@ -1041,12 +1053,19 @@ internal sealed class OperationsFixture : IAsyncDisposable
             Remote,
             new WorkspaceManifestFile(),
             Manifest,
-            new WorkspaceOperationRunner(NullLogger<WorkspaceOperationRunner>.Instance),
+            Lock,
             new FakeWorkspacePathResolver(seed.Factory),
             new FakeFeatureContextResolver(),
             workspaceRepository,
             workspaceService,
             new RecordingGitChangesScanner(GitChangesScans),
+            new WorkspaceRepositoryDetacher(
+                seed.Factory,
+                seed.Bridge,
+                new FakeWorkspacePathResolver(seed.Factory),
+                new FakeFeatureContextResolver(),
+                MonitoringPause,
+                NullLogger<WorkspaceRepositoryDetacher>.Instance),
             NullLogger<WorkspaceRepositoryOperations>.Instance);
     }
 

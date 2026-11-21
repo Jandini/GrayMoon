@@ -1,0 +1,248 @@
+@using GrayMoon.Abstractions.Workspaces
+@using GrayMoon.App.Components.Shared
+@using GrayMoon.Application.Workspaces
+
+@if (IsVisible && !_busy)
+{
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);"
+         @onkeydown="HandleKeyDownAsync"
+         @ref="_modalElement">
+        <div class="@DialogCssClass">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-nowrap">Import Workspace</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+                </div>
+                @if (_panel is not null)
+                {
+                    <div class="modal-body">
+                        <p class="mb-2 fw-semibold">@_panel.Headline</p>
+                        @if (_panel.SyncError is not null)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">
+                                <div>@ImportResultPanel.SyncRetryHint</div>
+                                <div class="small text-muted mt-1">@_panel.SyncError</div>
+                            </div>
+                        }
+                        @foreach (var warning in _panel.Warnings)
+                        {
+                            <div class="gm-callout gm-callout--warning mb-3" role="alert">@warning</div>
+                        }
+                        @if (_panel.HasUnresolved)
+                        {
+                            <ul class="restore-missing-list small mb-2">
+                                @foreach (var repository in _panel.UnresolvedRepositories)
+                                {
+                                    <li>@repository</li>
+                                }
+                                @foreach (var connector in _panel.UnresolvedConnectors)
+                                {
+                                    <li>Connector: @connector</li>
+                                }
+                            </ul>
+                            <p class="text-muted small mb-0">@ImportResultPanel.ImportGuidance</p>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        @if (_panel.HasUnresolved)
+                        {
+                            <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0" @onclick="OpenConnectors">Open Connectors</button>
+                        }
+                        <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="OpenWorkspace">Open Workspace</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="modal-body">
+                        <p class="text-muted mb-3">Import a folder that is already on this computer as a GrayMoon Workspace. Nothing in the folder is deleted or reset.</p>
+
+                        @if (IsWorkerVersionMismatch)
+                        {
+                            <div class="@RestoreWorkspaceModal.ValidationCalloutClass" role="alert">
+                                <div class="mb-1">Update the GrayMoon Worker before importing a Workspace.</div>
+                                <div class="small font-monospace">App:&nbsp;&nbsp;&nbsp; @(WorkerConnectionTracker.AppSemVer ?? "unknown")</div>
+                                <div class="small font-monospace mb-2">Worker: @(WorkerConnectionTracker.WorkerSemVer ?? "unknown")</div>
+                                <button type="button" class="btn btn-sm btn-outline-dark text-nowrap" @onclick="OpenWorkerPage">Update Worker</button>
+                            </div>
+                        }
+                        else if (WorkerUnavailable is not null)
+                        {
+                            <div class="@RestoreWorkspaceModal.ValidationCalloutClass" role="alert">Worker is not available. Start the GrayMoon Worker to import a Workspace.</div>
+                        }
+
+                        <div class="mb-3">
+                            <label class="form-label text-nowrap" for="import-workspace-folder">Folder</label>
+                            <RepositoryPicker Id="import-workspace-folder"
+                                              Choices="@_folderChoices"
+                                              SelectedRepositoryId="@SelectedFolderIndex"
+                                              SelectedRepositoryIdChanged="OnFolderPickedAsync"
+                                              Placeholder="@(_foldersLoading ? "Loading folders..." : "Select a folder")"
+                                              SearchPlaceholder="Search folders"
+                                              EmptyText="No matching folders"
+                                              Disabled="@_foldersLoading"
+                                              ShowFetch="false" />
+                            @if (_foldersError is not null)
+                            {
+                                <div class="@RestoreWorkspaceModal.ValidationCalloutClass mt-2" role="alert">@_foldersError</div>
+                            }
+                            else if (!_foldersLoading && _folders.Count == 0)
+                            {
+                                <div class="gm-callout gm-callout--info mt-2" role="status">@ImportWorkspaceFlow.NoFoldersMessage</div>
+                            }
+                            @if (FolderPath.Length > 0)
+                            {
+                                <div class="form-text text-break">
+                                    The workspace is named <strong>@_folder</strong>, like its folder. Location <span class="font-monospace">@FolderPath</span>
+                                </div>
+                            }
+                        </div>
+
+                        @if (_preflightPending)
+                        {
+                            <div class="text-muted small mb-3" role="status">@ImportWorkspaceFlow.CheckingFolderStatus</div>
+                        }
+                        else if (_preflight is { Success: false } failed)
+                        {
+                            <div class="@RestoreWorkspaceModal.ValidationCalloutClass" role="alert">
+                                <div>@failed.Error</div>
+                                @if (failed.NotLinked.Count > 0)
+                                {
+                                    <ul class="restore-missing-list small mb-0 mt-1">
+                                        @foreach (var line in failed.NotLinked)
+                                        {
+                                            <li>@line</li>
+                                        }
+                                    </ul>
+                                }
+                                @if (failed.NeedsConnectors)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-dark text-nowrap mt-2" @onclick="OpenConnectors">Open Connectors</button>
+                                }
+                            </div>
+                        }
+                        else if (_preflight is { Success: true } preview)
+                        {
+                            <div class="restore-preview p-2 mb-3">
+                                <dl class="restore-preview-grid small mb-0">
+                                    <dt>Folder</dt>
+                                    <dd>@ImportWorkspaceFlow.ShapeLabel(preview.Shape)</dd>
+                                    @if (preview.WorkspaceRepository is not null)
+                                    {
+                                        <dt>Workspace repository</dt>
+                                        <dd>@preview.WorkspaceRepository</dd>
+                                    }
+                                    @if (preview.ProfileFromDefinition)
+                                    {
+                                        <dt>Profile</dt>
+                                        <dd>@RestoreWorkspaceFlow.ProfileTypeLabel(preview.WorkspaceType)</dd>
+                                        <dt>Versioning</dt>
+                                        <dd>@RestoreWorkspaceFlow.VersioningLabel(preview.VersioningMode)</dd>
+                                        <dt>CI</dt>
+                                        <dd>@RestoreWorkspaceFlow.CiLabel(preview.CiProvider)</dd>
+                                    }
+                                    <dt>Linked as they are</dt>
+                                    <dd>@ImportWorkspaceFlow.CountLabel(preview.LinkedOnDisk.Count)</dd>
+                                    @if (preview.ToClone.Count > 0)
+                                    {
+                                        <dt>Cloned by the Sync</dt>
+                                        <dd>@ImportWorkspaceFlow.CountLabel(preview.ToClone.Count)</dd>
+                                    }
+                                    @if (preview.ReadOnlyCount > 0)
+                                    {
+                                        <dt>Read only</dt>
+                                        <dd>@ImportWorkspaceFlow.CountLabel(preview.ReadOnlyCount)</dd>
+                                    }
+                                </dl>
+                            </div>
+
+                            @if (preview.Note is not null)
+                            {
+                                <div class="gm-callout gm-callout--info mb-3" role="status">@preview.Note</div>
+                            }
+
+                            @if (preview.NotLinked.Count > 0)
+                            {
+                                <div class="gm-callout gm-callout--warning mb-3" role="status">
+                                    <div>@(preview.NotLinked.Count == 1 ? "1 repository in the folder is not linked and stays as it is:" : $"{preview.NotLinked.Count} repositories in the folder are not linked and stay as they are:")</div>
+                                    <ul class="restore-missing-list small mb-0 mt-1">
+                                        @foreach (var line in preview.NotLinked)
+                                        {
+                                            <li>@line</li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+
+                            @if (preview.MissingRepositories.Count > 0 || preview.MissingConnectors.Count > 0)
+                            {
+                                <div class="gm-callout gm-callout--warning mb-3" role="status">
+                                    <div>The definition lists repositories or connectors that are not available on this computer. The workspace can still be imported.</div>
+                                    <ul class="restore-missing-list small mb-0 mt-1">
+                                        @foreach (var repository in preview.MissingRepositories)
+                                        {
+                                            <li>@repository</li>
+                                        }
+                                        @foreach (var connector in preview.MissingConnectors)
+                                        {
+                                            <li>Connector: @connector</li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+
+                            @if (!preview.ProfileFromDefinition)
+                            {
+                                <div class="mb-3">
+                                    <div class="form-label text-nowrap">Workspace Type</div>
+                                    <div class="form-check">
+                                        <input class="form-check-input form-check-input-gray" type="radio" name="import-workspace-type" id="importTypeDotNet"
+                                               checked="@(_type == WorkspaceType.DotNetDependency)"
+                                               @onchange="() => OnTypeChosen(WorkspaceType.DotNetDependency)" />
+                                        <label class="form-check-label text-nowrap" for="importTypeDotNet">.NET Dependency</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input form-check-input-gray" type="radio" name="import-workspace-type" id="importTypeBasic"
+                                               checked="@(_type == WorkspaceType.Basic)"
+                                               @onchange="() => OnTypeChosen(WorkspaceType.Basic)" />
+                                        <label class="form-check-label text-nowrap" for="importTypeBasic">Basic</label>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input form-check-input-gray" type="checkbox" id="importUseGitVersion" @bind="_useGitVersion" />
+                                        <label class="form-check-label text-nowrap" for="importUseGitVersion">Calculate versions with GitVersion</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input form-check-input-gray" type="checkbox" id="importUseGitHubActions" @bind="_useGitHubActions" />
+                                        <label class="form-check-label text-nowrap" for="importUseGitHubActions">Show GitHub Actions</label>
+                                    </div>
+                                </div>
+                            }
+                        }
+
+                        @if (_error is not null)
+                        {
+                            <div class="@RestoreWorkspaceModal.ValidationCalloutClass" role="alert">
+                                <div>@_error</div>
+                                @if (_errorResidue is not null)
+                                {
+                                    <div class="small mt-1">@_errorResidue</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary text-nowrap flex-shrink-0" @onclick="CancelAsync">Cancel</button>
+                        <button type="button" class="btn btn-primary text-nowrap flex-shrink-0" data-default-action @onclick="StartImport" disabled="@(!CanImport)">
+                            @if (_preflightPending)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Import
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
