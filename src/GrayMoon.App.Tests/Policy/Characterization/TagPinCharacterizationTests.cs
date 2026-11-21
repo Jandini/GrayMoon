@@ -117,9 +117,11 @@ public sealed class TagPinCharacterizationTests
                 .CreateBranchAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "topic", "main");
         }
 
-        // This path writes no repository state itself (the hook does), so the database still shows the tag.
+        // This path records the branch the Worker reports (it used to leave that to the hook), so the tag is gone here too.
         AssertPinCleared(pins);
-        Assert.Equal(Tag, (await ctx.ReadLinkAsync()).CheckedOutTag);
+        var link = await ctx.ReadLinkAsync();
+        Assert.Null(link.CheckedOutTag);
+        Assert.Equal("topic", link.BranchName);
     }
 
     [Fact]

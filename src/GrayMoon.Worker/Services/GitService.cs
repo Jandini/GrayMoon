@@ -208,7 +208,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 var (retryExitCode, retryStdout, retryStderr) = await runner.RunAsync(fileName, arguments, repoPath, ct);
                 if (retryExitCode != 0)
                 {
-                    var retryError = BuildProcessError(retryStderr, retryStdout, $"{toolName} exited with code {retryExitCode}");
+                    var retryError = GitVersionFailureText.Summarize(retryStderr, retryStdout)
+                        ?? BuildProcessError(retryStderr, retryStdout, $"{toolName} exited with code {retryExitCode}");
                     logger.LogError("{ToolName} failed after tool restore. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", toolName, retryExitCode, retryStdout, retryStderr);
                     return (null, retryError);
                 }
@@ -216,7 +217,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             }
             else
             {
-                var error = BuildProcessError(stderr, stdout, $"{toolName} exited with code {exitCode}");
+                // A repository without commits has no version. That is its normal state, not a tool failure, so the
+                // row gets one sentence and the log one line instead of GitVersion's stack trace.
+                if (GitVersionFailureText.IsNoCommits(stderr, stdout))
+                {
+                    logger.LogInformation("{ToolName} found no commits on the current branch of {RepoPath}; the version stays unresolved.", toolName, repoPath);
+                    return (null, GitVersionFailureText.NoCommits);
+                }
+
+                var error = GitVersionFailureText.Summarize(stderr, stdout)
+                    ?? BuildProcessError(stderr, stdout, $"{toolName} exited with code {exitCode}");
                 if (manifestExists)
                     logger.LogWarning("{ToolName} failed in {ElapsedMs}ms in {RepoPath}. Tool manifest exists, but failure does not look like a missing local tool; skipping 'dotnet tool restore'. ExitCode={ExitCode}", toolName, sw.ElapsedMilliseconds, repoPath, exitCode);
                 // A warning, not an error: the repository keeps syncing with an unresolved version.
@@ -607,6 +617,21 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                     return (false, CombineOutput(stdout, stderr));
                 }
             }
+            else if (!await reader.RefExistsAsync(repoPath, "HEAD", ct))
+            {
+                // A repository without commits has no branch to check out: a branch there is only the name the
+                // unborn HEAD points at ("pathspec did not match"). The name it is already on is a success, any
+                // other name moves the unborn HEAD, which keeps the index and the files.
+                if (!string.Equals(await reader.GetCurrentBranchNameAsync(repoPath, ct), branchName, StringComparison.Ordinal))
+                {
+                    var (exitCode, stdout, stderr) = await runner.RunAsync("git", [.. GetHooksConfigArgs(skipHooks), "checkout", "-b", branchName, "--"], repoPath, null, ct);
+                    if (exitCode != 0)
+                    {
+                        logger.LogError("Git checkout failed for {RepoPath}, which has no commits. Branch={Branch}, ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, branchName, exitCode, stdout, stderr);
+                        return (false, CombineOutput(stdout, stderr));
+                    }
+                }
+            }
             else
             {
                 var (exitCode, stdout, stderr) = await runner.RunAsync("git", $"{hooksPrefix}checkout {branchName}", repoPath, ct);
@@ -652,6 +677,22 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         if (await reader.RefExistsAsync(repoPath, remoteCandidate, ct))
             startPoint = remoteCandidate;
+
+        // A repository without commits has no base to branch from ("'main' is not a commit"). Its current branch is
+        // only a name, so the new branch takes its place: git moves the unborn HEAD and keeps the index and the files.
+        // Only when the base is missing too; a base that exists is used as in any other repository.
+        if (!await reader.RefExistsAsync(repoPath, "HEAD", ct) && !await reader.RefExistsAsync(repoPath, startPoint, ct))
+        {
+            var (unbornExit, unbornOut, unbornErr) = await runner.RunAsync("git", [.. hooksArgs, "checkout", "-b", newBranchName, "--"], repoPath, null, ct);
+            if (unbornExit != 0)
+            {
+                logger.LogError("Git create branch failed for {RepoPath}, which has no commits. NewBranch={NewBranch}, ExitCode={ExitCode}", repoPath, newBranchName, unbornExit);
+                return (false, CombineOutput(unbornOut, unbornErr), false);
+            }
+
+            logger.LogInformation("Git branch {NewBranch} set as the current branch of {RepoPath}, which has no commits; base {BaseBranch} is not used.", newBranchName, repoPath, baseBranchName);
+            return (true, null, false);
+        }
 
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", [.. hooksArgs, "checkout", "-b", newBranchName, "--no-track", startPoint, "--"], repoPath, null, ct);
         if (exitCode != 0)

@@ -53,6 +53,13 @@ public static class RepositoryPolicySubjectExtensions
         RepositoryOperationPolicy.IsAllowed(operation, row.ToPolicySubject(isFeatureContext), scope);
 
     /// <summary>
+    /// True when a bulk <paramref name="operation"/> includes the repository of this link only when it can take part
+    /// and must not depend on it (<see cref="RepositoryOperationPolicy.IsOptional"/>).
+    /// </summary>
+    public static bool IsOptionalFor(this WorkspaceRepositoryLink link, RepositoryOperation operation) =>
+        RepositoryOperationPolicy.IsOptional(operation, link.ToPolicySubject(isFeatureContext: false));
+
+    /// <summary>
     /// For a caller that was handed rows without the kind of context they came from. No rule reads the context kind:
     /// the row itself says whether it is a reference repository or a reference snapshot.
     /// </summary>

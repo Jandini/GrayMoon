@@ -180,16 +180,61 @@ public sealed class ReferenceRepositoryEnforcementTests
     }
 
     [Fact]
-    public async Task A_Workspace_wide_checkout_leaves_the_read_only_repository_where_it_is()
+    public async Task A_Workspace_wide_checkout_leaves_a_read_only_repository_without_the_branch_where_it_is()
     {
         await using var ctx = await CreateAsync();
         var graph = await SeedReferenceProducerAsync(ctx);
+        // The read only repository has branches, only not this one.
+        await SeedBranchesAsync(ctx, graph.ProducerId, "main");
+        await SeedBranchesAsync(ctx, graph.ConsumerId, "main", "topic");
+
+        var result = await CheckoutEverywhereAsync(ctx, graph, "topic");
+
+        // Not attempted, and neither a skip nor an error: nothing asked it to have the branch.
+        Assert.Equal([ConsumerName], RepositoryNames(ctx, "CheckoutBranch"));
+        Assert.Empty(result.Skipped);
+        Assert.DoesNotContain(graph.ProducerId, result.ErrorsByRepositoryId.Keys);
+    }
+
+    [Fact]
+    public async Task A_Workspace_wide_checkout_switches_a_read_only_repository_that_has_the_branch()
+    {
+        await using var ctx = await CreateAsync();
+        var graph = await SeedReferenceProducerAsync(ctx);
+        await SeedBranchesAsync(ctx, graph.ProducerId, "main", "topic");
+        await SeedBranchesAsync(ctx, graph.ConsumerId, "main", "topic");
+
+        var result = await CheckoutEverywhereAsync(ctx, graph, "topic");
+
+        Assert.Equal(
+            new[] { ConsumerName, ProducerName }.Order(StringComparer.Ordinal),
+            RepositoryNames(ctx, "CheckoutBranch").Order(StringComparer.Ordinal));
+        Assert.Empty(result.Skipped);
+    }
+
+    [Fact]
+    public async Task A_read_only_repository_never_decides_which_branches_are_common()
+    {
+        await using var ctx = await CreateAsync();
+        var graph = await SeedReferenceProducerAsync(ctx);
+        await SeedBranchesAsync(ctx, graph.ProducerId, "main");
+        await SeedBranchesAsync(ctx, graph.ConsumerId, "main", "topic");
+
+        await using var scope = ctx.CreateScope();
+        var outcome = await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>().GetCommonBranchesAsync(ctx.WorkspaceId);
+
+        var body = Assert.IsType<GrayMoon.App.Models.Api.CommonBranchesApiResult>(outcome.Body);
+        Assert.Equal(["topic"], body.CommonLocalBranchNames);
+    }
+
+    private static async Task<WorkspaceBranchBulkResult> CheckoutEverywhereAsync(SyncStateTestContext ctx, Graph graph, string branchName)
+    {
         var special = await ctx.GetSpecialContextIdAsync();
         var producerLink = await ReadLinkAsync(ctx, graph.ProducerId);
         var consumerLink = await ReadLinkAsync(ctx, graph.ConsumerId);
 
         await using var scope = ctx.CreateScope();
-        var result = await scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>().CheckoutBranchForWorkspaceAsync(
+        return await scope.ServiceProvider.GetRequiredService<WorkspaceBranchHandler>().CheckoutBranchForWorkspaceAsync(
             ctx.WorkspaceId,
             special,
             new Dictionary<int, int>
@@ -197,12 +242,28 @@ public sealed class ReferenceRepositoryEnforcementTests
                 [graph.ProducerId] = producerLink.WorkspaceRepositoryId,
                 [graph.ConsumerId] = consumerLink.WorkspaceRepositoryId,
             },
-            "main",
+            branchName,
             reportProgress: null,
             CancellationToken.None);
+    }
 
-        Assert.Equal([graph.ProducerId], result.Skipped.Select(skip => skip.RepositoryId));
-        Assert.Equal([ConsumerName], RepositoryNames(ctx, "CheckoutBranch"));
+    /// <summary>Replaces the local branch rows of one repository; the first name is its default branch.</summary>
+    private static async Task SeedBranchesAsync(SyncStateTestContext ctx, int repositoryId, params string[] branchNames)
+    {
+        var link = await ReadLinkAsync(ctx, repositoryId);
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        db.RepositoryBranches.RemoveRange(db.RepositoryBranches.Where(branch => branch.WorkspaceRepositoryId == link.WorkspaceRepositoryId));
+        foreach (var branchName in branchNames)
+        {
+            db.RepositoryBranches.Add(new RepositoryBranch
+            {
+                WorkspaceRepositoryId = link.WorkspaceRepositoryId,
+                BranchName = branchName,
+                IsDefault = branchName == branchNames[0],
+            });
+        }
+
+        await db.SaveChangesAsync();
     }
 
     [Fact]

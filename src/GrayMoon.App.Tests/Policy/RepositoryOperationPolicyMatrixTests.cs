@@ -42,6 +42,8 @@ public sealed class RepositoryOperationPolicyMatrixTests
         RepositoryOperation.RestorePackages,
         RepositoryOperation.Pull,
         RepositoryOperation.ManualCheckout,
+        // Allowed and never required: switched when it has the branch (see the IsOptional test below).
+        RepositoryOperation.WorkspaceCheckout,
         RepositoryOperation.DeleteLocalBranch,
     ];
 
@@ -256,6 +258,26 @@ public sealed class RepositoryOperationPolicyMatrixTests
         Assert.Equal(
             "Repository is on a tag; checkout a branch first.",
             RepositoryOperationPolicy.Evaluate(RepositoryOperation.UpdateDependencies, RepositoryOperationScope.Individual, onTag).Message);
+    }
+
+    /// <summary>
+    /// Only a Workspace-wide checkout treats a read only repository as optional: it is switched when it has the branch
+    /// and never required to have one. The Workspace repository and a writable Source are never optional.
+    /// </summary>
+    [Fact]
+    public void Only_a_Workspace_wide_checkout_of_a_read_only_repository_is_optional()
+    {
+        var reference = RepositoryPolicySubject.ForCheckout("main", null, isReference: true);
+        var writable = RepositoryPolicySubject.ForCheckout("main", null);
+        var workspaceRepository = RepositoryPolicySubject.ForCheckout("main", null, isWorkspaceRepository: true, isReference: true);
+        var snapshot = RepositoryPolicySubject.ForCheckout(null, null, isFeatureContext: true, isReference: true, isReferenceSnapshot: true);
+
+        Assert.Equal(
+            [RepositoryOperation.WorkspaceCheckout],
+            Enum.GetValues<RepositoryOperation>().Where(operation => RepositoryOperationPolicy.IsOptional(operation, reference)));
+        Assert.False(RepositoryOperationPolicy.IsOptional(RepositoryOperation.WorkspaceCheckout, writable));
+        Assert.False(RepositoryOperationPolicy.IsOptional(RepositoryOperation.WorkspaceCheckout, workspaceRepository));
+        Assert.False(RepositoryOperationPolicy.IsAllowed(RepositoryOperation.WorkspaceCheckout, snapshot));
     }
 
     private static void AssertAllowed(RepositoryOperationDecision decision)

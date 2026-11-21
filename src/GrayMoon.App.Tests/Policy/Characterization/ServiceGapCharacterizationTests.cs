@@ -270,6 +270,27 @@ public sealed class ServiceGapCharacterizationTests
         Assert.Equal(["only-consumer"], after);
     }
 
+    /// <summary>
+    /// A repository without commits has no branch at all. It used to empty the list for every other repository, so
+    /// Switch Branch offered nothing as long as one new repository was in the Workspace.
+    /// </summary>
+    [Fact]
+    public async Task Common_branches_do_not_ask_a_repository_that_has_no_branch_at_all()
+    {
+        await using var ctx = await CreateAsync();
+        var graph = await SeedGraphAsync(ctx);
+        await using (var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            var consumer = await db.WorkspaceRepositories.SingleAsync(l => l.WorkspaceId == ctx.WorkspaceId && l.RepositoryId == graph.ConsumerId);
+            db.RepositoryBranches.RemoveRange(db.RepositoryBranches);
+            db.RepositoryBranches.Add(new RepositoryBranch { WorkspaceRepositoryId = consumer.WorkspaceRepositoryId, BranchName = "main", IsDefault = true });
+            db.RepositoryBranches.Add(new RepositoryBranch { WorkspaceRepositoryId = consumer.WorkspaceRepositoryId, BranchName = "topic" });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(["topic"], await CommonLocalAsync(ctx));
+    }
+
     private static async Task<List<string>> CommonLocalAsync(SyncStateTestContext ctx)
     {
         await using var scope = ctx.CreateScope();

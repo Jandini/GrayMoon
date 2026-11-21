@@ -91,6 +91,44 @@ public sealed class GitServiceCreateBranchTests : IDisposable
         Assert.Equal("local edit\n", File.ReadAllText(Path.Combine(_repo, "README.md")));
     }
 
+    /// <summary>
+    /// A repository without commits: "main" is only the name of the unborn branch, so <c>git checkout -b topic main</c>
+    /// fails with "'main' is not a commit". The new branch takes the place of the unborn one and staged work stays.
+    /// </summary>
+    [Fact]
+    public async Task A_repository_without_commits_gets_the_new_branch_as_its_current_branch()
+    {
+        var root = Directory.CreateTempSubdirectory("graymoon-create-branch-empty-").FullName;
+        try
+        {
+            var empty = GitScenarios.ClonedRepository(root, commit: false);
+            File.WriteAllText(Path.Combine(empty, "draft.md"), "draft\n");
+            GitConfigTestSupport.Git(empty, "add draft.md");
+
+            var (success, error, alreadyExisted) = await _git.CreateBranchAsync(empty, "feature/x", "main", CancellationToken.None);
+
+            Assert.True(success, error);
+            Assert.False(alreadyExisted);
+            Assert.Equal("refs/heads/feature/x", GitConfigTestSupport.Git(empty, "symbolic-ref HEAD").Trim());
+            Assert.Contains("draft.md", GitConfigTestSupport.Git(empty, "diff --cached --name-only"));
+
+            // Checking out the branch it is on used to fail with "pathspec 'feature/x' did not match"; another name
+            // moves the unborn HEAD, so the user can go back.
+            var (sameOk, sameError) = await _git.CheckoutBranchAsync(empty, "feature/x", CancellationToken.None);
+            Assert.True(sameOk, sameError);
+            Assert.Equal("refs/heads/feature/x", GitConfigTestSupport.Git(empty, "symbolic-ref HEAD").Trim());
+
+            var (backOk, backError) = await _git.CheckoutBranchAsync(empty, "main", CancellationToken.None);
+            Assert.True(backOk, backError);
+            Assert.Equal("refs/heads/main", GitConfigTestSupport.Git(empty, "symbolic-ref HEAD").Trim());
+            Assert.Contains("draft.md", GitConfigTestSupport.Git(empty, "diff --cached --name-only"));
+        }
+        finally
+        {
+            TestDirectory.Delete(root);
+        }
+    }
+
     private void CommitFile(string name, string content)
     {
         File.WriteAllText(Path.Combine(_repo, name), content);

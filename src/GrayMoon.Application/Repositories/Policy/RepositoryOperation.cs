@@ -58,6 +58,13 @@ public enum ReferenceRule
     /// <summary>Allowed when the user names the repository; left out of a bulk action.</summary>
     IndividualOnly,
 
+    /// <summary>
+    /// Allowed, and never required: a bulk action includes the repository when it can take part and leaves it where it
+    /// is when it cannot. A Workspace-wide checkout switches it only when it has the branch, and the list of common
+    /// branches does not ask it to have one.
+    /// </summary>
+    Optional,
+
     Forbidden,
 }
 
