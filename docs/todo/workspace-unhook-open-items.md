@@ -39,4 +39,4 @@ By decision they stay on disk. Each call costs one lookup and one log line on th
 
 ### 5. Wiki
 
-`Getting-Started.md` and `Restore-Workspace.md` in the wiki describe the old Add Workspace dialog and the old "Restore from repository" button, and the Add Workspace screenshots show the old dialog. A page for Import from disk does not exist.
+The wiki text was updated on 2026-11-21 (`App-Workspaces.md`, `Getting-Started.md`, `Restore-Workspace.md`, and the new `Import-Workspace.md`). The screenshots were retaken the same day at the original sizes, and `workspaces-add-menu.png` and `workspaces-import-modal.png` were added. Nothing is open here except publishing the wiki (commit and push by the owner).

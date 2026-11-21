@@ -18,6 +18,10 @@ public sealed partial class WorkspaceRepositories
 
     private BulkMergePullRequestsModalState _bulkMergeModal = new();
     private string? _bulkReturnReconciliationError;
+    /// <summary>What the return step of the last bulk run still has to say after a full success: a branch that was not deleted.</summary>
+    private string? _bulkReturnWarning;
+    /// <summary>The repositories the return step of the last bulk run left out (read only, on a tag), as one sentence.</summary>
+    private string? _bulkReturnSkipped;
 
     /// <summary>Bound to the same singleton the single-PR dialog's own "Return to default branch" checkbox uses, so the two remember one shared last choice.</summary>
     private bool BulkMergeReturnToDefault
@@ -378,6 +382,8 @@ public sealed partial class WorkspaceRepositories
             return;
 
         _bulkReturnReconciliationError = null;
+        _bulkReturnWarning = null;
+        _bulkReturnSkipped = null;
 
         foreach (var row in rowsToMerge)
         {
@@ -621,6 +627,10 @@ public sealed partial class WorkspaceRepositories
                 return;
             BulkMergeReturnStatus.Apply(succeededRows, batch.Results, ClearRepositoryError, SetRepositoryError);
             _bulkReturnReconciliationError = batch.ReconciliationSucceeded ? null : batch.ReconciliationError;
+            _bulkReturnWarning = ReturnToDefaultWarnings.Summarize(batch.Warnings);
+            _bulkReturnSkipped = RepositorySkipSummary.Describe(batch.Skipped);
+            foreach (var warning in batch.Warnings)
+                Logger.LogWarning("Bulk merge return to default: {Warning}", warning);
             StateHasChanged();
         });
 
@@ -651,11 +661,17 @@ public sealed partial class WorkspaceRepositories
                     ? "The repository returned to the default branch, but refreshing the workspace failed."
                     : "Repositories returned to the default branch, but refreshing the workspace failed.");
             }
+            else if (_bulkReturnWarning is not null)
+            {
+                // Everything merged and returned, but a branch the run was to delete is still there.
+                ToastService.ShowWarning(_bulkReturnWarning);
+            }
             else
             {
-                ToastService.Show(counts.Succeeded == 1
+                var merged = counts.Succeeded == 1
                     ? "1 pull request merged successfully."
-                    : $"{counts.Succeeded} pull requests merged successfully.");
+                    : $"{counts.Succeeded} pull requests merged successfully.";
+                ToastService.Show(_bulkReturnSkipped is null ? merged : $"{merged} {_bulkReturnSkipped}");
             }
             return;
         }

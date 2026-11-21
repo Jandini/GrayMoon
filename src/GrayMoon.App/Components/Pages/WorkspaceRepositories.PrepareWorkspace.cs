@@ -76,6 +76,9 @@ public sealed partial class WorkspaceRepositories
                     pipelined = true;
                     await ApplyUpdateAndPushExecutionResultAsync(combined);
                     PresentUpdateAndPushNotice(combined);
+                    // After the notice, so a run that worked still says the branch was not created here.
+                    if (combined.Success)
+                        ShowBranchAlreadyExisted(request.NewBranchName, result);
                     return;
                 }
 
@@ -90,7 +93,9 @@ public sealed partial class WorkspaceRepositories
                 if (result.Success)
                 {
                     SafeInvoke(() => ClearRepositoryErrorsFor(result.SyncedRepoIds));
-                    ShowSkippedRepositories(result.Skipped);
+                    // A branch that was already there is a warning; the repositories left out are information only.
+                    if (!ShowBranchAlreadyExisted(request.NewBranchName, result))
+                        ShowSkippedRepositories(result.Skipped);
                 }
 
                 if (!result.PushPending)
@@ -118,6 +123,19 @@ public sealed partial class WorkspaceRepositories
 
             await PreparePushOnlyAsync(jobContextId, job, ct, syncedRepoIds);
         }, new PageJobOptions { RefreshOnSuccess = false });
+    }
+
+    /// <summary>
+    /// Warns that the branch was already there in some repositories and was checked out as it is. Returns false when
+    /// every branch was created.
+    /// </summary>
+    private bool ShowBranchAlreadyExisted(string newBranchName, PrepareWorkspaceResult result)
+    {
+        if (BranchAlreadyExistedWarning.Describe(newBranchName, result.BranchAlreadyExisted) is not { } warning)
+            return false;
+
+        SafeInvoke(() => ToastService.ShowWarning(warning));
+        return true;
     }
 
     /// <summary>

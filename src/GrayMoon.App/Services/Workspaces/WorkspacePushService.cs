@@ -847,7 +847,8 @@ public sealed partial class WorkspacePushService(
         Action<int, string>? onLevelError = null,
         bool restorePackages = true,
         string? runId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<IReadOnlyList<RepositorySkip>>? onSkipped = null)
     {
         runId = GrayMoon.Abstractions.Logging.GrayMoonOperationContext.EnsureId(runId);
         if (!_workerBridge.IsWorkerConnected)
@@ -871,7 +872,11 @@ public sealed partial class WorkspacePushService(
             .ToDictionary(
                 wr => wr.RepositoryId,
                 wr => ConnectorHelpers.UnprotectToken(wr.Repository!.Connector?.UserToken));
-        var pushSkippedRepoIds = await LoadPushSkippedRepoIdsAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        // Loaded once per run. The ids keep those repositories out of every level; the records go to the caller,
+        // so a pipelined run names what its push lane left out.
+        var pushSkipped = await LoadPushSkippedAsync(workspace.WorkspaceId, contextId, cancellationToken);
+        var pushSkippedRepoIds = pushSkipped.Select(skip => skip.RepositoryId).ToHashSet();
+        onSkipped?.Invoke(pushSkipped);
         var ciProvider = _ciProviderResolver == null
             ? NoCiProvider.Instance
             : await _ciProviderResolver.GetForWorkspaceAsync(workspaceId, cancellationToken);
@@ -1754,11 +1759,18 @@ public sealed partial class WorkspacePushService(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken)
-        => (await _operationPolicy.PartitionAsync(
-                workspaceId, contextId, RepositoryOperation.Push, repositoryIds: null, RepositorySubjectSource.Context, cancellationToken))
-            .Skipped
+        => (await LoadPushSkippedAsync(workspaceId, contextId, cancellationToken))
             .Select(skip => skip.RepositoryId)
             .ToHashSet();
+
+    /// <summary>The repositories of the context the policy leaves out of a push, with the reason.</summary>
+    private async Task<IReadOnlyList<RepositorySkip>> LoadPushSkippedAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken)
+        => (await _operationPolicy.PartitionAsync(
+                workspaceId, contextId, RepositoryOperation.Push, repositoryIds: null, RepositorySubjectSource.Context, cancellationToken))
+            .Skipped;
 
     /// <summary>
     /// True for a registry call that failed in transit and is worth asking again: network and socket errors, and a

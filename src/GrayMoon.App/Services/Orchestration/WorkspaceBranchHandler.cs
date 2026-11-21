@@ -73,7 +73,11 @@ public sealed class WorkspaceBranchHandler(
             cancellationToken: cancellationToken);
     }
 
-    public async Task<(bool Success, string? Error)> CreateSingleBranchAsync(
+    /// <summary>
+    /// Creates one branch and, when asked, sets its upstream. <c>AlreadyExisted</c> is true when a local branch of that
+    /// name was already there and was checked out as it is; the caller must say so (<see cref="BranchAlreadyExistedWarning"/>).
+    /// </summary>
+    public async Task<(bool Success, string? Error, bool AlreadyExisted)> CreateSingleBranchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
@@ -86,39 +90,49 @@ public sealed class WorkspaceBranchHandler(
         if (!create.IsSuccessStatus)
         {
             logger.LogError("Create branch failed: {StatusCode}, {Error}", create.StatusCode, create.ErrorText);
-            return (false, "Failed to create branch.");
+            return (false, "Failed to create branch.", false);
         }
 
         var result = create.Body as CreateBranchApiResult;
         if (result is null || !result.Success)
-            return (false, result?.Error ?? "Failed to create branch.");
+            return (false, result?.Error ?? "Failed to create branch.", false);
 
+        var alreadyExisted = result.AlreadyExisted;
+        var created = alreadyExisted ? "Branch already existed" : "Branch created";
         if (setUpstream)
         {
             var upstream = await branchOperations.SetUpstreamAsync(workspaceId, contextId, repositoryId, newBranchName, cancellationToken);
             if (!upstream.IsSuccessStatus)
             {
                 logger.LogWarning("Set upstream failed: {StatusCode}, {Error}", upstream.StatusCode, upstream.ErrorText);
-                return (true, "Branch created but failed to set upstream.");
+                return (true, $"{created} but failed to set upstream.", alreadyExisted);
             }
 
             var upstreamResult = upstream.Body as CreateBranchApiResult;
             if (upstreamResult != null && !upstreamResult.Success)
-                return (true, upstreamResult.Error ?? "Branch created but failed to set upstream.");
+                return (true, upstreamResult.Error ?? $"{created} but failed to set upstream.", alreadyExisted);
         }
 
-        return (true, null);
+        return (true, null, alreadyExisted);
     }
 
-    public Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
+    public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
         string branchName,
         CancellationToken cancellationToken)
-        => CheckoutBranchAsync(workspaceId, contextId, repositoryId, branchName, isTag: false, cancellationToken);
+    {
+        var (success, errorMessage, _) = await CheckoutBranchAsync(workspaceId, contextId, repositoryId, branchName, isTag: false, cancellationToken);
+        return (success, errorMessage);
+    }
 
-    public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(
+    /// <summary>
+    /// Checks out a branch or tag in one repository. <c>Warning</c> is set on a success when something beside the
+    /// checkout did not work (the new branch of a read only repository could not be recorded in the Workspace
+    /// definition); the caller must show it.
+    /// </summary>
+    public async Task<(bool Success, string? ErrorMessage, string? Warning)> CheckoutBranchAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
@@ -133,14 +147,14 @@ public sealed class WorkspaceBranchHandler(
         {
             var result = outcome.Body as CheckoutBranchApiResult;
             if (result != null && !result.Success)
-                return (false, !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : failureLabel);
+                return (false, !string.IsNullOrWhiteSpace(result.ErrorMessage) ? result.ErrorMessage : failureLabel, null);
 
-            return (true, null);
+            return (true, null, string.IsNullOrWhiteSpace(result?.Warning) ? null : result.Warning);
         }
 
         var message = outcome.ErrorText ?? $"{failureLabel.TrimEnd('.')}: {outcome.StatusCode}";
         logger.LogError("Checkout {Kind} failed: {StatusCode}, {Error}", isTag ? "tag" : "branch", outcome.StatusCode, outcome.ErrorText);
-        return (false, message);
+        return (false, message, null);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> ReturnToDefaultSingleAsync(

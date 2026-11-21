@@ -523,7 +523,7 @@ public sealed class WorkspaceBranchOperations(
         {
             await connectorHealthService.EnsureConnectorHealthyForRepositoryAsync(repo.RepositoryId, cancellationToken);
 
-            var (success, errorMessage) = await workspaceGitService.ReturnToDefaultDirectAsync(
+            var returned = await workspaceGitService.ReturnToDefaultDirectAsync(
                 workspaceId,
                 contextId,
                 repositoryId,
@@ -532,12 +532,13 @@ public sealed class WorkspaceBranchOperations(
                 allowForceDeleteLocalBranch,
                 cancellationToken);
 
-            if (!success)
-                return BranchHttpOutcome.Problem(errorMessage ?? "Failed to return to default branch", 500);
+            if (!returned.Success)
+                return BranchHttpOutcome.Problem(returned.ErrorMessage ?? "Failed to return to default branch", 500);
 
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
 
-            return BranchHttpOutcome.Ok(new { success = true });
+            // "warning" is set when the repository returned but its remote or local branch could not be deleted.
+            return BranchHttpOutcome.Ok(new ReturnToDefaultApiResult(true, returned.Warning));
         }
         catch (Exception ex)
         {
@@ -568,7 +569,7 @@ public sealed class WorkspaceBranchOperations(
             return BranchHttpOutcome.Problem(result.ErrorMessage ?? "Failed to return to default branch", 500);
 
         await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
-        return BranchHttpOutcome.Ok(new { success = true });
+        return BranchHttpOutcome.Ok(new ReturnToDefaultApiResult(true, result.Warning));
     }
 
     public async Task<BranchHttpOutcome> GetCommonBranchesAsync(int workspaceId, CancellationToken cancellationToken = default)
@@ -771,7 +772,7 @@ public sealed class WorkspaceBranchOperations(
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
-            return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = true });
+            return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = true, AlreadyExisted = createResponse?.AlreadyExisted == true });
         }
         catch (Exception ex)
         {

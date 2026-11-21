@@ -26,7 +26,7 @@ public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader re
             };
         }
 
-        var (success, errorMessage) = await git.CreateBranchAsync(repoPath, newBranchName, baseBranchName, cancellationToken, skipHooks: request.SkipHooks);
+        var (success, errorMessage, alreadyExisted) = await git.CreateBranchAsync(repoPath, newBranchName, baseBranchName, cancellationToken, skipHooks: request.SkipHooks);
         if (!success)
         {
             return new CreateBranchResponse
@@ -43,7 +43,8 @@ public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader re
             return new CreateBranchResponse
             {
                 Success = true,
-                CurrentBranch = currentBranch
+                CurrentBranch = currentBranch,
+                AlreadyExisted = alreadyExisted
             };
         }
 
@@ -102,7 +103,8 @@ public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader re
             HasUpstream = hasUpstream,
             DefaultBranchBehind = defaultBehind,
             DefaultBranchAhead = defaultAhead,
-            FetchError = fetchError
+            FetchError = fetchError,
+            AlreadyExisted = alreadyExisted
         };
     }
 }

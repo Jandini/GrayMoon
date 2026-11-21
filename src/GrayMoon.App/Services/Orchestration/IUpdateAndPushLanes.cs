@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using GrayMoon.Application;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 
 namespace GrayMoon.App.Services.Orchestration;
 
@@ -38,6 +39,7 @@ public interface IPushLane
         int? maxLevel,
         CancellationToken cancellationToken);
 
+    /// <param name="onSkipped">Called once, before the first level, with the repositories the policy leaves out of the push (read only, on a tag), so the run can name them.</param>
     Task<int> RunPushLaneAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -47,5 +49,6 @@ public interface IPushLane
         Action<int, string>? onLevelError = null,
         bool restorePackages = true,
         string? runId = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Action<IReadOnlyList<RepositorySkip>>? onSkipped = null);
 }

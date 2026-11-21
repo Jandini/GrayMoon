@@ -157,6 +157,13 @@ public sealed record PrepareWorkspaceResult(
     /// <summary>Repositories the policy left out of the branch stage (reference repositories).</summary>
     public IReadOnlyList<RepositorySkip> BranchSkipped { get; init; } = [];
 
+    /// <summary>
+    /// Names of the repositories where the branch was already there when the branch stage ran. It was checked out as
+    /// it is, so it may not be based on the chosen base, and the later stages ran on it. Reported to the user as a
+    /// warning (<see cref="BranchAlreadyExistedWarning"/>) and part of the REST response.
+    /// </summary>
+    public IReadOnlyList<string> BranchAlreadyExisted { get; init; } = [];
+
     /// <summary>Repositories the policy left out of any stage, each named once.</summary>
     public IReadOnlyList<RepositorySkip> Skipped =>
         [.. BranchSkipped.Concat(Update?.Skipped ?? []).Concat(Combined?.Skipped ?? []).DistinctBy(skip => skip.RepositoryId)];

@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using GrayMoon.Application.Features;
+using GrayMoon.Application.Repositories.Policy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -47,6 +48,24 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
         Assert.Equal([1, 2, 3], push.ReceivedLevels);
         Assert.Equal(3, result.PushedRepoCount);
         Assert.Equal([1, 2, 3], update.CompletedLevels);
+    }
+
+    /// <summary>
+    /// A pipelined run used to carry only the skips of the update lane, so a repository only the push lane left out
+    /// was not named anywhere.
+    /// </summary>
+    [Fact]
+    public async Task The_result_names_the_repositories_the_push_lane_left_out()
+    {
+        var skip = new RepositorySkip(7, "graymoon-api", RepositoryOperationReason.Reference, RepositoryOperationPolicy.ReferenceMessage);
+        var push = new FakePushLane { Skipped = [skip] };
+        var update = new FakeUpdateLane { Levels = [1] };
+
+        var result = await Run(Create(update, push)).WaitAsync(Timeout);
+
+        Assert.True(result.Success);
+        Assert.Equal([skip], result.Push!.Skipped);
+        Assert.Equal([skip], result.Skipped);
     }
 
     [Fact]
@@ -288,14 +307,19 @@ public sealed class UpdateAndPushOrchestratorPipelineTests
             }
         }
 
+        /// <summary>What the lane reports as left out by policy.</summary>
+        public IReadOnlyList<RepositorySkip> Skipped { get; init; } = [];
+
         public Task<bool> CanRunPushLaneAsync(int workspaceId, WorkspaceFeatureContextId contextId, int? maxLevel, CancellationToken cancellationToken)
             => Task.FromResult(CanRun);
 
         public Task<int> RunPushLaneAsync(
             int workspaceId, WorkspaceFeatureContextId contextId, ChannelReader<DependencyLevelCompletion> completedLevels,
             Action<string>? onProgressMessage = null, Action<int, string>? onRepoError = null, Action<int, string>? onLevelError = null,
-            bool restorePackages = true, string? runId = null, CancellationToken cancellationToken = default)
+            bool restorePackages = true, string? runId = null, CancellationToken cancellationToken = default,
+            Action<IReadOnlyList<RepositorySkip>>? onSkipped = null)
         {
+            onSkipped?.Invoke(Skipped);
             // Ended is signalled only once the returned task is complete. Signalling it from inside the method let a
             // waiter run while the task still looked unfinished to the orchestrator, and one more level was committed.
             var run = RunCoreAsync(completedLevels, onRepoError, onLevelError, cancellationToken);

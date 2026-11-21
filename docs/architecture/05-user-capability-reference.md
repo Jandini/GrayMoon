@@ -594,6 +594,8 @@ The primary button follows `DeterminePrimaryAction`: **Create PR** when at least
 
 Creates the selected branch across repositories. Not offered in a Feature.
 
+When a local branch of that name is already in a repository, nothing is created there: the Worker (`GitService.CreateBranchAsync`) checks the existing branch out as it is, the chosen base is not used, and the response says `alreadyExisted`. This is decided before the create, so a create that fails for any other reason (a base that does not exist, local changes in the way) is a failure and never ends on another branch. The caller reports it as a warning built by `BranchAlreadyExistedWarning.Describe`, for example "Branch 'feature/x' already existed in 2 repositories (api, web). It was checked out as it is and was not created from the base branch.": New Branch for one repository (`CreateBranchApiResult.AlreadyExisted`), Create Branches (`BranchCreationOutcome.AlreadyExistedByRepositoryId`) and Prepare Workspace (`PrepareWorkspaceResult.BranchAlreadyExisted`, also in the REST response as `branchAlreadyExisted`). Test anchors: `GitServiceCreateBranchTests`, `CreateBranchesOutcomeTests`.
+
 ### Switch Branch
 
 Computes compatible/common branches and performs coordinated checkout. Not offered as a bulk action in a Feature.
@@ -604,7 +606,7 @@ Starts multi-repository PR creation (section 24). In a Feature context, a reposi
 
 ### Merge PRs...
 
-Opens `BulkMergePullRequestsModal` over the scope (a level, the Workspace or Repositories header set, or all repositories). Candidates are resolved from the persisted PR table, not from the virtualized render cache. The "Return to default branch" checkbox shares its remembered value with the single-PR dialog and is hidden in a Feature. When checked, **Merged** (default) or **All repositories** chooses the return set: Merged returns only repositories whose PR just merged; All repositories also returns every other repository in the same dialog scope that had no open PR and is not on a tag (tag checkouts are never returned). Returning after a bulk merge uses `ReturnToDefaultUnattendedBatchAsync`: ids deduped, branches refreshed in parallel, one PR refresh, eligible repositories returned in parallel (tag checkouts completed as untouched), one recompute only when at least one returned. Overlay progress shows counts only (no "(failed)" annotation); repository failures surface on the workspace afterward.
+Opens `BulkMergePullRequestsModal` over the scope (a level, the Workspace or Repositories header set, or all repositories). Candidates are resolved from the persisted PR table, not from the virtualized render cache. The "Return to default branch" checkbox shares its remembered value with the single-PR dialog and is hidden in a Feature. When checked, **Merged** (default) or **All repositories** chooses the return set: Merged returns only repositories whose PR just merged; All repositories also returns every other repository in the same dialog scope that had no open PR and is not on a tag (tag checkouts are never returned). Returning after a bulk merge uses `ReturnToDefaultUnattendedBatchAsync`: ids deduped, branches refreshed in parallel, one PR refresh, eligible repositories returned in parallel (tag checkouts completed as untouched), one recompute only when at least one returned. Overlay progress shows counts only (no "(failed)" annotation); repository failures surface on the workspace afterward. When every row succeeded but a branch could not be deleted, the closing toast is the warning of section 14 instead of the success message; repositories the return left out by policy are appended to the success message.
 
 ### Return to Default
 
@@ -723,6 +725,8 @@ commit message options
 ```
 
 The branch gate (`PrepareWorkspaceOrchestrator.GetBranchFailures`) counts as a failure a reported error, a requested repository that was never targeted, an attempt with no result, and a success whose checked-out branch is unknown or different. Any failure, or zero targeted repositories, stops the workflow with "Prepare Workspace stopped: branches could not be created in all selected repositories. No dependency updates or pushes were started." (`PrepareWorkspaceResult.BranchesStoppedMessage`), or "Prepare Workspace stopped: no repositories were selected."; nothing is updated, committed or pushed, and branches already created are left in place.
+
+A repository where the branch was already there passes the gate (it is on the branch), but the branch was not created from the chosen base. The run goes on, the orchestrator logs it, and `PrepareWorkspaceResult.BranchAlreadyExisted` names those repositories: the page shows the warning of New Branch (above) and REST returns `branchAlreadyExisted`.
 
 Update and push (both options) runs through the same shared combined operation as the Repositories page and the popup (`IWorkspaceUpdateAndPushOperations`, origin `PrepareWorkspace`): the two-lane pipeline when possible, otherwise the sequential update followed by a synchronized push. When a synchronized push is not possible, the run stops after the update with "Continue with normal push?" (the page asks; REST returns 409 with a `pendingApprovalId`) and pushes only after the user agrees. Update only and Push only stay standalone. `PrepareWorkspaceResult` carries `BranchesCreated`, `BranchErrors`, `Update`, `Combined` and `PushPending` (Push only). REST `/prepare-workspace` returns the same stop message. REST `POST /api/workspaces/{id}/update-and-push` runs the same operation for the Workspace context (200 done or nothing to push, 409 approval required or refused, 400 failed) and `POST .../update-and-push/approve` with `pendingApprovalId` continues a normal push.
 
@@ -869,7 +873,7 @@ WorkspaceUndoPushHandler
 Worker undo/reset command path
 ```
 
-The Worker (`UndoPushCommand`, `GitService.ResetToRemoteAsync`) runs `git reset --mixed` (keep changes) or `--hard` to `origin/<branch>`. When that ref does not exist because the branch was never pushed, the target is `git merge-base <compare ref> HEAD`, where the compare ref is the one the outgoing count uses (`IGitRepositoryReader.GetNoUpstreamCompareRefAsync`: the Feature divergence base as a local branch, otherwise the default origin branch). With no compare ref or no common commit the undo fails and changes nothing. The command never pushes or fetches.
+The Worker (`UndoPushCommand`, `GitService.ResetToRemoteAsync`) runs `git reset --mixed` (keep changes) or `--hard` to `origin/<branch>`. When that ref does not exist because the branch was never pushed, the target is `git merge-base <compare ref> HEAD`, where the compare ref is the one the outgoing count uses (`IGitRepositoryReader.GetNoUpstreamCompareRefAsync`: the Feature divergence base as a local branch, otherwise the default origin branch). With no compare ref or no common commit the undo fails and changes nothing. The command never pushes or fetches, so the request carries no connector token and `ResetToRemoteAsync` takes none. The Undo Push Commits dialog says the same: a branch that is on the remote goes back to its `origin` branch, a branch that was never pushed goes back to where it left its base branch, and nothing is pushed.
 
 ---
 
@@ -902,13 +906,29 @@ whether explicit discard confirmation is needed
 
 `ExecuteReturnToDefaultAsync` receives explicit `ReturnToDefaultOptions`. Repositories on a tag are skipped (untouched), not reported as errors.
 
+### A branch that could not be deleted
+
+The Worker (`ReturnToDefaultBranchCommand`) deletes the remote branch (when asked) before the fetch and the local branch after the checkout. A delete that fails does not stop the return: the repository still ends on the default branch and is pulled. The failure is reported, not only logged: the response carries `remoteBranchDeleteError` and `localBranchDeleteError`, and `WorkspaceGitService.ReturnToDefaultDirectAsync` returns a `ReturnToDefaultOutcome` whose `Warning` is one sentence, for example "graymoon-api: returned to the default branch, but the remote branch 'feature/x' was not deleted (remote: Permission denied)." (`ReturnToDefaultOutcome.DescribeBranchDeleteFailure`).
+
+Every caller passes it on as a warning of a run that succeeded:
+
+```text
+ExecuteReturnToDefaultAsync          OperationResult.Warnings + WarningSummary
+ReturnToDefaultUnattendedAsync       UnattendedReturnToDefaultResult.Warnings
+ReturnToDefaultUnattendedBatchAsync  UnattendedReturnToDefaultRepositoryResult.Warning, batch.Warnings
+IWorkspaceBranchOperations
+  .ReturnToDefaultAsync (REST)       ReturnToDefaultApiResult.warning
+```
+
+The Repositories page shows an amber warning toast (`ToastService.ShowWarning`) after a single, level or all-repositories return, after a merge that returns, and after a bulk merge whose rows all succeeded; several warnings are summed up by `ReturnToDefaultWarnings.Summarize`. When a run also has a failed repository, the failure is what is shown and the warnings go to the App log. Test anchors: `ReturnToDefaultBranchCommandTests`, `ReturnToDefaultUnattendedBatchTests`.
+
 ### UI policy
 
 Single-repository (the yellow Return to {branch} button in the Branch dialog), level, and all-repositories flows run analysis under the page loading overlay, including the command terminal, then render the appropriate existing GrayMoon confirmation UI. When that single repository needs no confirmation, the return continues on the same overlay.
 
 ### Unattended policy
 
-REST/post-merge flows call the same analysis first and abort safely when analysis/PR refresh is insufficient. The unattended policy deletes the remote branch only when there is an upstream, force-deletes the local branch and never closes PRs. Bulk merge uses the batch form (section 6); single-repository callers keep abort-all behavior (`ReturnToDefaultUnattendedAsync`).
+REST/post-merge flows call the same analysis first and abort safely when analysis/PR refresh is insufficient. The unattended policy deletes the remote branch only when there is an upstream, force-deletes the local branch and never closes PRs. Bulk merge uses the batch form (section 6); single-repository callers keep abort-all behavior (`ReturnToDefaultUnattendedAsync`). Both results name the repositories the policy left out (on a tag, read only) in `Skipped`, as `ExecuteReturnToDefaultAsync` does; the page shows them as information when there is no error and no warning to show.
 
 ---
 

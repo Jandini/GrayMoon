@@ -4,13 +4,11 @@ Written 2026-11-12, when the feature was wrapped up for the merge to `main`.
 
 ## What is left
 
-The feature is built and merged to `main`. This is everything that is still open, and nothing else is.
+The feature is built and merged to `main`. This is everything that is still open, and nothing else is. Items 2 (the warning of a manual switch is shown as a toast) and 3 (the pipelined push lane and Return to Default report what they left out) were built on 2026-11-21 and are described in `docs/architecture/02-system-architecture.md`; their numbers are not reused.
 
 | # | What | Who | Needed before the feature counts as tested |
 |---|---|---|---|
 | 1 | Manual smoke M1-M13 and five things to look at | Owner | **Yes** |
-| 2 | Show the warning of a manual switch on the Repositories page | Developer | No, a user can notice it |
-| 3 | Skip reporting in the pipelined push lane and Return to Default | Developer | No, a user can notice it |
 | 4 | Convention test: see tag reads inside query expressions | Developer | No, tests only |
 | 5 | Mutation checks that were never run | Developer | No, tests only |
 | 6 | Render tests for the Switch Branch dialog and the settings section | Developer | No, tests only |
@@ -44,25 +42,6 @@ Look at these too, because no test sees them:
 - [ ] Switch Branch dialog: padlock in the header, Lock / Unlock button.
 - [ ] Workspace settings: the "Read only repositories" section (make all read only, make all writable, the default switch, the archived suggestion).
 - [ ] An archived repository that was unarchived on GitHub becomes pushable again without a repository fetch. The check is tested only against scripted HTTP answers.
-
-## 2. The manual switch warning is not shown
-
-When a read only repository is switched to another branch by hand, the result carries a warning (`Warning` on the checkout result). The Repositories page does not show it. The switch itself works and the new branch and commit are recorded.
-
-Done when: the page shows the warning as a toast, and a test covers the result that carries it.
-
-## 3. Skip reporting is partial
-
-The list of repositories an operation left out (`Skipped`) is filled by `WorkspacePushOperations.PushAsync` and `DependencyUpdateOrchestrator.RunAsync`. Missing:
-
-- The pipelined push lane (`WorkspacePushService.PushLaneLevelAsync`, result built in `UpdateAndPushOrchestrator.BuildPushResult`). For a pipelined run, `UpdateAndPushResult.Skipped` carries only the skips of the update lane.
-- Return to Default (`WorkspaceSyncHandler`, batch and unattended). A repository that is left out has no record.
-
-Steps:
-
-1. Pipelined push: the lane already loads the skipped ids once per run. Keep the `RepositorySkip` objects and pass them to `BuildPushResult`.
-2. Return to Default: add `Skipped` to its result type (init-only), filled from the plan entries the policy left out.
-3. One test per filled place in `RepositorySkipReportingTests`.
 
 ## 4. The convention test does not see tag reads inside query expressions
 

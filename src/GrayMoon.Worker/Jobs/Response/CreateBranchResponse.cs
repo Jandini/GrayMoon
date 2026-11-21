@@ -40,4 +40,8 @@ public sealed class CreateBranchResponse
 
     [JsonPropertyName("fetchError")]
     public string? FetchError { get; set; }
+
+    /// <summary>True when a local branch of that name was already there: it was checked out as it is and the requested base was not used.</summary>
+    [JsonPropertyName("alreadyExisted")]
+    public bool AlreadyExisted { get; set; }
 }

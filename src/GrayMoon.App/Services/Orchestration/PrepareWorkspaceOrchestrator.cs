@@ -48,6 +48,16 @@ public sealed class PrepareWorkspaceOrchestrator(
             workspaceId, contextId, newBranchName, baseBranch, repositoryIds, progress, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
+        // A branch that was already there was checked out as it is: it may not be based on the chosen base. The run
+        // goes on, and the result names those repositories so every caller reports it.
+        IReadOnlyList<string> alreadyExisted = [.. outcome.AlreadyExistedByRepositoryId.Values.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)];
+        if (alreadyExisted.Count > 0)
+        {
+            logger.LogWarning(
+                "PrepareWorkspaceOrchestrator: branch {Branch} already existed in {Count} repositories of workspace {WorkspaceId} and was checked out as it is: {Repositories}",
+                newBranchName, alreadyExisted.Count, workspaceId, string.Join(", ", alreadyExisted));
+        }
+
         // Branch gate: every later phase mutates repositories, so all of them must be on the new branch first.
         var branchErrors = GetBranchFailures(repositoryIds, outcome, newBranchName);
         if (branchErrors.Count > 0 || outcome.TargetedRepositoryIds.Count == 0)
@@ -61,7 +71,7 @@ public sealed class PrepareWorkspaceOrchestrator(
             logger.LogWarning(
                 "PrepareWorkspaceOrchestrator stopped for workspace {WorkspaceId}: branch creation failed in {FailedCount} of {TargetedCount} repositories",
                 workspaceId, branchErrors.Count, outcome.TargetedRepositoryIds.Count);
-            return PrepareWorkspaceResult.BranchesFailed(branchErrors) with { BranchSkipped = outcome.Skipped };
+            return PrepareWorkspaceResult.BranchesFailed(branchErrors) with { BranchSkipped = outcome.Skipped, BranchAlreadyExisted = alreadyExisted };
         }
 
         var noBranchErrors = new Dictionary<int, string>();
@@ -77,7 +87,7 @@ public sealed class PrepareWorkspaceOrchestrator(
                 setLevelError,
                 cancellationToken);
             logger.LogInformation("PrepareWorkspaceOrchestrator completed for workspace {WorkspaceId} (combined). Status={Status}", workspaceId, combined.Status);
-            return new PrepareWorkspaceResult(true, noBranchErrors, Combined: combined) { BranchSkipped = outcome.Skipped };
+            return new PrepareWorkspaceResult(true, noBranchErrors, Combined: combined) { BranchSkipped = outcome.Skipped, BranchAlreadyExisted = alreadyExisted };
         }
 
         DependencyUpdateRunResult? update = null;
@@ -96,6 +106,7 @@ public sealed class PrepareWorkspaceOrchestrator(
             PushPending: pushChanges && (update?.Success ?? true))
         {
             BranchSkipped = outcome.Skipped,
+            BranchAlreadyExisted = alreadyExisted,
         };
     }
 

@@ -1,5 +1,6 @@
 using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
+using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services.Policy;
 using GrayMoon.App.Services;
 
@@ -273,7 +274,12 @@ public sealed partial class WorkspaceRepositories
 
             if (outcome.IsSuccessStatus)
             {
-                SafeInvoke(() => ClearRepositoryError(repositoryId));
+                SafeInvoke(() =>
+                {
+                    ClearRepositoryError(repositoryId);
+                    if (outcome.Body is ReturnToDefaultApiResult { Warning: { } warning })
+                        ToastService.ShowWarning(warning);
+                });
                 await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
             }
             else
@@ -292,6 +298,18 @@ public sealed partial class WorkspaceRepositories
         });
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Says what a Return to Default that succeeded still has to report: a branch that could not be deleted (warning),
+    /// otherwise the repositories it left out (information). Call on the dispatcher.
+    /// </summary>
+    private void ShowReturnToDefaultNotices(OperationResult result)
+    {
+        if (result.HasWarnings)
+            ToastService.ShowWarning(result.WarningSummary ?? string.Join(" ", result.Warnings!));
+        else if (result.Success && RepositorySkipSummary.Describe(result.Skipped) is { } skipped)
+            ToastService.Show(skipped);
     }
 
     private static string ReturningToDefaultMessage(string? defaultBranchName)
@@ -317,7 +335,11 @@ public sealed partial class WorkspaceRepositories
 
         if (result.Success)
         {
-            SafeInvoke(() => repositoryErrors.Remove(repositoryId));
+            SafeInvoke(() =>
+            {
+                repositoryErrors.Remove(repositoryId);
+                ShowReturnToDefaultNotices(result);
+            });
             await InvokeAsync(async () => { if (_disposed) return; await RefreshFromSync(); });
         }
         else if (result.RepoErrors != null && result.RepoErrors.TryGetValue(repositoryId, out var errMsg))
@@ -366,6 +388,8 @@ public sealed partial class WorkspaceRepositories
                     if (result.RepoErrors == null || !result.RepoErrors.ContainsKey(repoId))
                         repositoryErrors.Remove(repoId);
                 }
+
+                ShowReturnToDefaultNotices(result);
             });
         }, new PageJobOptions
         {
@@ -509,7 +533,10 @@ public sealed partial class WorkspaceRepositories
                         repositoryErrors.Remove(repoId);
                 }
 
-                if (total > 1 && failureCount == 0)
+                // A branch that could not be deleted is the more important thing to say than the count.
+                if (result.HasWarnings)
+                    ShowReturnToDefaultNotices(result);
+                else if (total > 1 && failureCount == 0)
                     ToastService.Show($"Returned {successCount} of {total} repositories to default branch.");
             });
         }, new PageJobOptions

@@ -1,4 +1,5 @@
 using GrayMoon.App.Components.Modals;
+using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 
@@ -536,6 +537,12 @@ public sealed partial class WorkspaceRepositories
                         {
                             ReflectBulkMergeDrillInResult(repositoryId, BulkMergeRowStatus.ReturnedToDefault);
                         }
+
+                        // Returned, but the branch could not be deleted: say so. Otherwise name a repository that was left out.
+                        if (syncResult.Completed && ReturnToDefaultWarnings.Summarize(syncResult.Warnings) is { } returnWarning)
+                            ToastService.ShowWarning(returnWarning);
+                        else if (syncResult.Completed && RepositorySkipSummary.Describe(syncResult.Skipped) is { } returnSkipped)
+                            ToastService.Show(returnSkipped);
 
                         if (isBulkMergeDrillIn)
                             _bulkMergeModal.DrillInRepositoryId = null;

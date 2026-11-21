@@ -47,7 +47,7 @@ public sealed class UndoPushCommand(
                 return new UndoPushResponse { Success = false, ErrorMessage = GitRemoteIntegrateService.NotOnBranchMessage };
         }
 
-        var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, request.BearerToken, cancellationToken);
+        var (success, errorMessage) = await git.ResetToRemoteAsync(repoPath, branch, request.KeepChanges, cancellationToken);
 
         if (success)
             await SendPostResetSyncAsync(request, repoPath, branch, cancellationToken);

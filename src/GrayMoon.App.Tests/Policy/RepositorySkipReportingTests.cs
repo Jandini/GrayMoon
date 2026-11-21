@@ -77,6 +77,31 @@ public sealed class RepositorySkipReportingTests
         Assert.Equal(RepositoryOperationReason.OnTag, skip.Reason);
     }
 
+    /// <summary>
+    /// The push lane of a pipelined Update and Push leaves the same repositories out as a plain push. It used to keep
+    /// only their ids, so the run's push result named nobody.
+    /// </summary>
+    [Fact]
+    public async Task The_push_lane_names_the_repository_it_leaves_out()
+    {
+        await using var ctx = await CreateAsync();
+        var graph = await SeedGraphAsync(ctx);
+        await PinWorkspaceAsync(ctx, graph.ProducerId);
+        var special = await ctx.GetSpecialContextIdAsync();
+        var levels = System.Threading.Channels.Channel.CreateUnbounded<GrayMoon.App.Services.Orchestration.DependencyLevelCompletion>();
+        levels.Writer.Complete();
+        IReadOnlyList<RepositorySkip>? reported = null;
+
+        await using var scope = ctx.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Workspaces.WorkspacePushService>().RunPushLaneAsync(
+            ctx.WorkspaceId, special, levels.Reader, onSkipped: skipped => reported = skipped);
+
+        var skip = Assert.Single(reported!);
+        Assert.Equal(graph.ProducerId, skip.RepositoryId);
+        Assert.Equal(ProducerName, skip.RepositoryName);
+        Assert.Equal(RepositoryOperationReason.OnTag, skip.Reason);
+    }
+
     [Fact]
     public void The_combined_results_carry_the_skips_of_their_parts()
     {

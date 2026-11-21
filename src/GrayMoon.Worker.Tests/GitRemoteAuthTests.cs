@@ -135,7 +135,7 @@ public sealed class GitRemoteAuthTests
             nameof(IGitService.CloneAsync), nameof(IGitService.CloneIntoAsync), nameof(IGitService.FetchAsync),
             nameof(IGitService.FetchMinimalAsync), nameof(IGitService.PullAsync), nameof(IGitService.PushAsync),
             nameof(IGitService.GetRemoteBranchesAsync), nameof(IGitService.FetchTagsAsync),
-            nameof(IGitService.DeleteBranchAsync), nameof(IGitService.ResetToRemoteAsync),
+            nameof(IGitService.DeleteBranchAsync),
             nameof(IGitService.GetRemoteDefaultBranchAsync), nameof(IGitService.RepairOriginHeadAsync),
         ];
 

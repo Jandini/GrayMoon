@@ -175,6 +175,7 @@ public sealed partial class WorkspaceGitService
         var errors = new ConcurrentDictionary<int, string>();
         var branchNameByRepoId = new ConcurrentDictionary<int, string>();
         var checkedOutBranchByRepoId = new ConcurrentDictionary<int, string?>();
+        var alreadyExistedByRepoId = new ConcurrentDictionary<int, string>();
         var syncResponseByRepoId = new ConcurrentDictionary<int, CreateBranchResponse>();
         var useDefaultBase = string.Equals(baseBranch, "__default__", StringComparison.OrdinalIgnoreCase);
         var completedCount = 0;
@@ -244,6 +245,8 @@ public sealed partial class WorkspaceGitService
                     // via WorkspaceRepositoryStateWriter in a sequential pass below.
                     branchNameByRepoId[wr.RepositoryId] = createResponse?.Branch ?? newBranchName;
                     checkedOutBranchByRepoId[wr.RepositoryId] = createResponse?.CurrentBranch;
+                    if (createResponse?.AlreadyExisted == true)
+                        alreadyExistedByRepoId[wr.RepositoryId] = repo.RepositoryName ?? string.Empty;
                     if (syncState && createResponse != null)
                         syncResponseByRepoId[wr.RepositoryId] = createResponse;
                 }
@@ -325,6 +328,7 @@ public sealed partial class WorkspaceGitService
             new Dictionary<int, string>(errors))
         {
             Skipped = eligibility.Skipped,
+            AlreadyExistedByRepositoryId = new Dictionary<int, string>(alreadyExistedByRepoId),
         };
     }
 

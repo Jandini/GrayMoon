@@ -117,6 +117,38 @@ public sealed class PrepareWorkspaceOrchestratorTests
         Assert.Equal(0, phases.UpdateCalls + phases.PipelineCalls);
     }
 
+    /// <summary>
+    /// A branch that was already there is checked out as it is, so the later stages run on a branch that may not be
+    /// based on the chosen base. The run goes on, and the result names those repositories.
+    /// </summary>
+    [Fact]
+    public async Task A_branch_that_already_existed_is_named_in_the_result_and_the_run_goes_on()
+    {
+        var phases = new FakePhases
+        {
+            Branches = Outcome(created: [RepoA, RepoB]) with
+            {
+                AlreadyExistedByRepositoryId = new Dictionary<int, string> { [RepoB] = "web", [RepoA] = "api" },
+            },
+        };
+
+        var result = await RunAsync(phases, new RecordedErrors(), update: true, push: false, requested: null);
+
+        Assert.True(result.BranchesCreated);
+        Assert.Equal(["api", "web"], result.BranchAlreadyExisted);
+        Assert.Equal(1, phases.UpdateCalls);
+    }
+
+    [Fact]
+    public async Task Created_branches_leave_the_already_existed_list_empty()
+    {
+        var phases = new FakePhases { Branches = Outcome(created: [RepoA, RepoB]) };
+
+        var result = await RunAsync(phases, new RecordedErrors(), update: true, push: false, requested: null);
+
+        Assert.Empty(result.BranchAlreadyExisted);
+    }
+
     [Fact]
     public async Task Attempted_repository_without_an_outcome_fails_closed()
     {

@@ -63,7 +63,6 @@ public sealed class WorkspaceUndoPushHandler(
                     keepChanges,
                     workspaceRoot,
                     workspaceRepositoryName,
-                    bearerToken = ConnectorHelpers.UnprotectToken(wr.Repository?.Connector?.UserToken),
                     capabilities,
                 };
                 var response = await workerBridge.SendCommandAsync("UndoPush", args, ct);

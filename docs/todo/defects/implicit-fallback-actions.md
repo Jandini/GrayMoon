@@ -2,9 +2,15 @@
 
 **Priority: HIGH. Investigate and validate before the next release.** Written 2026-11-21.
 
-Status: the bug that started this note is fixed (see "The bug this came from"). The six items under "Open items" came out of a code sweep for the same pattern. None of them is fixed, and none was reproduced in the running app: four were read end to end in the code, one is only plausible, one is cleanup. Each needs the validation named in its section before any fix.
+Status: the bug that started this note is fixed (see "The bug this came from"). A code sweep for the same pattern found six items. Items 3, 4 and 5 are fixed (see "Built"). Items 1, 2 and 6 are open: none was reproduced in the running app, and each needs the validation named in its section before any fix.
 
 Why high: items 1 and 2 publish local commits to the remote without the user asking for a push, the same harm as the original bug. A push to a public repository cannot be taken back once someone has fetched it.
+
+## Built (2026-11-21)
+
+- **Item 3, Return to Default hid a failed branch delete.** The Worker response carries `remoteBranchDeleteError` and `localBranchDeleteError`, and every caller shows the result as a warning of a return that succeeded. Behavior: `docs/architecture/05-user-capability-reference.md` (Return to Default, "A branch that could not be deleted").
+- **Item 4, Create Branch silently switched to an existing branch.** The Worker decides "already exists" before the create, reports `alreadyExisted`, and no longer falls back after a create that failed for another reason. New Branch, Create Branches and Prepare Workspace show a warning that names the repositories. Behavior: `05-user-capability-reference.md` (New Branch, Prepare Workspace).
+- **Item 5, leftovers of the Undo fix.** `ResetToRemoteAsync` and the `UndoPush` request take no connector token, and the Undo Push Commits dialog says what happens to a never-pushed branch.
 
 ## The bug this came from
 
@@ -26,7 +32,7 @@ Cause: `GitService.ResetToRemoteAsync` pushed the branch when `origin/<branch>` 
 
 Fix (uncommitted at the time of writing): with no `origin/<branch>`, reset to `git merge-base <compare ref> HEAD`, where the compare ref is the one the outgoing count uses (`IGitRepositoryReader.GetNoUpstreamCompareRefAsync`: the Feature divergence base as a local branch, otherwise the default origin branch). Fail without changing anything when there is no compare ref or no common commit. The command no longer contacts the remote. Regression tests: `GitServiceUndoUnpushedCommitsTests` (4 tests; 3 fail on the old code). Behavior is described in `docs/architecture/01-product-model-and-user-workflows.md` (Undo Push) and `05-user-capability-reference.md` (Undo Push).
 
-Still to do for the bug itself:
+Still to do for the bug itself (owner):
 
 - Manual check in the app with a rebuilt Worker: new Feature, commit, Undo Push Commits with and without "Keep changes".
 - Commit `ac31b787` is still on `origin/unhook-workspace` of the public repository. Owner decision: leave it, or reset locally and delete or force-push the remote branch.
@@ -47,9 +53,6 @@ Status words: CONFIRMED means read in the code path end to end, not run. PLAUSIB
 |---|---|---|---|
 | 1 | "Pull" also pushes | CONFIRMED by reading | Should |
 | 2 | Sync Commits on a never-pushed branch publishes it without an upstream | PLAUSIBLE | Should |
-| 3 | Return to Default reports success when a branch delete failed | CONFIRMED by reading | Should |
-| 4 | Create Branch silently switches to an existing branch | CONFIRMED by reading | Should |
-| 5 | Leftovers of the Undo fix | CONFIRMED | Optional |
 | 6 | Interpolated git command lines in `GitService` | CONFIRMED | Optional |
 
 ### 1. "Pull" also pushes (CONFIRMED by reading, Should)
@@ -70,30 +73,9 @@ Validate: a `GitScenarios.ClonedRepository` test with a local-only branch and on
 
 Suggested fix: with no upstream, do not push from commit sync (Push already does the first push with `-u`), or push with `-u` and say so in the confirmation.
 
-### 3. Return to Default reports success when a branch delete failed (CONFIRMED by reading, Should)
-
-`ReturnToDefaultBranchCommand` logs a warning and carries on when the remote branch delete fails and when the local branch delete fails; the response is `Success = true` with no field for either failure. A user who ticked "delete remote branch" is told the operation worked while the branch is still on the remote. This breaks the "always report an outcome" rule in `AGENTS.md` ("Failures, cancellation and waiting").
-
-Validate: a test with a stub `IGitService` whose `DeleteBranchAsync` fails, asserting the response carries the failure.
-
-Suggested fix: add `RemoteBranchDeleteError` / `LocalBranchDeleteError` to `ReturnToDefaultBranchResponse` and show them as warnings in the result.
-
-### 4. Create Branch silently switches to an existing branch (CONFIRMED by reading, Should)
-
-`GitService.CreateBranchAsync`: when `git checkout -b <new> --no-track <base>` fails for any reason and a local branch of that name exists, it checks that branch out and returns success. The requested base is ignored and the caller is not told. A caller such as Prepare Workspace then continues (dependency update, commit, push) on a branch that may be old or based on something else.
-
-Validate: a test that creates `feature/x` at an old commit, calls `CreateBranchAsync("feature/x", "main")` and asserts what is reported. Then read what Prepare Workspace does with that result.
-
-Suggested fix: return an "already existed" flag in `CreateBranchResponse` so the caller can report it, and take this path only when the failure really is "branch already exists".
-
-### 5. Leftovers of the Undo fix (CONFIRMED, Optional)
-
-- `IGitService.ResetToRemoteAsync` still has a `bearerToken` parameter it no longer uses, `WorkspaceUndoPushHandler` still decrypts and sends the connector token with every `UndoPush`, and `GitRemoteAuthTests.EveryRemoteGitServiceMethodTakesAnExplicitBearerToken` still lists the method as a remote one. Remove all three together.
-- `UndoPushModal.razor` says commits "will be reset back to `origin`", which is not what happens for a never-pushed branch. Its checkbox also lacks `form-check-input-gray`.
-
 ### 6. Interpolated git command lines in `GitService` (CONFIRMED, Optional)
 
-`CheckoutBranchAsync`, `CreateBranchAsync` and `DeleteBranchAsync` build `checkout {branch}`, `branch -D {name}`, `push origin --delete {name}` and `update-ref -d {ref}` by interpolation, against rule 2 of "Worker: input, processes and git" in `AGENTS.md`. Branch names reach these from the App. Move them to the `IReadOnlyList<string>` overload of `GitProcessRunner.RunAsync` when one of them is next touched.
+`CheckoutBranchAsync` and `DeleteBranchAsync` build `checkout {branch}`, `branch -D {name}`, `push origin --delete {name}` and `update-ref -d {ref}` by interpolation, against rule 2 of "Worker: input, processes and git" in `AGENTS.md`. Branch names reach these from the App. Move them to the `IReadOnlyList<string>` overload of `GitProcessRunner.RunAsync` when one of them is next touched. `CreateBranchAsync` was moved with the fix of item 4.
 
 ## Checked and found in order
 
@@ -108,5 +90,4 @@ Suggested fix: return an "already existed" flag in `CreateBranchResponse` so the
 
 1. Validate items 1 and 2 (two Worker tests and a manual check). Fix whichever reproduces, with the test as its regression test.
 2. Sweep the areas listed under "Not reviewed" for the same pattern and add what is found here.
-3. Items 3 and 4.
-4. Items 5 and 6 with the next change in those files.
+3. Item 6 with the next change in those methods.
