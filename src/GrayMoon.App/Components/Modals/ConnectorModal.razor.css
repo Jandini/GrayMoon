@@ -39,6 +39,12 @@
     box-shadow: inset 0 0 0 1px var(--focus-ring-outer);
 }
 
+/* The shared dialog rule clips every modal at its frame. This dialog is a short form, and the Feed
+   list (and the type menu) open past that frame, so they must paint outside it. */
+.modal-dialog > .modal-content {
+    overflow: visible;
+}
+
 /* The feeds of the ProGet server, under the Feed box. */
 .connector-feed-list {
     position: absolute;
