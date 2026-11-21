@@ -596,9 +596,15 @@ Creates the selected branch across repositories. Not offered in a Feature.
 
 When a local branch of that name is already in a repository, nothing is created there: the Worker (`GitService.CreateBranchAsync`) checks the existing branch out as it is, the chosen base is not used, and the response says `alreadyExisted`. This is decided before the create, so a create that fails for any other reason (a base that does not exist, local changes in the way) is a failure and never ends on another branch. The caller reports it as a warning built by `BranchAlreadyExistedWarning.Describe`, for example "Branch 'feature/x' already existed in 2 repositories (api, web). It was checked out as it is and was not created from the base branch.": New Branch for one repository (`CreateBranchApiResult.AlreadyExisted`), Create Branches (`BranchCreationOutcome.AlreadyExistedByRepositoryId`) and Prepare Workspace (`PrepareWorkspaceResult.BranchAlreadyExisted`, also in the REST response as `branchAlreadyExisted`). Test anchors: `GitServiceCreateBranchTests`, `CreateBranchesOutcomeTests`.
 
+A repository without commits has no base to branch from (git answers "'main' is not a commit"). When HEAD is unborn and the base does not exist either, the Worker runs `git checkout -b <new>` without a start point: the new branch takes the place of the unborn one, and the index and the files stay. The base is not used. Git runs no post-checkout hook there, so New Branch for one repository (`WorkspaceBranchOperations.CreateBranchAsync`) records the branch the Worker reports checked out itself, as a checkout does. A checkout in such a repository (`GitService.CheckoutBranchAsync`) is a success for the branch it is already on and moves the unborn HEAD for any other name.
+
+GitVersion cannot compute a version for such a repository. The Version cell shows "unresolved" and the row shows one sentence, "Repository has no commits yet, so it has no version.", instead of GitVersion's output. For any other GitVersion failure the row shows the message of the exception GitVersion printed ("GitVersion: ..."), without the log lines and the stack trace (`GitVersionFailureText`); the full output is in the Worker log.
+
 ### Switch Branch
 
 Computes compatible/common branches and performs coordinated checkout. Not offered as a bulk action in a Feature.
+
+The list of common branches (`WorkspaceBranchOperations.GetCommonBranchesAsync`) is the intersection over the repositories the checkout depends on. Three kinds of repository are not asked: one on a tag, a read only one (`RepositoryOperationPolicy.IsOptional`, `ReferenceRule.Optional`), and one with no branch at all, which is a repository without commits. The checkout (`WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync`) switches a read only repository when it has a local or remote branch of that name and otherwise leaves it where it is: not attempted, not counted, not a skip and not an error. A repository without commits is still attempted and shows git's answer on its row. Test anchors: `ReferenceRepositoryEnforcementTests`, `ServiceGapCharacterizationTests`.
 
 ### Create PR
 
@@ -641,7 +647,7 @@ Sync from a row, Sync of a level       no         yes         yes
 Refresh projects, Restore packages     no         yes         yes
 Pull                                   no         yes (fast-forward only)   no
 Switch Branch (one repository)         yes        yes         no
-Checkout in all repositories           yes        no          no
+Checkout in all repositories           yes        when it has the branch (never required)   no
 Create branch                          yes        no          no
 Return to Default                      no         one: plain switch to the default branch; all: no   no
 Return to Default cleanup              no         no          no

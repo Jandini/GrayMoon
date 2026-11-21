@@ -428,7 +428,7 @@ When a repository already has a local branch of that name, GrayMoon checks that 
 
 GrayMoon can switch repositories to a common branch.
 
-Common branch computation intentionally ignores incompatible states such as repositories pinned to tags.
+Common branch computation intentionally ignores incompatible states such as repositories pinned to tags. Read only repositories and repositories without commits are not asked either: a branch is listed when every other repository has it. A read only repository is switched along with the others when it has the branch, and stays where it is when it does not.
 
 Individual repositories can also be switched independently. Branch lists carry ownership badges: a branch checked out by a Feature or by another worktree cannot be checked out here.
 
@@ -453,7 +453,7 @@ A Source repository can be read only in a Workspace (in code: a reference reposi
 
 - **Where it is set.** Edit Workspace's Lock tab is "Repository Lock": Lock All and Unlock All (regular buttons with a padlock) and the switch "New repositories are locked as read only" (the default for repositories added later; it changes no existing repository). Lock All and Unlock All ask in a dark gray callout that sits in space the dialog already has, so the dialog does not grow. The switch does not show a loading overlay. One repository is changed with the Lock / Unlock button in the Switch Branch dialog. Lock All and Unlock All apply immediately; they are not part of Save. Details on that dialog are labeled Workspace Name and Workspace Location.
 - **Turning it on is checked.** GrayMoon inspects the Workspace checkout and every Feature worktree of the repository. Unpushed commits, or a branch whose upstream state cannot be read, refuse the change for all selected repositories and nothing is written. Uncommitted changes are a warning only. Turning it off needs no check.
-- **What the user sees.** A padlock after the repository name on Repositories, in the Switch Branch dialog title and in the Changes tree. The commits badge of a read only row offers pull only. Actions on all repositories leave read only repositories out and name them in one sentence; an action on one named repository is refused with "Repository is read only.".
+- **What the user sees.** A padlock after the repository name on Repositories, in the Switch Branch dialog title and in the Changes tree. The commits badge of a read only row offers pull only. Actions on all repositories leave read only repositories out and name them in one sentence (Switch Branch for all repositories is the exception: it switches a read only repository that has the branch); an action on one named repository is refused with "Repository is read only.".
 - **Pull.** A pull is fast-forward only and never pushes. A branch with local commits is refused.
 - **Changes.** A read only repository is never committed. Staging, unstaging and discarding one named repository still work; Stage All, Unstage All, Discard All and Commit leave it out. A repository on a tag is treated the same way in Changes (padlock, never committed, left out of actions on all repositories), because a commit on a tag checkout has no branch to be pushed from.
 - **Features.** A read only Source joins a new Feature as a snapshot: a detached worktree at the commit the Workspace checkout had, with no Feature branch. Every checkout in a snapshot is refused. A Source made read only later keeps its existing Feature branches; the flag stops the writes.

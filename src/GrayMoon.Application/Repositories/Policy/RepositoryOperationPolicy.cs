@@ -62,7 +62,9 @@ public static class RepositoryOperationPolicy
         // Moving off a tag is how a repository leaves it, so the checkouts and branch creation stay possible.
         // "Skip repos on tags" in the Workspace-wide dialogs is a user option, not a rule: see IsOnTag on the subject.
         [RepositoryOperation.ManualCheckout] = new(AllowedOnTag: true, ReferenceRule.Allowed, ReferenceRule.Forbidden),
-        [RepositoryOperation.WorkspaceCheckout] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
+        // A read only repository follows a Workspace-wide checkout when it has the branch, and is never the reason a
+        // branch is missing from the list of common branches: see IsOptional.
+        [RepositoryOperation.WorkspaceCheckout] = new(AllowedOnTag: true, ReferenceRule.Optional, ReferenceRule.Forbidden),
         [RepositoryOperation.CreateBranch] = new(AllowedOnTag: true, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
         [RepositoryOperation.ReturnToDefault] = new(AllowedOnTag: false, ReferenceRule.IndividualOnly, ReferenceRule.Forbidden),
         [RepositoryOperation.ReturnToDefaultCleanup] = new(AllowedOnTag: false, ReferenceRule.Forbidden, ReferenceRule.Forbidden),
@@ -142,7 +144,26 @@ public static class RepositoryOperationPolicy
     /// <summary>True when a rule cell allows the operation in the given scope.</summary>
     public static bool Permits(ReferenceRule rule, RepositoryOperationScope scope) =>
         rule == ReferenceRule.Allowed
+        || rule == ReferenceRule.Optional
         || (rule == ReferenceRule.IndividualOnly && scope == RepositoryOperationScope.Individual);
+
+    /// <summary>
+    /// True when the repository takes part in a bulk <paramref name="operation"/> only when it can
+    /// (<see cref="ReferenceRule.Optional"/>): the action must not depend on it, and a repository that cannot take
+    /// part is left where it is without an error. Never true for the Workspace repository.
+    /// </summary>
+    public static bool IsOptional(RepositoryOperation operation, RepositoryPolicySubject subject)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        if (!Rules.TryGetValue(operation, out var rule))
+            throw new ArgumentOutOfRangeException(nameof(operation), operation, "The operation has no policy rule.");
+
+        if (subject.IsWorkspaceRepository)
+            return false;
+
+        return (subject.IsReferenceSnapshot && rule.ReferenceSnapshot == ReferenceRule.Optional)
+            || (subject.IsReference && rule.Reference == ReferenceRule.Optional);
+    }
 
     private static RepositoryOperationDecision Forbidden(
         RepositoryOperationScope scope,

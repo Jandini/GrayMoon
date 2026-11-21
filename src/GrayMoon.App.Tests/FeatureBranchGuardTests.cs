@@ -172,6 +172,29 @@ public sealed class FeatureBranchGuardTests
         Assert.Equal("release/1", ReadArg(call.Args, "baseBranchName"));
     }
 
+    /// <summary>
+    /// Git runs no post-checkout hook in a repository without commits, so nothing told the App about the new branch:
+    /// the row kept showing the old one and the user tried to check the new branch out again. The App now records
+    /// the branch the Worker reports.
+    /// </summary>
+    [Fact]
+    public async Task Workspace_create_branch_records_the_branch_the_Worker_reports_checked_out()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        ctx.WorkerBridge.Respond("CreateBranch", new CreateBranchResponse { Success = true, CurrentBranch = "topic" });
+        var special = await ctx.GetSpecialContextIdAsync();
+        Assert.NotEqual("topic", (await ctx.ReadLinkAsync()).BranchName);
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var outcome = await scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>()
+                .CreateBranchAsync(ctx.WorkspaceId, special, ctx.RepositoryId, "topic", "main");
+            Assert.True(outcome.IsSuccessStatus);
+        }
+
+        Assert.Equal("topic", (await ctx.ReadLinkAsync()).BranchName);
+    }
+
     [Fact]
     public async Task Workspace_return_to_default_still_reaches_the_Worker()
     {

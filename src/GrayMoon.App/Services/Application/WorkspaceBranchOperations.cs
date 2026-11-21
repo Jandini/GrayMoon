@@ -590,8 +590,29 @@ public sealed class WorkspaceBranchOperations(
             .ToListAsync(cancellationToken);
 
         // Repos checked out on a tag do not participate in the common-branch intersection, and neither do those a
-        // Workspace-wide checkout leaves alone (reference repositories).
-        links = links.Where(wr => !wr.IsOnTag && wr.Allows(RepositoryOperation.WorkspaceCheckout)).ToList();
+        // Workspace-wide checkout does not depend on: a read only repository is switched when it has the branch, and
+        // never decides which branches are listed.
+        links = links
+            .Where(wr => !wr.IsOnTag
+                && wr.Allows(RepositoryOperation.WorkspaceCheckout)
+                && !wr.IsOptionalFor(RepositoryOperation.WorkspaceCheckout))
+            .ToList();
+
+        // One query for every link (instead of one per link), grouped by WorkspaceRepositoryId.
+        var linkIds = links.Select(wr => wr.WorkspaceRepositoryId).ToList();
+        var branchRows = await db.RepositoryBranches
+            .AsNoTracking()
+            .Where(rb => linkIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsTag)
+            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName, rb.IsRemote, rb.IsDefault })
+            .ToListAsync(cancellationToken);
+        var branchesByLink = branchRows
+            .GroupBy(rb => rb.WorkspaceRepositoryId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // A repository with no branch at all (no commits yet) has nothing to switch to. It would empty the list for
+        // every other repository, so it is not asked either. A Workspace-wide checkout still tries it and reports
+        // git's answer on its row.
+        links = links.Where(wr => branchesByLink.ContainsKey(wr.WorkspaceRepositoryId)).ToList();
 
         if (links.Count == 0)
         {
@@ -607,21 +628,9 @@ public sealed class WorkspaceBranchOperations(
         var localBranchSets = new List<HashSet<string>>();
         var remoteBranchSets = new List<HashSet<string>>();
         var defaultBranchNames = new List<string>();
-        // One query for every link (instead of one per link), grouped by WorkspaceRepositoryId.
-        var linkIds = links.Select(wr => wr.WorkspaceRepositoryId).ToList();
-        var branchRows = await db.RepositoryBranches
-            .AsNoTracking()
-            .Where(rb => linkIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsTag)
-            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName, rb.IsRemote, rb.IsDefault })
-            .ToListAsync(cancellationToken);
-        var branchesByLink = branchRows
-            .GroupBy(rb => rb.WorkspaceRepositoryId)
-            .ToDictionary(g => g.Key, g => g.ToList());
         foreach (var wr in links)
         {
-            var branches = branchesByLink.TryGetValue(wr.WorkspaceRepositoryId, out var linkBranches)
-                ? linkBranches
-                : [];
+            var branches = branchesByLink[wr.WorkspaceRepositoryId];
 
             localBranchSets.Add(
                 branches
@@ -762,7 +771,22 @@ public sealed class WorkspaceBranchOperations(
 
             await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, newBranchName, cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(wr.CheckedOutTag))
+            // The branch the Worker reports checked out is recorded here, like a checkout does. The post-checkout
+            // hook normally reports it too, but git runs no hook when the repository has no commits, and the row
+            // then kept showing the old branch.
+            // Read before the state write below clears the tag on this tracked link.
+            var leavingTag = !string.IsNullOrWhiteSpace(wr.CheckedOutTag);
+            var checkedOutBranch = createResponse?.CurrentBranch?.Trim();
+            if (!string.IsNullOrWhiteSpace(checkedOutBranch))
+            {
+                await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
+                {
+                    BranchName = checkedOutBranch,
+                    IdentityProbed = true,
+                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
+            }
+
+            if (leavingTag)
             {
                 var pinError = await ClearRepositoryTagPinAsync(
                     workspaceId, contextId, wr, repo, workspaceRepositoryName, cancellationToken);

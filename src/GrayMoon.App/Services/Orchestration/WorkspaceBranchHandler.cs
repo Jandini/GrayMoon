@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using GrayMoon.App.Api.Endpoints;
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Services.Features;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Repositories.Policy;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Orchestration;
@@ -268,8 +270,8 @@ public sealed class WorkspaceBranchHandler(
             return new WorkspaceBranchBulkResult(0, refused.Count, refused);
         }
 
-        // A Workspace-wide checkout leaves reference repositories where they are. They are neither attempted nor
-        // counted, and come back in Skipped.
+        // A Workspace-wide checkout leaves out what the policy forbids (a read only snapshot of a Feature). Those are
+        // neither attempted nor counted, and come back in Skipped.
         var eligibility = await operationPolicy.PartitionAsync(
             workspaceId,
             contextId,
@@ -285,6 +287,22 @@ public sealed class WorkspaceBranchHandler(
             logger.LogInformation(
                 "Workspace checkout of {BranchName} left out {SkippedCount} repositories of workspace {WorkspaceId}: {Repositories}",
                 branchName, eligibility.Skipped.Count, workspaceId, string.Join(", ", eligibility.Skipped.Select(skip => skip.RepositoryName)));
+            if (workspaceRepositoryIdsByRepositoryId.Count == 0)
+                return WorkspaceBranchBulkResult.Empty with { Skipped = eligibility.Skipped };
+        }
+
+        // A read only repository follows the checkout only when it has the branch. Without it, it stays where it is:
+        // not attempted, not counted and not an error, because the list of common branches never asked it to have one.
+        var withoutBranch = await FindOptionalRepositoriesWithoutBranchAsync(
+            workspaceId, contextId, workspaceRepositoryIdsByRepositoryId, branchName, cancellationToken);
+        if (withoutBranch.Count > 0)
+        {
+            workspaceRepositoryIdsByRepositoryId = workspaceRepositoryIdsByRepositoryId
+                .Where(pair => !withoutBranch.Contains(pair.Key))
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+            logger.LogInformation(
+                "Workspace checkout of {BranchName} left {Count} read only repositories of workspace {WorkspaceId} where they are, they do not have the branch: {RepositoryIds}",
+                branchName, withoutBranch.Count, workspaceId, string.Join(", ", withoutBranch.Order()));
             if (workspaceRepositoryIdsByRepositoryId.Count == 0)
                 return WorkspaceBranchBulkResult.Empty with { Skipped = eligibility.Skipped };
         }
@@ -377,6 +395,46 @@ public sealed class WorkspaceBranchHandler(
         {
             Skipped = eligibility.Skipped,
         };
+    }
+
+    /// <summary>
+    /// The repositories a Workspace-wide checkout does not depend on (<see cref="RepositoryOperationPolicy.IsOptional"/>,
+    /// read only repositories) that have no local or remote branch named <paramref name="branchName"/>.
+    /// </summary>
+    private async Task<HashSet<int>> FindOptionalRepositoriesWithoutBranchAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyDictionary<int, int> workspaceRepositoryIdsByRepositoryId,
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        var subjects = await operationPolicy.GetSubjectsAsync(workspaceId, contextId, cancellationToken: cancellationToken);
+        var optional = workspaceRepositoryIdsByRepositoryId
+            .Where(pair => subjects.TryGetValue(pair.Key, out var subject)
+                && RepositoryOperationPolicy.IsOptional(RepositoryOperation.WorkspaceCheckout, subject))
+            .ToList();
+        if (optional.Count == 0)
+            return [];
+
+        var linkIds = optional.Select(pair => pair.Value).ToList();
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
+        await using var db = await scope.ServiceProvider
+            .GetRequiredService<IDbContextFactory<AppDbContext>>()
+            .CreateDbContextAsync(cancellationToken);
+        var branchRows = await db.RepositoryBranches
+            .AsNoTracking()
+            .Where(rb => linkIds.Contains(rb.WorkspaceRepositoryId) && !rb.IsTag)
+            .Select(rb => new { rb.WorkspaceRepositoryId, rb.BranchName })
+            .ToListAsync(cancellationToken);
+        var linksWithBranch = branchRows
+            .Where(rb => string.Equals(rb.BranchName, branchName, StringComparison.OrdinalIgnoreCase))
+            .Select(rb => rb.WorkspaceRepositoryId)
+            .ToHashSet();
+
+        return optional
+            .Where(pair => !linksWithBranch.Contains(pair.Value))
+            .Select(pair => pair.Key)
+            .ToHashSet();
     }
 
     private static BranchesResponse? TryReadRefreshBody(object? body)
