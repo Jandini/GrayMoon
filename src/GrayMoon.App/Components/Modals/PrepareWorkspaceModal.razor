@@ -99,7 +99,7 @@
                     @if (HasTaggedRepos)
                     {
                         <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="prepare-workspace-skip-tags"
+                            <input class="form-check-input form-check-input-gray" type="checkbox" id="prepare-workspace-skip-tags"
                                    @bind="skipReposOnTags" />
                             <label class="form-check-label" for="prepare-workspace-skip-tags">
                                 Skip repos on tags
@@ -109,19 +109,26 @@
                     }
 
                     <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="prepare-workspace-update-deps"
+                        <input class="form-check-input form-check-input-gray" type="checkbox" id="prepare-workspace-update-deps"
                                checked="@updateDependencies"
                                @onchange="OnUpdateDependenciesChanged" />
                         <label class="form-check-label" for="prepare-workspace-update-deps">Update dependencies</label>
                         <div class="form-text">Bump package versions and commit changes per dependency level</div>
                     </div>
 
-                    <div class="form-check mb-0">
-                        <input class="form-check-input" type="checkbox" id="prepare-workspace-push"
+                    <div class="form-check mb-3">
+                        <input class="form-check-input form-check-input-gray" type="checkbox" id="prepare-workspace-push"
                                @bind="pushChanges"
                                disabled="@(!updateDependencies)" />
                         <label class="form-check-label" for="prepare-workspace-push">Push changes</label>
                         <div class="form-text">Push all repositories using synchronized push (waits for NuGet availability per level)</div>
+                    </div>
+
+                    <div class="form-check mb-0">
+                        <input class="form-check-input form-check-input-gray" type="checkbox" id="prepare-workspace-restore"
+                               @bind="restorePackages" />
+                        <label class="form-check-label" for="prepare-workspace-restore">Restore packages</label>
+                        <div class="form-text">Restore NuGet packages locally when changes are pushed</div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -156,6 +163,7 @@
     private bool skipReposOnTags = true;
     private bool updateDependencies = true;
     private bool pushChanges = true;
+    private bool restorePackages;
     private bool isCreating = false;
     private string? errorMessage;
     private bool showBranchExistsConfirmation = false;
@@ -215,6 +223,7 @@
             skipReposOnTags = true;
             updateDependencies = true;
             pushChanges = true;
+            restorePackages = false;
         }
     }
 
@@ -264,7 +273,7 @@
                 return;
             }
 
-            await OnCreate.InvokeAsync(new PrepareWorkspaceRequest(name, baseBranch, skipReposOnTags, updateDependencies, pushChanges));
+            await OnCreate.InvokeAsync(new PrepareWorkspaceRequest(name, baseBranch, skipReposOnTags, updateDependencies, pushChanges, restorePackages));
         }
         finally
         {
@@ -283,7 +292,7 @@
 
         try
         {
-            await OnCreate.InvokeAsync(new PrepareWorkspaceRequest(_pendingCreateName, _pendingCreateBaseBranch, skipReposOnTags, updateDependencies, pushChanges));
+            await OnCreate.InvokeAsync(new PrepareWorkspaceRequest(_pendingCreateName, _pendingCreateBaseBranch, skipReposOnTags, updateDependencies, pushChanges, restorePackages));
             DismissBranchExistsConfirmation();
         }
         finally

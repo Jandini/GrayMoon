@@ -487,7 +487,7 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
 
         var result = await orchestrator.RunAsync(
             WorkspaceId, Context, "feature/prep", "__default__", null, updateDependencies: true, pushChanges: true,
-            commitMessage: null, progress: null, (_, _) => { }, (_, _) => { }, CancellationToken.None);
+            restorePackages: true, commitMessage: null, progress: null, (_, _) => { }, (_, _) => { }, CancellationToken.None);
 
         Assert.True(result.BranchesCreated);
         Assert.True(result.Combined!.NeedsApproval);
@@ -498,6 +498,31 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
 
         Assert.Equal(UpdateAndPushStatus.Completed, approved.Status);
         Assert.False(h.Push.PushCalls.Last().Synchronized);
+        Assert.True(h.Update.PipelineCalls.Single().Restore);
+        Assert.All(h.Push.PushCalls, call => Assert.True(call.Restore));
+    }
+
+    [Fact]
+    public async Task Prepare_workspace_with_restore_off_does_not_restore()
+    {
+        var h = new Harness();
+        h.Update.Update = DependencyUpdateRunResult.Ok(new HashSet<int> { 1 });
+        h.Push.ThrowNotPossibleWhenSynchronized = true;
+        var phases = new PreparePhasesOverCoordinator(new PrepareWorkspacePhases(null!, null!, h.Operations));
+        var orchestrator = new PrepareWorkspaceOrchestrator(phases, NullLogger<PrepareWorkspaceOrchestrator>.Instance);
+
+        var result = await orchestrator.RunAsync(
+            WorkspaceId, Context, "feature/prep", "__default__", null, updateDependencies: true, pushChanges: true,
+            restorePackages: false, commitMessage: null, progress: null, (_, _) => { }, (_, _) => { }, CancellationToken.None);
+
+        Assert.False(h.Update.PipelineCalls.Single().Restore);
+        Assert.All(h.Push.PushCalls, call => Assert.False(call.Restore));
+
+        var approved = await h.Run(new ApproveNormalPushContinuation(WorkspaceId, Context, result.Combined!.PendingApprovalId!));
+
+        Assert.Equal(UpdateAndPushStatus.Completed, approved.Status);
+        Assert.All(h.Push.PushCalls, call => Assert.False(call.Restore));
+        Assert.DoesNotContain("RestoreSynced", h.Calls);
     }
 
     /// <summary>Branch creation is faked; the combined step is the real <see cref="PrepareWorkspacePhases"/> mapping.</summary>
@@ -515,9 +540,9 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
             => throw new InvalidOperationException("Update Only must not run for Update and Push.");
 
         public Task<UpdateAndPushExecutionResult> UpdateAndPushAsync(
-            int workspaceId, WorkspaceFeatureContextId contextId, string? commitMessage, Action<string> reportOverlay,
+            int workspaceId, WorkspaceFeatureContextId contextId, string? commitMessage, bool restorePackages, Action<string> reportOverlay,
             Action<int, string> setRepositoryError, Action<int, string> setLevelError, CancellationToken cancellationToken)
-            => real.UpdateAndPushAsync(workspaceId, contextId, commitMessage, reportOverlay, setRepositoryError, setLevelError, cancellationToken);
+            => real.UpdateAndPushAsync(workspaceId, contextId, commitMessage, restorePackages, reportOverlay, setRepositoryError, setLevelError, cancellationToken);
     }
 
     private sealed class Harness
@@ -674,7 +699,7 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
             return Task.FromResult(PushResult);
         }
 
-        public Task<OperationResult> PushPendingAsync(int workspaceId, WorkspaceFeatureContextId contextId, bool synchronizedPush, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
+        public Task<OperationResult> PushPendingAsync(int workspaceId, WorkspaceFeatureContextId contextId, bool synchronizedPush, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default, bool restorePackages = true)
             => Task.FromResult(OperationResult.Ok());
 
         public Task<OperationResult> PushSingleAsync(int workspaceId, WorkspaceFeatureContextId contextId, int repositoryId, string? branchName, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)

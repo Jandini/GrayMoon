@@ -111,7 +111,8 @@ public sealed class WorkspacePushOperations(
         WorkspaceFeatureContextId contextId,
         bool synchronizedPush,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool restorePackages = true)
     {
         var plan = await GetPlanAsync(workspaceId, contextId, maxLevel: null, cancellationToken);
         if (!plan.HasUnpushed)
@@ -124,7 +125,8 @@ public sealed class WorkspacePushOperations(
             synchronizedPush,
             plan.RequiredPackageIds,
             progress,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            restorePackages: restorePackages);
     }
 
     public Task<OperationResult> PushSingleAsync(

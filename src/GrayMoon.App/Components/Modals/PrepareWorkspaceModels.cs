@@ -6,4 +6,5 @@ public sealed record PrepareWorkspaceRequest(
     string BaseBranch,
     bool SkipReposOnTags,
     bool UpdateDependencies,
-    bool PushChanges);
+    bool PushChanges,
+    bool RestorePackages);

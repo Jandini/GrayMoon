@@ -718,6 +718,7 @@ based on (default branches, or a branch common to every repository)
 skip repos on tags (shown only when a repository is on a tag)
 update dependencies
 push changes (enabled only with "Update dependencies")
+restore packages (starts unticked; when unticked, the push does not restore locally)
 commit message options
 ```
 
@@ -734,7 +735,7 @@ The branch gate (`PrepareWorkspaceOrchestrator.GetBranchFailures`) counts as a f
 
 A repository where the branch was already there passes the gate (it is on the branch), but the branch was not created from the chosen base. The run goes on, the orchestrator logs it, and `PrepareWorkspaceResult.BranchAlreadyExisted` names those repositories: the page shows the warning of New Branch (above) and REST returns `branchAlreadyExisted`.
 
-Update and push (both options) runs through the same shared combined operation as the Repositories page and the popup (`IWorkspaceUpdateAndPushOperations`, origin `PrepareWorkspace`): the two-lane pipeline when possible, otherwise the sequential update followed by a synchronized push. When a synchronized push is not possible, the run stops after the update with "Continue with normal push?" (the page asks; REST returns 409 with a `pendingApprovalId`) and pushes only after the user agrees. Update only and Push only stay standalone. `PrepareWorkspaceResult` carries `BranchesCreated`, `BranchErrors`, `Update`, `Combined` and `PushPending` (Push only). REST `/prepare-workspace` returns the same stop message. REST `POST /api/workspaces/{id}/update-and-push` runs the same operation for the Workspace context (200 done or nothing to push, 409 approval required or refused, 400 failed) and `POST .../update-and-push/approve` with `pendingApprovalId` continues a normal push.
+Update and push (both options) runs through the same shared combined operation as the Repositories page and the popup (`IWorkspaceUpdateAndPushOperations`, origin `PrepareWorkspace`): the two-lane pipeline when possible, otherwise the sequential update followed by a synchronized push. The dialog's Restore packages choice is `RestorePackages` on that run. The box starts unticked, and an unticked box does not restore during the combined run or a later normal push. Push only uses the same choice. When a synchronized push is not possible, the run stops after the update with "Continue with normal push?" (the page asks; REST returns 409 with a `pendingApprovalId`) and pushes only after the user agrees. Update only and Push only stay standalone. `PrepareWorkspaceResult` carries `BranchesCreated`, `BranchErrors`, `Update`, `Combined` and `PushPending` (Push only). REST `/prepare-workspace` returns the same stop message. REST `POST /api/workspaces/{id}/update-and-push` runs the same operation for the Workspace context (200 done or nothing to push, 409 approval required or refused, 400 failed) and `POST .../update-and-push/approve` with `pendingApprovalId` continues a normal push.
 
 ### Implementation
 

@@ -234,6 +234,7 @@ public static class WorkspaceOperationsEndpoints
                 body.RepositoryIds?.ToHashSet(),
                 body.UpdateDependencies,
                 body.PushChanges,
+                body.RestorePackages,
                 body.CommitMessage,
                 progress,
                 (_, _) => { },
@@ -262,7 +263,7 @@ public static class WorkspaceOperationsEndpoints
                     : Results.BadRequest(new { success = false, error = "Update failed.", skipped = prepared.Skipped, branchAlreadyExisted = prepared.BranchAlreadyExisted });
             }
 
-            var push = await pushOperations.PushPendingAsync(workspaceId, contextId, synchronizedPush: true, progress, ct);
+            var push = await pushOperations.PushPendingAsync(workspaceId, contextId, synchronizedPush: true, progress, ct, body.RestorePackages);
             return push.Success
                 ? Results.Ok(new { success = true, pushed = true, skipped = prepared.Skipped.Concat(push.Skipped).DistinctBy(skip => skip.RepositoryId), branchAlreadyExisted = prepared.BranchAlreadyExisted })
                 : Results.BadRequest(push);
@@ -530,6 +531,8 @@ public sealed class PrepareWorkspaceApiRequest
     public IReadOnlyList<int>? RepositoryIds { get; set; }
     public bool UpdateDependencies { get; set; }
     public bool PushChanges { get; set; }
+    /// <summary>Local restore during the push. Omitted requests keep the previous prepare-workspace default and restore.</summary>
+    public bool RestorePackages { get; set; } = true;
     public string? CommitMessage { get; set; }
 }
 

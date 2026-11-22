@@ -39,7 +39,8 @@ public interface IWorkspacePushOperations
         WorkspaceFeatureContextId contextId,
         bool synchronizedPush,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool restorePackages = true);
 
     Task<OperationResult> PushSingleAsync(
         int workspaceId,
