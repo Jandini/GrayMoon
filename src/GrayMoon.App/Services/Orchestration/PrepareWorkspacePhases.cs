@@ -30,6 +30,7 @@ public interface IPrepareWorkspacePhases
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? commitMessage,
+        bool restorePackages,
         Action<string> reportOverlay,
         Action<int, string> setRepositoryError,
         Action<int, string> setLevelError,
@@ -37,8 +38,8 @@ public interface IPrepareWorkspacePhases
 }
 
 /// <summary>
-/// Branch creation with inline state sync (hooks suppressed), the dependency update, and the shared combined Update and Push,
-/// each with the arguments Prepare Workspace has always used. The update and the pipeline take every repository
+/// Branch creation with inline state sync (hooks suppressed), the dependency update, and the shared combined Update and Push.
+/// Restore packages is the caller's choice and starts off in the dialog. The update and the pipeline take every repository
 /// (<c>repoIdsToUpdate: null</c>): after the branch gate every targeted repository is on the new branch, and the
 /// repositories deliberately left out (Skip Repos on Tags) are tag-pinned, which both the update and the push skip.
 /// </summary>
@@ -89,6 +90,7 @@ public sealed class PrepareWorkspacePhases(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         string? commitMessage,
+        bool restorePackages,
         Action<string> reportOverlay,
         Action<int, string> setRepositoryError,
         Action<int, string> setLevelError,
@@ -100,7 +102,7 @@ public sealed class PrepareWorkspacePhases(
                 MaxLevel: null,
                 commitMessage,
                 IncludeDepsInCommitMessage: true,
-                RestorePackages: true,
+                restorePackages,
                 Origin: "PrepareWorkspace"),
             new UpdateAndPushObserver(reportOverlay, setRepositoryError, setLevelError),
             cancellationToken);

@@ -24,6 +24,7 @@ public sealed class PrepareWorkspaceOrchestrator(
         IReadOnlySet<int>? repositoryIds,
         bool updateDependencies,
         bool pushChanges,
+        bool restorePackages,
         string? commitMessage,
         IProgress<OperationProgress>? progress,
         Action<int, string> setRepositoryError,
@@ -31,8 +32,8 @@ public sealed class PrepareWorkspaceOrchestrator(
         CancellationToken cancellationToken)
     {
         logger.LogInformation(
-            "PrepareWorkspaceOrchestrator starting for workspace {WorkspaceId}: branch={Branch}, updateDeps={UpdateDeps}, push={Push}",
-            workspaceId, newBranchName, updateDependencies, pushChanges);
+            "PrepareWorkspaceOrchestrator starting for workspace {WorkspaceId}: branch={Branch}, updateDeps={UpdateDeps}, push={Push}, restore={Restore}",
+            workspaceId, newBranchName, updateDependencies, pushChanges, restorePackages);
 
         var sink = new OperationErrorSink(workspaceId, logger, setRepositoryError, setLevelError);
 
@@ -82,6 +83,7 @@ public sealed class PrepareWorkspaceOrchestrator(
                 workspaceId,
                 contextId,
                 commitMessage,
+                restorePackages,
                 message => progress.Report(message),
                 setRepositoryError,
                 setLevelError,

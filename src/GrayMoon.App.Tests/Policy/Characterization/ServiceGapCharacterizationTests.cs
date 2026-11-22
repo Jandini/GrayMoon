@@ -75,6 +75,7 @@ public sealed class ServiceGapCharacterizationTests
             repositoryIds: null,
             updateDependencies: false,
             pushChanges: false,
+            restorePackages: false,
             commitMessage: null,
             progress: null,
             setRepositoryError: (_, _) => { },

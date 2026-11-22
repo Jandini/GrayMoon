@@ -65,6 +65,7 @@ public sealed partial class WorkspaceRepositories
                         tagFilteredRepoIds,
                         request.UpdateDependencies && _presentation.ShowDependencyUpdateActions,
                         request.PushChanges,
+                        request.RestorePackages,
                         commitMessage: null,
                         progress: new SynchronousProgress(job.ReportProgress),
                         setRepositoryError: (repoId, msg) => SafeInvoke(() => SetRepositoryError(repoId, msg)),
@@ -121,7 +122,7 @@ public sealed partial class WorkspaceRepositories
                     await RefreshAfterPipelinedRunAsync();
             }
 
-            await PreparePushOnlyAsync(jobContextId, job, ct, syncedRepoIds);
+            await PreparePushOnlyAsync(jobContextId, job, ct, syncedRepoIds, request.RestorePackages);
         }, new PageJobOptions { RefreshOnSuccess = false });
     }
 
@@ -141,10 +142,11 @@ public sealed partial class WorkspaceRepositories
     /// <summary>
     /// Prepare Workspace with Push only: the standalone synchronized push after the branches exist. Update and Push never
     /// reaches here - it runs as the shared combined operation, including its approval for a normal push.
+    /// <paramref name="restorePackages"/> is the dialog's Restore packages choice.
     /// </summary>
-    private async Task PreparePushOnlyAsync(GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, BackgroundJobHandle job, CancellationToken ct, IReadOnlySet<int> syncedRepoIds)
+    private async Task PreparePushOnlyAsync(GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, BackgroundJobHandle job, CancellationToken ct, IReadOnlySet<int> syncedRepoIds, bool restorePackages)
     {
-        // Phase 3: determine push plan and execute push (per-level restore handled inside push service)
+        // Phase 3: determine push plan and execute push. A local restore runs only when the dialog asked for one.
         job.ReportProgress("Preparing push...");
         IReadOnlySet<int> pushRepoIds;
         IReadOnlySet<string> requiredPackageIds;
@@ -167,7 +169,7 @@ public sealed partial class WorkspaceRepositories
 
         try
         {
-            await ExecutePushCoreAsync(jobContextId, job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds);
+            await ExecutePushCoreAsync(jobContextId, job, ct, pushRepoIds, synchronizedPush: true, requiredPackageIds, syncedRepoIds, restorePackages: restorePackages);
         }
         catch (SynchronizedPushNotPossibleException ex)
         {

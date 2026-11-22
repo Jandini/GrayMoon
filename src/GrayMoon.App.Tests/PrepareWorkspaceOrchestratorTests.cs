@@ -311,6 +311,20 @@ public sealed class PrepareWorkspaceOrchestratorTests
         Assert.False(result.PushPending);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Combined_run_forwards_the_restore_choice(bool restorePackages)
+    {
+        var phases = new FakePhases { Branches = Outcome(created: [RepoA, RepoB]) };
+
+        await RunAsync(phases, new RecordedErrors(), update: true, push: true, requested: null, restorePackages: restorePackages);
+
+        Assert.Equal(1, phases.PipelineCalls);
+        Assert.Equal(restorePackages, phases.LastRestorePackages);
+        Assert.Equal(0, phases.UpdateCalls);
+    }
+
     [Fact]
     public async Task Pipeline_exception_propagates_without_a_fallback_update()
     {
@@ -332,7 +346,8 @@ public sealed class PrepareWorkspaceOrchestratorTests
         bool push,
         IReadOnlySet<int>? requested,
         CancellationToken cancellationToken = default,
-        List<string>? progress = null)
+        List<string>? progress = null,
+        bool restorePackages = false)
     {
         var orchestrator = new PrepareWorkspaceOrchestrator(phases, NullLogger<PrepareWorkspaceOrchestrator>.Instance);
         return orchestrator.RunAsync(
@@ -343,6 +358,7 @@ public sealed class PrepareWorkspaceOrchestratorTests
             requested,
             update,
             push,
+            restorePackages,
             commitMessage: null,
             progress == null ? null : new SynchronousProgress(progress.Add),
             errors.SetRepository,
@@ -391,6 +407,7 @@ public sealed class PrepareWorkspaceOrchestratorTests
         public int BranchCalls { get; private set; }
         public int UpdateCalls { get; private set; }
         public int PipelineCalls { get; private set; }
+        public bool? LastRestorePackages { get; private set; }
         public IReadOnlySet<int>? RequestedRepositoryIds { get; private set; }
 
         public Task<BranchCreationOutcome> CreateBranchesAsync(
@@ -427,12 +444,14 @@ public sealed class PrepareWorkspaceOrchestratorTests
             int workspaceId,
             WorkspaceFeatureContextId contextId,
             string? commitMessage,
+            bool restorePackages,
             Action<string> reportOverlay,
             Action<int, string> setRepositoryError,
             Action<int, string> setLevelError,
             CancellationToken cancellationToken)
         {
             PipelineCalls++;
+            LastRestorePackages = restorePackages;
             OnPipeline?.Invoke(reportOverlay);
             if (PipelineException != null)
                 throw PipelineException;
