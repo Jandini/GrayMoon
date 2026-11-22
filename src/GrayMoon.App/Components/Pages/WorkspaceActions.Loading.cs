@@ -85,6 +85,11 @@ public sealed partial class WorkspaceActions
                     };
                 })
                 .ToList();
+
+            // A new load (open, or another context) starts from the default chip, then hides success when this data already has a run.
+            _showSuccess = true;
+            _successFilterMode = SuccessFilterMode.Automatic;
+            SyncSuccessFilterWithRunning();
         }
         catch (Exception ex)
         {
@@ -196,6 +201,7 @@ public sealed partial class WorkspaceActions
             }
         }
 
+        SyncSuccessFilterWithRunning();
         return rowsToRefresh;
     }
 

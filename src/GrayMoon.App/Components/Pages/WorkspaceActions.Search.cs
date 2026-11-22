@@ -63,8 +63,56 @@ public sealed partial class WorkspaceActions
 
     internal void ToggleShowSuccess()
     {
-        _showSuccess = !_showSuccess;
+        (_showSuccess, _successFilterMode) = ToggleSuccessFilter(_showSuccess, RunningCount > 0);
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// Hides success rows while any workflow is running, and shows them again once none are, unless the user
+    /// clicked the success chip. A grid refresh that is still running does not turn success back on until it
+    /// finishes, so a row that completes early cannot flash the successful rows in before the rest of the grid is known.
+    /// </summary>
+    private void SyncSuccessFilterWithRunning()
+    {
+        (_showSuccess, _successFilterMode) = ApplyRunningSuccessFilter(
+            _showSuccess, _successFilterMode, RunningCount > 0, deferRestore: isRefreshing);
+    }
+
+    /// <summary>A click on the success chip. While something is running, turning it on is kept until those runs finish; turning it off returns to <see cref="SuccessFilterMode.Automatic"/>.</summary>
+    internal static (bool ShowSuccess, SuccessFilterMode Mode) ToggleSuccessFilter(bool showSuccess, bool anyRunning)
+    {
+        var show = !showSuccess;
+        if (anyRunning)
+            return (show, show ? SuccessFilterMode.ShownByUser : SuccessFilterMode.Automatic);
+
+        return (show, show ? SuccessFilterMode.Automatic : SuccessFilterMode.HiddenByUser);
+    }
+
+    /// <summary>
+    /// The success chip follows whether anything is running. <paramref name="deferRestore"/> keeps a hide in
+    /// place until the in-progress grid refresh finishes.
+    /// </summary>
+    internal static (bool ShowSuccess, SuccessFilterMode Mode) ApplyRunningSuccessFilter(
+        bool showSuccess, SuccessFilterMode mode, bool anyRunning, bool deferRestore)
+    {
+        if (mode == SuccessFilterMode.HiddenByUser)
+            return (showSuccess, mode);
+
+        if (mode == SuccessFilterMode.ShownByUser)
+        {
+            if (!anyRunning && !deferRestore)
+                return (true, SuccessFilterMode.Automatic);
+
+            return (showSuccess, mode);
+        }
+
+        if (anyRunning)
+            return (false, SuccessFilterMode.Automatic);
+
+        if (deferRestore)
+            return (showSuccess, mode);
+
+        return (true, SuccessFilterMode.Automatic);
     }
 
     internal void ToggleShowNone()
@@ -87,6 +135,7 @@ public sealed partial class WorkspaceActions
 
             await WorkspaceRepository.UpdateExcludeAiWorkflowsAsync(WorkspaceId, exclude);
             workspace.ExcludeAiWorkflows = exclude;
+            SyncSuccessFilterWithRunning();
         }
         finally
         {

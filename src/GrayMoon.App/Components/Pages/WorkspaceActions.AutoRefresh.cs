@@ -125,7 +125,11 @@ public sealed partial class WorkspaceActions
                 isRefreshing = false;
                 try
                 {
-                    await InvokeAsync(StateHasChanged);
+                    await InvokeAsync(() =>
+                    {
+                        SyncSuccessFilterWithRunning();
+                        StateHasChanged();
+                    });
                 }
                 catch (ObjectDisposedException)
                 {
@@ -187,6 +191,7 @@ public sealed partial class WorkspaceActions
         if (rows.Any(r => r.WorkflowLines.Any(line => IsLineRunningForBranch(r, line))))
             EnsureAutoPollRunning();
 
+        SyncSuccessFilterWithRunning();
         StateHasChanged();
     }
 
@@ -345,7 +350,11 @@ public sealed partial class WorkspaceActions
                 row.IsRefreshing = false;
                 try
                 {
-                    await InvokeAsync(StateHasChanged);
+                    await InvokeAsync(() =>
+                    {
+                        SyncSuccessFilterWithRunning();
+                        StateHasChanged();
+                    });
                 }
                 catch (ObjectDisposedException)
                 {

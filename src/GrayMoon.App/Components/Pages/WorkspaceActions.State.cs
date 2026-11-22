@@ -89,6 +89,21 @@ public sealed partial class WorkspaceActions
     private bool _showAborted = true;
     private bool _showRunning = true;
     private bool _showSuccess = true;
+
+    /// <summary>
+    /// Who last chose the success chip. <see cref="SuccessFilterMode.Automatic"/> hides success while a
+    /// workflow is running and shows it again when none are. <see cref="SuccessFilterMode.ShownByUser"/> is a
+    /// click that turns success on during a run, and lasts until those runs finish.
+    /// <see cref="SuccessFilterMode.HiddenByUser"/> is a click that turns success off while nothing is running.
+    /// </summary>
+    internal enum SuccessFilterMode
+    {
+        Automatic,
+        ShownByUser,
+        HiddenByUser
+    }
+
+    private SuccessFilterMode _successFilterMode = SuccessFilterMode.Automatic;
     private bool _showNone;
     private bool _isTogglingAiFilter;
     private string searchTerm = string.Empty;

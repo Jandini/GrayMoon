@@ -1325,6 +1325,8 @@ success
 none
 ```
 
+The success chip starts on. When the page loads, or a refresh updates the grid, and any workflow is running, success turns off so those rows are hidden. Clicking the chip shows them again for as long as something is running; when nothing is running, success turns back on, and the next run hides it again. A refresh that is still in progress does not turn success back on until it finishes. Turning the chip off while nothing is running leaves success hidden until the next click. The other chips stay as the user set them.
+
 ### Polling
 
 Adaptive by page/browser activity.
