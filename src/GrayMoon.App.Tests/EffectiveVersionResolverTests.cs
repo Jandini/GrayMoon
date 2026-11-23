@@ -45,6 +45,42 @@ public sealed class EffectiveVersionResolverTests
     }
 
     [Fact]
+    public async Task A_background_refresh_on_the_same_HEAD_keeps_the_stored_decision_without_asking_the_Worker_or_registry()
+    {
+        // The refresh runs after every hook sync, in the queue "Applying pending repository changes..." waits for. On the
+        // old code each one asked the Worker for GitVersion again (5-50 s per refresh in a 45-repository Workspace).
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await s.ResolveAsync(bypassCache: true);
+        var branchPointCalls = s.BranchPointCalls;
+        var lookups = s.Registry.Lookups;
+
+        var refreshed = await s.ResolveAsync(bypassCache: false);
+
+        Assert.Equal(EffectiveVersionKind.InheritedVerified, refreshed.Decisions.Single(d => d.RepositoryId == s.ProducerId).Kind);
+        Assert.Equal(EffectiveVersionScenario.ParentVersion, refreshed.Decisions.Single(d => d.RepositoryId == s.ProducerId).EffectiveVersion);
+        Assert.Equal(branchPointCalls, s.BranchPointCalls);
+        Assert.Equal(lookups, s.Registry.Lookups);
+
+        // The start of an operation always asks again.
+        await s.ResolveAsync(bypassCache: true);
+        Assert.True(s.BranchPointCalls > branchPointCalls);
+    }
+
+    [Fact]
+    public async Task A_background_refresh_after_HEAD_moved_does_not_reuse_the_old_decision()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await s.ResolveAsync(bypassCache: true);
+        await s.MutateStateAsync(s.ProducerLinkId, state => state.HeadCommit = EffectiveVersionScenario.MovedSha);
+
+        var refreshed = await s.ResolveAsync(bypassCache: false);
+
+        var producer = refreshed.Decisions.Single(d => d.RepositoryId == s.ProducerId);
+        Assert.Equal(EffectiveVersionKind.Own, producer.Kind);
+        Assert.Equal(EffectiveVersionReasonCodes.NotOnBaseline, producer.ReasonCode);
+    }
+
+    [Fact]
     public async Task A_missing_package_gives_the_repository_its_own_version()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync();
@@ -128,10 +164,20 @@ public sealed class EffectiveVersionResolverTests
         Assert.Equal(2, s.Registry.Lookups);
         Assert.Equal(EffectiveVersionKind.Own, atStart.Kind);
 
-        // And the cached "available" expires.
+        // A background refresh keeps that decision for the same HEAD without asking.
         s.Registry.Lists(EffectiveVersionScenario.PackageId, EffectiveVersionScenario.ParentVersion);
         await s.ResolveAsync(bypassCache: false);
+        Assert.Equal(2, s.Registry.Lookups);
+
+        // And the cached "available" expires (stored decisions cleared so the refresh checks again).
+        await s.MutateStateAsync(s.ProducerLinkId, state => state.EffectiveVersionKind = null);
+        await s.ResolveAsync(bypassCache: false);
+        Assert.Equal(3, s.Registry.Lookups);
+        await s.MutateStateAsync(s.ProducerLinkId, state => state.EffectiveVersionKind = null);
+        await s.ResolveAsync(bypassCache: false);
+        Assert.Equal(3, s.Registry.Lookups);
         s.Clock.Advance(PackageAvailabilityCache.Ttl + TimeSpan.FromSeconds(1));
+        await s.MutateStateAsync(s.ProducerLinkId, state => state.EffectiveVersionKind = null);
         await s.ResolveAsync(bypassCache: false);
         Assert.Equal(4, s.Registry.Lookups);
     }

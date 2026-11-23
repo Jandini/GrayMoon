@@ -73,7 +73,10 @@ public sealed class EffectiveVersionResolver(
     /// <summary>
     /// Resolves <paramref name="repositoryIds"/> (all repositories of the Workspace when null) in
     /// <paramref name="contextId"/>. <paramref name="bypassCache"/> asks the registry even for versions it confirmed a
-    /// moment ago; the start of an operation always sets it. Cancellation writes nothing.
+    /// moment ago; the start of an operation always sets it. Without it (the refresh after every state write, which runs
+    /// in the hook sync queue that operations wait for), a repository whose stored decision came from a branch point check
+    /// for its current HEAD and the same kind of consumers keeps that decision: the Worker and the registry are not asked
+    /// again. Cancellation writes nothing.
     /// </summary>
     public async Task<EffectiveVersionResolution> ResolveAsync(
         int workspaceId,
@@ -103,7 +106,7 @@ public sealed class EffectiveVersionResolver(
         var states = await dbContext.WorkspaceRepositoryContextStates
             .AsNoTracking()
             .Where(s => s.WorkspaceFeatureContextId == contextId.Value && linkIds.Contains(s.WorkspaceRepositoryId))
-            .Select(s => new { s.WorkspaceRepositoryId, s.HeadCommit, s.GitVersion, s.BranchName })
+            .Select(s => new StoredState(s.WorkspaceRepositoryId, s.HeadCommit, s.GitVersion, s.BranchName, s.EffectiveVersion, s.EffectiveVersionKind, s.EffectiveVersionCommitSha, s.EffectiveVersionReasonCode))
             .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
 
         // Without its own state row a repository has nothing to compare and nothing to write to (I6).
@@ -138,6 +141,8 @@ public sealed class EffectiveVersionResolver(
                 : null;
             if (reason != null)
                 decisions[candidate.RepositoryId] = Own(candidate, reason, null);
+            else if (!bypassCache && StoredProbeDecision(candidate, states[candidate.WorkspaceRepositoryId], required.Count > 0) is { } stored)
+                decisions[candidate.RepositoryId] = stored;
             else
                 probes.Add((candidate, baseline!, required));
         }
@@ -370,6 +375,46 @@ public sealed class EffectiveVersionResolver(
     private static EffectiveVersionDecision Unresolved(Candidate candidate, string reasonCode, string message) => new(
         candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
         EffectiveVersionKind.Unresolved, null, candidate.GitVersion, candidate.HeadCommit, reasonCode, message);
+
+    /// <summary>
+    /// The stored decision of a repository that is on its branch point, when it came from a branch point check of its
+    /// current HEAD for the same kind of consumers (packages to verify, or version-file tokens only), else null. Unresolved
+    /// is never reused, so a registry that recovers is noticed on the next refresh.
+    /// </summary>
+    private static EffectiveVersionDecision? StoredProbeDecision(Candidate candidate, StoredState state, bool hasRequiredPackages)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.HeadCommit)
+            || !string.Equals(state.EffectiveVersionCommitSha?.Trim(), candidate.HeadCommit.Trim(), StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var kind = EffectiveVersionRules.KindOf(state.EffectiveVersionKind);
+        var sameConsumers = state.EffectiveVersionReasonCode switch
+        {
+            EffectiveVersionReasonCodes.Verified or EffectiveVersionReasonCodes.PackageNotPublished => hasRequiredPackages,
+            EffectiveVersionReasonCodes.TokenConsumersOnly => !hasRequiredPackages,
+            EffectiveVersionReasonCodes.BaselineNotOnRemoteParent or EffectiveVersionReasonCodes.ParentVersionUnavailable => true,
+            _ => false,
+        };
+        if (!sameConsumers || kind is null or EffectiveVersionKind.Unresolved)
+            return null;
+        if (kind is EffectiveVersionKind.InheritedVerified or EffectiveVersionKind.InheritedUnverified && string.IsNullOrWhiteSpace(state.EffectiveVersion))
+            return null;
+
+        return new EffectiveVersionDecision(
+            candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
+            kind.Value, kind == EffectiveVersionKind.Own ? candidate.GitVersion : state.EffectiveVersion!.Trim(), candidate.GitVersion,
+            candidate.HeadCommit, state.EffectiveVersionReasonCode!, null);
+    }
+
+    private sealed record StoredState(
+        int WorkspaceRepositoryId,
+        string? HeadCommit,
+        string? GitVersion,
+        string? BranchName,
+        string? EffectiveVersion,
+        int? EffectiveVersionKind,
+        string? EffectiveVersionCommitSha,
+        string? EffectiveVersionReasonCode);
 
     private sealed record Candidate(int RepositoryId, int WorkspaceRepositoryId, string RepositoryName, string? HeadCommit, string? GitVersion);
 
