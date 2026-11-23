@@ -147,21 +147,23 @@ public sealed class RepositorySkipReportingTests
 
         Assert.Null(RepositorySkipSummary.Describe([]));
         Assert.Null(RepositorySkipSummary.Describe(null));
-        Assert.Equal("1 read only repository skipped: graymoon-api.", RepositorySkipSummary.Describe([reference, reference]));
+        Assert.Equal("Skipped 1 \U0001F512 read only repo.", RepositorySkipSummary.Describe([reference, reference]));
         Assert.Equal(
-            "2 read only repositories skipped: graymoon-api, graymoon-web. 1 repository on a tag skipped: graymoon-docs.",
+            "Skipped 2 \U0001F512 read only repos and 1 repo on a tag.",
             RepositorySkipSummary.Describe([reference, tag, snapshot]));
     }
 
     [Fact]
-    public void The_summary_names_five_repositories_and_counts_the_rest()
+    public void The_summary_counts_the_repositories_and_names_none()
     {
         var skips = Enumerable.Range(1, 7)
             .Select(i => new RepositorySkip(i, "repo-" + i, RepositoryOperationReason.Reference, RepositoryOperationPolicy.ReferenceMessage))
+            .Append(new RepositorySkip(8, "repo-8", RepositoryOperationReason.OnTag, RepositoryOperationPolicy.OnTagMessage))
+            .Append(new RepositorySkip(9, "repo-9", RepositoryOperationReason.Archived, RepositoryOperationPolicy.ArchivedMessage))
             .ToList();
 
         Assert.Equal(
-            "7 read only repositories skipped: repo-1, repo-2, repo-3, repo-4, repo-5, and 2 more.",
+            "Skipped 7 \U0001F512 read only repos, 1 repo on a tag and 1 archived repo.",
             RepositorySkipSummary.Describe(skips));
     }
 
@@ -172,7 +174,7 @@ public sealed class RepositorySkipReportingTests
         var failed = OperationResult.Fail("boom") with { Skipped = [SampleSkip] };
         var warned = OperationResult.Ok() with { Skipped = [SampleSkip], Warnings = ["restore failed"], WarningSummary = "restore failed" };
 
-        Assert.Equal(["info:1 repository on a tag skipped: graymoon-api."], Shown(skipped));
+        Assert.Equal(["info:Skipped 1 repo on a tag."], Shown(skipped));
         Assert.Equal(["error:boom"], Shown(failed));
         Assert.Equal(["warning:restore failed"], Shown(warned));
         Assert.Empty(Shown(OperationResult.Ok()));
