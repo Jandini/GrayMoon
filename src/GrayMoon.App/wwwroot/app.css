@@ -1726,3 +1726,9 @@ a.repo-fork-badge--link:focus-visible {
     color: #fff !important;
     text-decoration: none;
 }
+
+/* Up arrow after a parent or Source branch name (Repositories read only snapshot, Actions parent branch): shorter than the text so it does not read as a letter. */
+.branch-parent-arrow {
+    font-size: 0.75em;
+    vertical-align: 0.05em;
+}
