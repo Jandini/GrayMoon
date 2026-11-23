@@ -1,0 +1,6 @@
+/* Feature Status (Repair) dialog: a Feature can have dozens of repositories, so the list scrolls inside a short
+   body instead of growing the dialog to the height of the window. */
+.feature-status-body {
+    max-height: min(22rem, calc(var(--modal-vh) * 0.5));
+    overflow-y: auto;
+}

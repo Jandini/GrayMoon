@@ -26,6 +26,8 @@ public sealed class GitProcessOptions
     /// connection, no local objects to reuse), and killing it partway through wastes all the work done so
     /// far instead of just failing fast on a truly transient error. Default 0, meaning **no timeout** -
     /// a clone runs to completion (or failure) with no time bound. Set to a positive value to bound it.
+    /// Also applies to <c>git checkout --progress</c>, which fills a new Feature worktree and takes about as long as the
+    /// checkout of the original clone did.
     /// </summary>
     public int CloneTimeoutSeconds { get; init; } = 0;
 
@@ -33,7 +35,8 @@ public sealed class GitProcessOptions
     /// Clone liveness bound: a clone is killed only after it has produced no output at all (stdout or stderr) for this many
     /// seconds. Git is started with <c>--progress</c>, so a healthy clone reports progress continuously and never trips this,
     /// however long it takes overall; a stalled one is stopped and reported instead of hanging. Covers the silent phase before
-    /// the first progress line too, so keep it generous. Default 180; 0 disables.
+    /// the first progress line too, so keep it generous. Default 180; 0 disables. Also applies to
+    /// <c>git checkout --progress</c> (Feature worktree checkout).
     /// </summary>
     public int CloneIdleTimeoutSeconds { get; init; } = 180;
 }

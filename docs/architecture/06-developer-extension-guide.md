@@ -607,11 +607,11 @@ Reference test: `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_so
 ## 20B. Worktree safety rules
 
 - HEAD is per worktree; `refs/heads/*`, remote refs and hooks are shared through the common git dir. Never copy `.git`, edit `.git/worktrees/*`, move a worktree with a filesystem move, or bypass `git worktree`.
-- Never `git worktree add --force`. `git worktree remove --force` only when the user authorized discarding changes; unlock only when authorized. No global `git worktree prune`.
+- Never `git worktree add --force`. `git worktree remove --force` only when the user authorized discarding changes; unlock only when authorized. No global `git worktree prune`. One exception, inside `GitWorktreeService.CreateWorktreeAsync` only: a worktree that create itself left unfinished (no index, so no staged work and no commit) is force-removed and unlocked without asking, together with its Feature branch while that still points at the base commit, so Create and Repair never report a half-written worktree as existing.
 - Never auto-adopt external worktrees, and never default an ambiguous hook path to the Workspace (`WorkspaceHookContextAttributor` skips unknown paths).
 - Persist intent before the Git mutation (Create: Feature `Creating` + context + `Pending` rows in one transaction); on failure persist the lifecycle and per-repository error and allow retry (Repair). Never "catch, delete rows, hope". Git is authoritative for worktree existence, SQLite for ownership and intent.
 - Do not call `IWorkspaceContextPathResolver` (or anything that opens a second `AppDbContext`) inside the intent transaction: SQLite deadlock.
-- Worktree create is idempotent per repository (an existing matching worktree is success); keep that when changing retry or ordering. The Workspace-role (root) worktree is created first and removed last.
+- Worktree create is idempotent per repository (an existing matching, finished worktree is success; an unfinished one is created again, see above); keep that when changing retry or ordering. The Workspace-role (root) worktree is created first and removed last.
 - Deletes below the Feature storage root go through the Worker's guarded cleaners (`FeatureFolderCleaner`, residue removal): never a folder holding a `.git` directory, a registered worktree, an existing Feature, or a path outside a managed `...\features` root. Reparse points are deleted, never followed.
 - Repair, reconcile and rollback never delete worktrees the user still needs; the reconciler only changes lifecycle state.
 
