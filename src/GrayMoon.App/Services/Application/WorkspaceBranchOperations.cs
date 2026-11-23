@@ -8,6 +8,7 @@ using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
 using GrayMoon.App.Services.Features;
 using GrayMoon.App.Services.Policy;
+using GrayMoon.App.Services.Versions;
 using GrayMoon.App.Services.WorkspaceManifest;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Repositories.Policy;
@@ -771,6 +772,12 @@ public sealed class WorkspaceBranchOperations(
 
             await workspaceGitService.EnsureLocalBranchPersistedAsync(wr.WorkspaceRepositoryId, newBranchName, cancellationToken);
 
+            // Where the branch started, before the state below is applied (effective versions, design 5.2).
+            var isSpecialWorkspace = (await contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
+            var baselineWarning = await BranchBaselineRecorder.RecordAsync(
+                stateWriter, contextId, isSpecialWorkspace, wr.WorkspaceRepositoryId, repo.RepositoryName ?? $"#{repositoryId}",
+                newBranchName, baseBranchName, createResponse, DateTime.UtcNow, logger, cancellationToken);
+
             // The branch the Worker reports checked out is recorded here, like a checkout does. The post-checkout
             // hook normally reports it too, but git runs no hook when the repository has no commits, and the row
             // then kept showing the old branch.
@@ -782,6 +789,8 @@ public sealed class WorkspaceBranchOperations(
                 await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     BranchName = checkedOutBranch,
+                    // A new branch starts on its base commit; the hook reports the same SHA later.
+                    HeadCommit = createResponse?.AlreadyExisted == false ? createResponse.BaseCommitSha : null,
                     IdentityProbed = true,
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
             }
@@ -796,7 +805,7 @@ public sealed class WorkspaceBranchOperations(
 
             await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
 
-            return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = true, AlreadyExisted = createResponse?.AlreadyExisted == true });
+            return BranchHttpOutcome.Ok(new CreateBranchApiResult { Success = true, AlreadyExisted = createResponse?.AlreadyExisted == true, Warning = baselineWarning });
         }
         catch (Exception ex)
         {
@@ -932,6 +941,8 @@ public sealed class WorkspaceBranchOperations(
                 return BranchHttpOutcome.Ok(new DeleteBranchApiResult { Success = false, Error = errorMessage ?? "Failed to delete branch" });
 
             await workspaceGitService.RemoveBranchPersistedAsync(wr.WorkspaceRepositoryId, branchName, isRemote, cancellationToken);
+            if (!isRemote)
+                await stateWriter.DeleteBranchBaselineAsync(contextId, wr.WorkspaceRepositoryId, branchName, cancellationToken);
 
             if (isRemote && string.Equals(await GetCurrentBranchAsync(workspaceId, contextId, wr.WorkspaceRepositoryId, cancellationToken), branchName, StringComparison.OrdinalIgnoreCase))
             {

@@ -883,6 +883,12 @@
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
 
         var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct);
+        if (plan.StopMessage is { } stopMessage)
+        {
+            if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(stopMessage));
+            return;
+        }
+
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.Show("Nothing to push."));

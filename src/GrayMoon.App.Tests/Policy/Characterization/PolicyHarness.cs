@@ -30,39 +30,45 @@ internal static class PolicyHarness
         => SyncStateTestContext.CreateAsync(configureServices: services =>
         {
             services.AddSingleton(new HttpClient(new OfflineHandler()));
-            services.AddScoped<NuGetService>();
-            services.AddScoped<PackageRegistrySyncService>();
-            services.AddScoped<WorkspacePushService>();
-            services.AddScoped<IPushLane>(sp => sp.GetRequiredService<WorkspacePushService>());
-            services.AddScoped<PushOrchestrator>();
-            services.AddScoped<WorkspacePushHandler>();
-            services.AddScoped<BasicGitPushStrategy>();
-            services.AddScoped<DotNetDependencyPushStrategy>();
-            services.AddScoped<WorkspacePushStrategySelector>();
-            services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
-            services.AddSingleton<WorkspaceOperationOutcomeStore>();
-            services.AddSingleton<UpdateAndPushApprovalStore>();
-            services.AddScoped<WorkspaceUndoPushHandler>();
-            services.AddSingleton<WorkerSyncNotificationQueue>();
-            services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
-            services.AddScoped<DependencyUpdateOrchestrator>();
-            services.AddScoped<IDependencyUpdateLane>(sp => sp.GetRequiredService<DependencyUpdateOrchestrator>());
-            services.AddScoped<UpdateAndPushOrchestrator>();
-            services.AddScoped<WorkspaceUpdateHandler>();
-            services.AddScoped<IWorkspaceUpdateOperations, WorkspaceUpdateOperations>();
-            services.AddScoped<IWorkspaceUpdateAndPushOperations, WorkspaceUpdateAndPushOperations>();
-            services.AddScoped<IWorkspaceSyncOperations, WorkspaceSyncOperations>();
-            services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
-            services.AddScoped<WorkspaceBranchHandler>();
-            services.AddScoped<IPrepareWorkspacePhases, PrepareWorkspacePhases>();
-            services.AddScoped<PrepareWorkspaceOrchestrator>();
-            services.AddScoped<IWorkspacePreparationOperations, WorkspacePreparationOperations>();
-            services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();
-            // The read service is only used by GetAsync, which these tests do not call.
-            services.AddScoped<IWorkspaceGitChangesReadService>(_ => null!);
-            services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
+            AddFacades(services);
             configure?.Invoke(services);
         });
+
+    /// <summary>The facades and orchestrators behind them, for a test container that brings its own HttpClient.</summary>
+    public static void AddFacades(IServiceCollection services)
+    {
+        services.AddScoped<NuGetService>();
+        services.AddScoped<PackageRegistrySyncService>();
+        services.AddScoped<WorkspacePushService>();
+        services.AddScoped<IPushLane>(sp => sp.GetRequiredService<WorkspacePushService>());
+        services.AddScoped<PushOrchestrator>();
+        services.AddScoped<WorkspacePushHandler>();
+        services.AddScoped<BasicGitPushStrategy>();
+        services.AddScoped<DotNetDependencyPushStrategy>();
+        services.AddScoped<WorkspacePushStrategySelector>();
+        services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
+        services.AddSingleton<WorkspaceOperationOutcomeStore>();
+        services.AddSingleton<UpdateAndPushApprovalStore>();
+        services.AddScoped<WorkspaceUndoPushHandler>();
+        services.AddSingleton<WorkerSyncNotificationQueue>();
+        services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
+        services.AddScoped<DependencyUpdateOrchestrator>();
+        services.AddScoped<IDependencyUpdateLane>(sp => sp.GetRequiredService<DependencyUpdateOrchestrator>());
+        services.AddScoped<UpdateAndPushOrchestrator>();
+        services.AddScoped<WorkspaceUpdateHandler>();
+        services.AddScoped<IWorkspaceUpdateOperations, WorkspaceUpdateOperations>();
+        services.AddScoped<IWorkspaceUpdateAndPushOperations, WorkspaceUpdateAndPushOperations>();
+        services.AddScoped<IWorkspaceSyncOperations, WorkspaceSyncOperations>();
+        services.AddScoped<IWorkspaceBranchOccupancyService, WorkspaceBranchOccupancyService>();
+        services.AddScoped<WorkspaceBranchHandler>();
+        services.AddScoped<IPrepareWorkspacePhases, PrepareWorkspacePhases>();
+        services.AddScoped<PrepareWorkspaceOrchestrator>();
+        services.AddScoped<IWorkspacePreparationOperations, WorkspacePreparationOperations>();
+        services.AddScoped<IGitChangesWorkerClient, GitChangesWorkerClient>();
+        // The read service is only used by GetAsync, which these tests do not call.
+        services.AddScoped<IWorkspaceGitChangesReadService>(_ => null!);
+        services.AddScoped<IWorkspaceGitChangesOperations, WorkspaceGitChangesOperations>();
+    }
 
     public sealed record Graph(int ProducerId, int ConsumerId);
 

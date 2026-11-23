@@ -272,6 +272,14 @@ public class SqlitePerformanceTests
 
         ctx.WorkerBridge.IsWorkerConnected = false;
         ctx.WorkerBridge.Respond("GetCommitCounts", new { outgoingCommits = 7, incomingCommits = 1, hasUpstream = true });
+        // The first effective version decision of each repository is stored once (one save for all); after that a
+        // recompute that changes no decision writes nothing, which is what the push bookkeeping below relies on.
+        await using (var scope = ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Versions.EffectiveVersionResolver>()
+                .ResolveAsync(ctx.WorkspaceId, contextId, repositoryIds: null, bypassCache: false, CancellationToken.None);
+        }
+
         saves.Reset();
         await using (var scope = ctx.CreateScope())
         {

@@ -122,6 +122,14 @@ public sealed class CreateBranchResponse
     /// <summary>True when a local branch of that name was already there: it was checked out as it is and the requested base was not used.</summary>
     [JsonPropertyName("alreadyExisted")]
     public bool AlreadyExisted { get; set; }
+
+    /// <summary>The ref the branch was created from; null when it already existed or the repository has no commits.</summary>
+    [JsonPropertyName("resolvedStartRef")]
+    public string? ResolvedStartRef { get; set; }
+
+    /// <summary>The commit the new branch starts on; null when it already existed or the repository has no commits.</summary>
+    [JsonPropertyName("baseCommitSha")]
+    public string? BaseCommitSha { get; set; }
 }
 
 /// <summary>Worker DeleteBranch response (camelCase).</summary>
@@ -238,6 +246,13 @@ public sealed class CreateBranchApiResult
     /// </summary>
     [JsonPropertyName("alreadyExisted")]
     public bool AlreadyExisted { get; set; }
+
+    /// <summary>
+    /// Set on a success with a problem that did not undo it: the branch was created but where it started could not be
+    /// recorded, so it will be pushed like a branch GrayMoon did not create.
+    /// </summary>
+    [JsonPropertyName("warning")]
+    public string? Warning { get; set; }
 }
 
 /// <summary>Worker StageAndCommit response (camelCase).</summary>

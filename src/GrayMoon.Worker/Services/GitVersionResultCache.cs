@@ -22,7 +22,7 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
     private readonly ConcurrentDictionary<(Key Key, string Inputs), TaskCompletionSource<RepositoryVersionResult>> _inFlight = new();
     private long _clock;
 
-    private readonly record struct Key(string Path, bool NonNormalize, string? CommitSha);
+    private readonly record struct Key(string Path, bool NonNormalize, string? CommitSha, string? BranchName);
 
     private sealed class Entry(GitVersionInputFingerprint fingerprint, GitVersionResult result, long stamp)
     {
@@ -163,7 +163,11 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { path = repoPath; }
         if (OperatingSystem.IsWindows())
             path = path.ToUpperInvariant();
-        return new Key(path, options.NonNormalize, string.IsNullOrWhiteSpace(options.CommitSha) ? null : options.CommitSha.Trim());
+        return new Key(
+            path,
+            options.NonNormalize,
+            string.IsNullOrWhiteSpace(options.CommitSha) ? null : options.CommitSha.Trim(),
+            string.IsNullOrWhiteSpace(options.BranchName) ? null : options.BranchName.Trim());
     }
 
     // The result is a mutable class; callers never share an instance with the cache or with each other.
@@ -172,6 +176,7 @@ public sealed class GitVersionResultCache(ILogger<GitVersionResultCache>? logger
         InformationalVersion = r.InformationalVersion,
         BranchName = r.BranchName,
         EscapedBranchName = r.EscapedBranchName,
+        Sha = r.Sha,
     };
 
     private static RepositoryVersionResult Copy(RepositoryVersionResult r)

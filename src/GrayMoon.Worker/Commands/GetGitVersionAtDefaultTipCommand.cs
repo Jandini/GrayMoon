@@ -51,7 +51,7 @@ public sealed class GetGitVersionAtDefaultTipCommand(IGitRepositoryReader reader
 
         var versionResult = await versionProvider.GetVersionAsync(
             repoPath,
-            new RepositoryVersionOptions { NonNormalize = true, CommitSha = sha },
+            new RepositoryVersionOptions { NonNormalize = true, CommitSha = sha, BranchName = defaultBranch },
             cancellationToken);
         var error = versionResult.Error;
         var version = versionResult.InformationalVersion;
@@ -61,6 +61,21 @@ public sealed class GetGitVersionAtDefaultTipCommand(IGitRepositoryReader reader
             {
                 Success = false,
                 ErrorMessage = error ?? "GitVersion returned no version for default tip.",
+                CommitSha = sha,
+                DefaultBranch = defaultBranch
+            };
+        }
+
+        // GitVersion answers for the branch tip when the commit is not in the local branch (local default behind its
+        // origin), and for origin/<default> when there is no local default branch. Both are another version, so the
+        // answer counts only when it names the default branch and the requested commit.
+        var mismatch = GitVersionBranchPoint.DescribeMismatch(versionResult.Result, defaultBranch, sha);
+        if (mismatch != null)
+        {
+            return new GetGitVersionAtDefaultTipResponse
+            {
+                Success = false,
+                ErrorMessage = $"GitVersion could not version origin/{defaultBranch} at {sha[..Math.Min(7, sha.Length)]}: {mismatch} Pull {defaultBranch} and try again.",
                 CommitSha = sha,
                 DefaultBranch = defaultBranch
             };

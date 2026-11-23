@@ -20,6 +20,12 @@ public sealed record BranchCreationOutcome(
     /// </summary>
     public IReadOnlyDictionary<int, string> AlreadyExistedByRepositoryId { get; init; } = new Dictionary<int, string>();
 
+    /// <summary>
+    /// One sentence per created branch whose branch point could not be recorded. The branch stays; it is then pushed like
+    /// a branch GrayMoon did not create. The caller reports these as warnings.
+    /// </summary>
+    public IReadOnlyList<string> BaselineWarnings { get; init; } = [];
+
     public static BranchCreationOutcome Empty { get; } =
         new(new HashSet<int>(), new Dictionary<int, string?>(), new Dictionary<int, string>());
 }

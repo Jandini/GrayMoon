@@ -202,6 +202,7 @@ builder.Services.AddSingleton<ICommandHandler<EnsureGitChangesWatchersRequest, E
         builder.Services.AddSingleton<ICommandHandler<CleanupFeatureFolderRequest, CleanupFeatureFolderResponse>, CleanupFeatureFolderCommand>();
         builder.Services.AddSingleton<ICommandHandler<SweepPendingFeatureFoldersRequest, SweepPendingFeatureFoldersResponse>, SweepPendingFeatureFoldersCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
+        builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtBranchPointRequest, GetGitVersionAtBranchPointResponse>, GetGitVersionAtBranchPointCommand>();
         builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();
         builder.Services.AddSingleton<ICommandHandler<DiscardWorkspaceRootRequest, DiscardWorkspaceRootResponse>, DiscardWorkspaceRootCommand>();
         builder.Services.AddSingleton<ICommandHandler<WriteRepositoryFileRequest, WriteRepositoryFileResponse>, WriteRepositoryFileCommand>();

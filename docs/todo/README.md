@@ -2,7 +2,7 @@
 
 Notes for work that is not built, or only partly built. Anything fully shipped is deleted: its behavior belongs in `docs/architecture/`. A note that is partly shipped keeps only what is still open, and says what is built in a short section at the top.
 
-Last checked against the code: 2026-11-21.
+Last checked against the code: 2026-11-23.
 
 ## `defects/` - something is wrong or missing today, and the cause is known
 
@@ -21,7 +21,7 @@ Classification (must / should / optional) and the order of work for all of these
 | Note | Idea | Status |
 |---|---|---|
 | [workspace-unhook-open-items](workspace-unhook-open-items.md) | Manual smoke and the follow-ups for removing GrayMoon's Git hooks when a Workspace or repository leaves, and for the Add / Import from disk / Restore split. The feature is built; how it works is in `docs/architecture/` (01, 02, 04 section 7, 05 section 1, 06 section 20G). | Built; smoke and follow-ups open |
-| [skip-push-of-unchanged-new-branch](ideas/skip-push-of-unchanged-new-branch.md) | Bulk push and the orchestrators leave out a repository on a new, never-pushed branch with no commits, unless another repository depends on it (its package must be built under the new branch version). A click on the repository's own badge still pushes it. | Idea only; full code analysis required |
+| [skip-push-of-unchanged-new-branch](ideas/skip-push-of-unchanged-new-branch.md) | Bulk push and the orchestrators leave out a repository on a new, never-pushed branch with no commits, unless another repository depends on it (its package must be built under the new branch version). A click on the repository's own badge still pushes it. | Superseded: built as effective versions and selective push (see the note) |
 | [changes-commit-timeline](ideas/changes-commit-timeline.md) | Commit timeline strip on the Changes page to review a Feature commit by commit across repositories (read-only "time machine"), persisted per branch, Feature contexts first. | Draft, design only |
 | [connector-token-failure-handling](ideas/connector-token-failure-handling.md) | Classify connector token failures instead of showing "unknown" errors. | Draft, analysis only |
 | [git-changes-large-changeset-scale](ideas/git-changes-large-changeset-scale.md) | Folder summaries, chunked Worker transfer, deltas for very large change sets. | Closed for now |

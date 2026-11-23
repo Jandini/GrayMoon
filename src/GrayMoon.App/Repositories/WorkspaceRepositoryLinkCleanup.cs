@@ -69,6 +69,10 @@ internal static class WorkspaceRepositoryLinkCleanup
             .Where(b => workspaceRepositoryIds.Contains(b.WorkspaceRepositoryId))
             .ExecuteDeleteAsync(cancellationToken);
 
+        await db.WorkspaceRepositoryBranchBaselines
+            .Where(b => workspaceRepositoryIds.Contains(b.WorkspaceRepositoryId))
+            .ExecuteDeleteAsync(cancellationToken);
+
         await db.WorkspaceRepositoryPullRequests
             .Where(p => workspaceRepositoryIds.Contains(p.WorkspaceRepositoryId))
             .ExecuteDeleteAsync(cancellationToken);

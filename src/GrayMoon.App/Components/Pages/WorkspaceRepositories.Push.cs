@@ -23,9 +23,16 @@ public sealed partial class WorkspaceRepositories
                 WorkspaceId,
                 contextId,
                 cancellationToken: CancellationToken.None);
+            if (plan.StopMessage is { } stopMessage)
+            {
+                ToastService.ShowError(stopMessage);
+                return;
+            }
+
             if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
             {
-                ToastService.Show("No repositories to push.");
+                // Repositories left out because they have no commits and nothing needs their packages are named ("no work").
+                ToastService.Show(plan.NoWork.Count == 0 ? "No repositories to push." : $"No repositories to push. {string.Join(" ", plan.NoWork)}");
                 return;
             }
 
@@ -216,6 +223,12 @@ public sealed partial class WorkspaceRepositories
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
         var plan = await planOps.GetPlanAsync(WorkspaceId, jobContextId, maxLevel, ct);
+        if (plan.StopMessage is { } stopMessage)
+        {
+            SafeInvoke(() => ToastService.ShowError(stopMessage));
+            return null;
+        }
+
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));

@@ -116,9 +116,18 @@
                 {
                     <div class="version-container @(IsVersionClicked ? "version-clicked" : "")"
                          @onmouseleave="OnVersionMouseLeave">
-                        <span class="version-inner text-muted"
-                              @onclick="OnVersionClick"
-                              title="Click to copy version">@Link.GitVersion</span>
+                        @if (Link.IsVersionInherited)
+                        {
+                            <span class="version-inner version-inner--inherited"
+                                  @onclick="OnVersionClick"
+                                  title="@VersionTitle(Link)">@Link.EffectiveVersion</span>
+                        }
+                        else
+                        {
+                            <span class="version-inner text-muted"
+                                  @onclick="OnVersionClick"
+                                  title="@VersionTitle(Link)">@Link.GitVersion</span>
+                        }
                     </div>
                 }
                 else if (versionCell == VersionCell.ProviderFailed)
@@ -652,6 +661,25 @@
         }
 
         return isVersionUnresolved ? VersionCell.ProviderFailed : VersionCell.NotApplicable;
+    }
+
+    /// <summary>
+    /// Tooltip of a resolved Version cell. An inherited version names its parent branch, the short branch point SHA and
+    /// the calculated GitVersion; an unresolved effective version names the reason; anything else is the plain copy hint.
+    /// </summary>
+    internal static string VersionTitle(WorkspaceRepositoryLink link)
+    {
+        if (link.IsVersionInherited)
+        {
+            var sha = link.BaselineCommitSha ?? link.EffectiveVersionCommitSha ?? "";
+            var shortSha = sha.Length > 7 ? sha[..7] : sha;
+            return $"Inherited published version {link.EffectiveVersion} from {link.BaselineParentBranchName ?? "the parent branch"} at {shortSha}. Calculated GitVersion: {link.GitVersion}. Click to copy effective version.";
+        }
+
+        if (link.EffectiveVersionKind == (int)EffectiveVersionKind.Unresolved)
+            return $"Click to copy version. The published packages could not be verified: {EffectiveVersionReasonCodes.Describe(link.EffectiveVersionReasonCode)}.";
+
+        return "Click to copy version";
     }
 
     private string RepositoryTypeTitle => Link?.RepositoryType switch

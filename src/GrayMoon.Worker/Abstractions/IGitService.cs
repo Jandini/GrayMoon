@@ -22,6 +22,12 @@ public interface IGitService
     /// </summary>
     Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct);
     /// <summary>
+    /// Same as the commit overload, plus <paramref name="branchName"/> (<c>/b</c>) to version the commit as that branch would
+    /// see it. With a branch, <c>/nocache</c> is passed too: GitVersion's own disk cache ignores <c>/b</c> and <c>/c</c> and
+    /// would otherwise answer with the result of an earlier run for HEAD. The caller validates the branch name and the SHA.
+    /// </summary>
+    Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, string? branchName, CancellationToken ct);
+    /// <summary>
     /// Fetches from origin; when <paramref name="includeTags"/> is true, fetches tags as well. Returns (success, errorMessage).
     /// <paramref name="skipHooks"/> runs git without the repository hooks: pass it when the caller reads and reports the branches
     /// itself afterwards, so the reference-transaction hook does not report the same refs a second time.
@@ -55,8 +61,8 @@ public interface IGitService
     Task<IReadOnlyList<string>> GetRemoteBranchesAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified branch. Returns (success, errorMessage). When <paramref name="skipHooks"/> is true, hooks are disabled for the checkout (orchestrated flows such as return-to-default).</summary>
     Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false);
-    /// <summary>Creates a new branch from the given base branch and checks it out. When a local branch of that name already exists it is checked out as it is, the base is not used, and <c>AlreadyExisted</c> is true so the caller can report it. A create that fails for any other reason is a failure. Returns (success, errorMessage, alreadyExisted).</summary>
-    Task<(bool Success, string? ErrorMessage, bool AlreadyExisted)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false);
+    /// <summary>Creates a new branch from the given base branch and checks it out. When a local branch of that name already exists it is checked out as it is, the base is not used, and <c>AlreadyExisted</c> is true so the caller can report it. A create that fails for any other reason is a failure. Returns (success, errorMessage, alreadyExisted, resolvedStartRef, baseCommitSha); the last two are set only when the branch was created from a commit (not for an existing branch or a repository without commits).</summary>
+    Task<CreateBranchResult> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D. When <paramref name="skipHooks"/> is true, hooks are disabled for the remote delete, so the pre-push hook does not queue a sync for a branch the caller is about to leave behind. When deleting a remote branch, pass <paramref name="bearerToken"/> so private remotes authenticate the same way as fetch/pull/push.</summary>
     Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null);
     /// <summary>Fetches only tags from origin (git fetch origin --tags). Does not touch branches. Returns (success, errorMessage).</summary>

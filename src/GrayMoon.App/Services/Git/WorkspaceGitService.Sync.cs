@@ -569,7 +569,7 @@ public sealed partial class WorkspaceGitService
                 var payload = WorkerResponseJson.DeserializeWorkerResponse<DefaultTipVersionWorkerResponse>(response.Data);
                 if (payload is not { Success: true } || string.IsNullOrWhiteSpace(payload.Version))
                 {
-                    _logger.LogDebug(
+                    _logger.LogWarning(
                         "GetGitVersionAtDefaultTip returned no version for {Repo}: {Error}",
                         repoName, payload?.ErrorMessage);
                     return (Link: link, RepoName: repoName, Payload: (DefaultTipVersionWorkerResponse?)null);

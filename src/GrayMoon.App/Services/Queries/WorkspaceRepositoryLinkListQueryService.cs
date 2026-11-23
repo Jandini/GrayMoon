@@ -652,63 +652,83 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
     {
         if (isSpecialWorkspace || contextId is null)
         {
-            return query.Select(wr => new WorkspaceRepositoryLinkListItemDto(
-                wr.WorkspaceRepositoryId,
-                wr.WorkspaceId,
-                wr.RepositoryId,
-                wr.Repository != null ? wr.Repository.RepositoryName : string.Empty,
-                wr.Repository != null ? wr.Repository.CloneUrl : string.Empty,
-                wr.GitVersion,
-                wr.BranchName,
-                wr.CheckedOutTag,
-                wr.DefaultBranchName,
-                wr.OutgoingCommits,
-                wr.IncomingCommits,
-                wr.DefaultBranchBehindCommits,
-                wr.DefaultBranchAheadCommits,
-                wr.BranchHasUpstream,
-                wr.SyncStatus,
-                wr.DependencyLevel,
-                wr.Dependencies,
-                wr.UnmatchedDeps,
-                wr.OutOfDateFileRepos,
-                wr.RepositoryType,
-                wr.HasNewerTag,
-                wr.HasSelfFileVersionToken,
-                wr.PullRequest != null ? wr.PullRequest.State : null,
-                wr.PullRequest != null ? wr.PullRequest.PullRequestNumber : null,
-                wr.PullRequest != null ? wr.PullRequest.HtmlUrl : null,
-                wr.PullRequest != null ? wr.PullRequest.MergedAt : null,
-                wr.PullRequest != null ? wr.PullRequest.Mergeable : null,
-                wr.PullRequest != null ? wr.PullRequest.MergeableState : null,
-                wr.PullRequest != null ? wr.PullRequest.ChangedFiles : null,
-                wr.Repository != null && wr.Repository.Archived,
+            // The effective version is per context: the special Workspace reads its own state row and branch baseline
+            // (none for legacy callers without a context).
+            var specialCid = contextId?.Value ?? -1;
+            var special =
+                from wr in query
+                join s in db.WorkspaceRepositoryContextStates.AsNoTracking().Where(s => s.WorkspaceFeatureContextId == specialCid)
+                    on wr.WorkspaceRepositoryId equals s.WorkspaceRepositoryId into states
+                from state in states.DefaultIfEmpty()
+                join b in db.WorkspaceRepositoryBranchBaselines.AsNoTracking().Where(b => b.WorkspaceFeatureContextId == specialCid)
+                    on new { Id = wr.WorkspaceRepositoryId, Branch = wr.BranchName } equals new { Id = b.WorkspaceRepositoryId, Branch = (string?)b.BranchName } into baselines
+                from baseline in baselines.DefaultIfEmpty()
+                select new { wr, state, baseline };
+
+            return special.Select(x => new WorkspaceRepositoryLinkListItemDto(
+                x.wr.WorkspaceRepositoryId,
+                x.wr.WorkspaceId,
+                x.wr.RepositoryId,
+                x.wr.Repository != null ? x.wr.Repository.RepositoryName : string.Empty,
+                x.wr.Repository != null ? x.wr.Repository.CloneUrl : string.Empty,
+                x.wr.GitVersion,
+                x.wr.BranchName,
+                x.wr.CheckedOutTag,
+                x.wr.DefaultBranchName,
+                x.wr.OutgoingCommits,
+                x.wr.IncomingCommits,
+                x.wr.DefaultBranchBehindCommits,
+                x.wr.DefaultBranchAheadCommits,
+                x.wr.BranchHasUpstream,
+                x.wr.SyncStatus,
+                x.wr.DependencyLevel,
+                x.wr.Dependencies,
+                x.wr.UnmatchedDeps,
+                x.wr.OutOfDateFileRepos,
+                x.wr.RepositoryType,
+                x.wr.HasNewerTag,
+                x.wr.HasSelfFileVersionToken,
+                x.wr.PullRequest != null ? x.wr.PullRequest.State : null,
+                x.wr.PullRequest != null ? x.wr.PullRequest.PullRequestNumber : null,
+                x.wr.PullRequest != null ? x.wr.PullRequest.HtmlUrl : null,
+                x.wr.PullRequest != null ? x.wr.PullRequest.MergedAt : null,
+                x.wr.PullRequest != null ? x.wr.PullRequest.Mergeable : null,
+                x.wr.PullRequest != null ? x.wr.PullRequest.MergeableState : null,
+                x.wr.PullRequest != null ? x.wr.PullRequest.ChangedFiles : null,
+                x.wr.Repository != null && x.wr.Repository.Archived,
                 db.WorkspaceGitContextChangeEntries.Count(e =>
-                    e.WorkspaceRepositoryId == wr.WorkspaceRepositoryId
+                    e.WorkspaceRepositoryId == x.wr.WorkspaceRepositoryId
                     && (contextId != null
                         ? e.WorkspaceFeatureContextId == contextId.Value.Value
                         : db.WorkspaceFeatureContexts.Any(c =>
                             c.WorkspaceFeatureContextId == e.WorkspaceFeatureContextId
-                            && c.WorkspaceId == wr.WorkspaceId
+                            && c.WorkspaceId == x.wr.WorkspaceId
                             && c.Kind == WorkspaceFeatureContextKind.Workspace))),
                 HeadCommit: null,
                 FeatureBaseCommitSha: null,
                 ParentBranchName: null,
                 FeaturePinnedTag: null,
-                IsReference: wr.IsReference,
+                IsReference: x.wr.IsReference,
                 IsReferenceSnapshot: false,
                 FeatureSourceBranchName: null,
-                Role: wr.Role,
+                Role: x.wr.Role,
                 GitVersionPending: null,
-                IsFork: wr.Repository != null && wr.Repository.IsFork,
-                ParentCloneUrl: wr.Repository != null ? wr.Repository.ParentCloneUrl : null,
-                ParentPullRequestNumber: wr.PullRequest != null ? wr.PullRequest.ParentPullRequestNumber : null,
-                ParentPullRequestState: wr.PullRequest != null ? wr.PullRequest.ParentState : null,
-                ParentPullRequestHtmlUrl: wr.PullRequest != null ? wr.PullRequest.ParentHtmlUrl : null,
-                ParentPullRequestMergedAt: wr.PullRequest != null ? wr.PullRequest.ParentMergedAt : null,
-                ParentPullRequestMergeable: wr.PullRequest != null ? wr.PullRequest.ParentMergeable : null,
-                ParentPullRequestMergeableState: wr.PullRequest != null ? wr.PullRequest.ParentMergeableState : null,
-                ParentPullRequestChangedFiles: wr.PullRequest != null ? wr.PullRequest.ParentChangedFiles : null));
+                IsFork: x.wr.Repository != null && x.wr.Repository.IsFork,
+                ParentCloneUrl: x.wr.Repository != null ? x.wr.Repository.ParentCloneUrl : null,
+                ParentPullRequestNumber: x.wr.PullRequest != null ? x.wr.PullRequest.ParentPullRequestNumber : null,
+                ParentPullRequestState: x.wr.PullRequest != null ? x.wr.PullRequest.ParentState : null,
+                ParentPullRequestHtmlUrl: x.wr.PullRequest != null ? x.wr.PullRequest.ParentHtmlUrl : null,
+                ParentPullRequestMergedAt: x.wr.PullRequest != null ? x.wr.PullRequest.ParentMergedAt : null,
+                ParentPullRequestMergeable: x.wr.PullRequest != null ? x.wr.PullRequest.ParentMergeable : null,
+                ParentPullRequestMergeableState: x.wr.PullRequest != null ? x.wr.PullRequest.ParentMergeableState : null,
+                ParentPullRequestChangedFiles: x.wr.PullRequest != null ? x.wr.PullRequest.ParentChangedFiles : null,
+                EffectiveVersion: x.state != null ? x.state.EffectiveVersion : null,
+                EffectiveVersionKind: x.state != null ? x.state.EffectiveVersionKind : null,
+                EffectiveVersionCommitSha: x.state != null ? x.state.EffectiveVersionCommitSha : null,
+                EffectiveVersionReasonCode: x.state != null ? x.state.EffectiveVersionReasonCode : null,
+                VersionHeadCommit: x.state != null ? x.state.HeadCommit : null,
+                BaselineParentBranchName: x.baseline != null ? x.baseline.ParentBranchName : null,
+                BaselineCommitSha: x.baseline != null ? x.baseline.BaseCommitSha : null));
         }
 
         var cid = contextId.Value.Value;
@@ -774,7 +794,14 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
             ParentPullRequestMergedAt: x.pr != null ? x.pr.ParentMergedAt : null,
             ParentPullRequestMergeable: x.pr != null ? x.pr.ParentMergeable : null,
             ParentPullRequestMergeableState: x.pr != null ? x.pr.ParentMergeableState : null,
-            ParentPullRequestChangedFiles: x.pr != null ? x.pr.ParentChangedFiles : null));
+            ParentPullRequestChangedFiles: x.pr != null ? x.pr.ParentChangedFiles : null,
+            EffectiveVersion: x.state != null ? x.state.EffectiveVersion : null,
+            EffectiveVersionKind: x.state != null ? x.state.EffectiveVersionKind : null,
+            EffectiveVersionCommitSha: x.state != null ? x.state.EffectiveVersionCommitSha : null,
+            EffectiveVersionReasonCode: x.state != null ? x.state.EffectiveVersionReasonCode : null,
+            VersionHeadCommit: x.state != null ? x.state.HeadCommit : null,
+            BaselineParentBranchName: x.featureRepo != null && x.featureRepo.PinnedTag == null && !x.featureRepo.IsReferenceSnapshot ? x.featureRepo.ParentBranchName : null,
+            BaselineCommitSha: x.featureRepo != null && x.featureRepo.PinnedTag == null && !x.featureRepo.IsReferenceSnapshot ? x.featureRepo.BaseCommitSha : null));
     }
 
     private static WorkspaceRepositoryLinkListCursor ToCursor(WorkspaceRepositoryLinkListItemDto dto) =>

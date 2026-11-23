@@ -123,6 +123,10 @@ Current strict steps:
 18  Connector removed-at column                            (Connectors.RemovedAtUtc)
 19  Reference repository columns                           (read only repository columns on links and Feature repositories)
 20  Agent environment variables                            (AgentEnvironmentVariables table, section 17)
+21  Effective versions and branch baselines                (WorkspaceRepositoryContextStates.EffectiveVersion, EffectiveVersionKind,
+                                                           EffectiveVersionCommitSha, EffectiveVersionReasonCode; WorkspaceRepositoryBranchBaselines table
+                                                           with its unique (context, repository, branch) index, section 22. The runner adds the four columns
+                                                           before older steps too: step 16 inserts context state rows through EF)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -966,7 +970,7 @@ All are unique on `WorkspaceFeatureContextId + WorkspaceRepositoryId` (or `+ Fil
 ```text
 WorkspaceRepositoryContextStates       checkout projection: the link's projection columns (BranchName, CheckedOutTag,
                                        HasNewerTag, GitVersion, commit counts, SyncStatus, dependency and file-version
-                                       metrics, TotalFileLines, RepositoryType) plus HeadCommit and GitVersionPending
+                                       metrics, TotalFileLines, RepositoryType) plus HeadCommit, GitVersionPending and the EffectiveVersion* columns
 WorkspaceRepositoryContextPullRequests
 WorkspaceRepositoryContextActions
 WorkspaceGitContextRepositoryStatuses
@@ -981,6 +985,30 @@ Seeding (`SeedInitialFeatureProjectionsAsync`) is an idempotent upsert. An exist
 `WorkspaceProjects` and `WorkspaceFileLineStatuses` carry a nullable `WorkspaceFeatureContextId` column instead of a separate table. On `WorkspaceProjects` it is a foreign key `ON DELETE CASCADE` (fresh databases and, after strict step 2, upgraded ones); `WorkspaceFileLineStatuses` has no foreign key on either, so the two shapes match. Rows with a null context id belong to the special Workspace only. Remove Feature does not rely on cascades: `DeleteContextScopedProjectDataAsync` explicitly deletes the context's `ProjectDependencies`, `WorkspaceProjects` and `WorkspaceFileLineStatuses` with `ExecuteDeleteAsync`. Writers of Feature-scoped `WorkspaceProjects` / `ProjectDependencies` go through `FeatureFinalizationCoordinator.AcquireProjectionAsync`.
 
 Readers have context-scoped overloads: `GetByWorkspaceIdAsync`, dependency edges, lines and graph, `GetPackagesByWorkspaceIdAsync(workspaceId, contextId)` (the context's real packages plus all generated ones), push-plan tag exclusion, and the notification `repoIdsThatNeedPush`.
+
+### Effective versions and branch baselines
+
+The version dependents and `{@Repo}` tokens use is the **effective version**, stored per context on `WorkspaceRepositoryContextStates` (strict step 21). `GitVersion` stays the calculated GitVersion; it is never rewritten.
+
+```text
+EffectiveVersion            the version dependents use (InheritedVerified), or the calculated GitVersion it was resolved with (Own)
+EffectiveVersionKind        int: Own = 0, InheritedVerified = 1, Unresolved = 2; null = never resolved
+EffectiveVersionCommitSha   the HeadCommit it was resolved for
+EffectiveVersionReasonCode  EffectiveVersionReasonCodes: Verified, NotOnBaseline, NoBaseline, BaselineNotOnRemoteParent,
+                            PolicyProtected, NoRequiredPackages, ParentVersionUnavailable, PackageNotPublished,
+                            RegistryAuthenticationFailed, RegistryFailure, RegistryTimeout, RegistryUnexpectedResponse
+```
+
+Only `WorkspaceRepositoryStateWriter.WriteEffectiveVersionAsync` writes them, only on an existing state row, and only when the decision changed; hook snapshots never touch them and nothing is mirrored onto the link. Every reader goes through `EffectiveVersionRules`: a stored `InheritedVerified` counts only while `HeadCommit` equals `EffectiveVersionCommitSha` (I10), otherwise the calculated `GitVersion` is the expected version. `WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync` is the one accessor: the update plan, the unmatched-dependency badge (`RecomputeAndPersistRepositoryDependencyStatsAsync`) and `{@Repo}` tokens (`WorkspaceFileVersionService.ResolveTokenValuesAsync`) read it. A Feature repository without its own state row has no version there and no token value; nothing borrows the Workspace's link (rule 20A.2). Push plans keep reading the consumers' actual reference versions.
+
+The **branch baseline** is where a branch GrayMoon created started:
+
+- a Feature: its `WorkspaceFeatureRepositories` row (`ParentBranchName`, `BaseCommitSha`), none for `PinnedTag` or `IsReferenceSnapshot`;
+- the special Workspace: `WorkspaceRepositoryBranchBaselines`, unique on `(WorkspaceFeatureContextId, WorkspaceRepositoryId, BranchName)`, with `ParentBranchName` (the base as requested, without `origin/`), `BaseCommitSha`, `ResolvedStartRef` (diagnostic) and `CreatedAtUtc`; cascades with the context and the link, and `WorkspaceRepositoryLinkCleanup` deletes it explicitly.
+
+The Worker's `CreateBranch` resolves the start ref to one commit (`rev-parse --verify <start>^{commit}`), creates the branch at that commit and returns `resolvedStartRef` and `baseCommitSha`; both are null for a branch that already existed and for a repository without commits. New Branch / REST (`WorkspaceBranchOperations.CreateBranchAsync`) and Create Branches / Prepare Workspace (`WorkspaceGitService.CreateBranchesWithOutcomeAsync`) write the row (`BranchBaselineRecorder`, through `WorkspaceRepositoryStateWriter.RecordBranchBaselineAsync`) before the state snapshot, and set `HeadCommit` to the base commit. The same branch name created again replaces the row; deleting the local branch through GrayMoon deletes it. A failed write leaves the branch, is logged and reported as a warning (`BranchCreationOutcome.BaselineWarnings`, `CreateBranchApiResult.Warning`); that branch then has no baseline. `RepositoryBranchBaselineReader` reads the baseline of the checked-out branch; it never reads `DefaultBranchName` or link state, so a branch GrayMoon did not create has none.
+
+How the kind is decided is in `05-user-capability-reference.md` (Dependency update and Push).
 
 ### WorkspaceSelectedFeatureContexts
 

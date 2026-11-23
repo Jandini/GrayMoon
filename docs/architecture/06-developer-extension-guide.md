@@ -454,6 +454,8 @@ Rules:
 - **Processes.** Launch processes only through `ICommandLineService` or `IBoundedProcessRunner` (both wrapped by the repository-access broker, section 15A); never `Process.Start` ad hoc. Use `IBoundedProcessRunner` (argument list, output caps, no argument logging) for anything that can produce unbounded output or carries user content.
 - **Remote auth.** Remote Git operations get credentials from the existing remote-auth path (`GitRemoteAuth`); see section 16.
 - **File writes into a repository** use `WriteRepositoryFile` semantics: temp file + move, reject absolute, `..` and `.git` paths, optional `onlyIfChanged`.
+- **GitVersion.** Ask for a version only through `IRepositoryVersionProvider` (`RepositoryVersionOptions`: `NonNormalize`, `CommitSha`, `BranchName`). GitVersion takes one argument string, so a SHA or branch name that goes into it passes `GitVersionArguments` first. A version for another branch than the checked-out one needs `BranchName` (which adds `/b` and `/nocache`) and must be checked with `GitVersionBranchPoint.DescribeMismatch`, because GitVersion answers for another branch or commit without failing (`04-runtime-communication-and-concurrency.md`, section 16C). `GetGitVersionAtBranchPoint` (effective versions) and `GetGitVersionAtDefaultTip` are the examples.
+- **Effective versions.** Code that compares a producer's version with what its consumers reference reads `WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync` (the effective version), never `GitVersion` directly; code that needs the calculated version reads `GitVersion`. A new bulk operation that changes repositories and depends on package versions runs `EffectiveVersionStartCheck` before its first change, and a new bulk push path selects through `GetRepositoryIdsNeedingPushAsync` (`05-user-capability-reference.md`, Push).
 
 ---
 
@@ -759,11 +761,9 @@ Security (open review findings):
 
 Behavior:
 
-- **GitVersion at default tip.** `GetGitVersionAtDefaultTip` relies on GitVersion `/c <sha>`, which GitVersion ignores for a local repository, so merged Feature repositories get the Feature branch version and `ApplyDefaultTipVersionsForMergedFeatureReposAsync` has no useful effect (`GitVersionParityTests`, skipped).
 - **REST and Features.** REST acts only on the special Workspace; there are no Feature endpoints and no endpoint uses `IWorkspaceFeatureOperations`.
 - **Hooks are never removed** when a repository leaves a Workspace or the Workspace is deleted; renamed foreign hooks (`<hook>.replaced-by-graymoon`) stop running.
 - **Large tag lists.** The branch inventory's unique index `(WorkspaceRepositoryId, BranchName, IsRemote)` has no `IsTag`, so a tag and a local branch with the same name collide; `SwitchBranchModal` renders every tag without virtualization.
-- **DependencyStats Feature fallback.** `RecomputeAndPersistRepositoryDependencyStatsAsync` falls back to the shared link `GitVersion` for a Feature repository with no context-state row (`GetValueOrDefault(..., x.GitVersion)`), contrary to rule 20A.2.
 - **Bulk branch dialog.** `BranchModal` shows no branch occupancy; `WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync` skips held repositories but fails open (`OccupancyCheckDegraded`) when occupancy cannot be read.
 - **Git lock scope.** `GitProcessRunner` serializes git per working-tree path, so a Workspace checkout and its Feature worktrees do not share a lock; ref updates in the shared common git dir rely on git's own `*.lock` files.
 - **Copy absolute path** in Git Changes (`WorkspaceGitChanges.CopyPath.cs`) always joins with `\`, wrong for a Linux Worker.

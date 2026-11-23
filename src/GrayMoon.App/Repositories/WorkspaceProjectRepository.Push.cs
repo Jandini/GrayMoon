@@ -7,7 +7,7 @@ namespace GrayMoon.App.Repositories;
 
 public sealed partial class WorkspaceProjectRepository
 {
-    /// <summary>Loads per-repo GitVersion and DependencyLevel scoped to a Feature context: read from <see cref="WorkspaceRepositoryContextState"/> when a row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink"/> only for the special Workspace context (or when no context-state row has been persisted for that repo yet). Internal (not private) so other context-aware callers in the same assembly - e.g. <c>DependencyUpdateOrchestrator</c>'s per-level repo grouping - can reuse the same fallback rule instead of reading the shared link directly.</summary>
+    /// <summary>Loads per-repo expected version and DependencyLevel scoped to a Feature context. The expected version is the effective version (<see cref="EffectiveVersionRules.Expected"/>): the verified, published parent version while the repository is on the commit it was verified for, otherwise the calculated GitVersion; callers that need the calculated value read <c>GitVersion</c> directly. Both are read from <see cref="WorkspaceRepositoryContextState"/> when a row exists for that context, falling back to the shared <see cref="WorkspaceRepositoryLink"/> only for the special Workspace context (or when no context-state row has been persisted for that repo yet). Internal (not private) so other context-aware callers in the same assembly - e.g. <c>DependencyUpdateOrchestrator</c>'s per-level repo grouping - can reuse the same fallback rule instead of reading the shared link directly.</summary>
     internal async Task<(Dictionary<int, string?> VersionByRepo, Dictionary<int, int?> LevelByRepo)> GetContextVersionAndLevelByRepoAsync(
         int workspaceId,
         int workspaceFeatureContextId,
@@ -29,7 +29,7 @@ public sealed partial class WorkspaceProjectRepository
             .AsNoTracking()
             .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId
                 && links.Select(l => l.WorkspaceRepositoryId).Contains(s.WorkspaceRepositoryId))
-            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersion, s.DependencyLevel })
+            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersion, s.DependencyLevel, s.HeadCommit, s.EffectiveVersion, s.EffectiveVersionKind, s.EffectiveVersionCommitSha })
             .ToListAsync(cancellationToken);
         var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
 
@@ -39,7 +39,10 @@ public sealed partial class WorkspaceProjectRepository
         {
             if (stateByLinkId.TryGetValue(link.WorkspaceRepositoryId, out var state))
             {
-                versionByRepo[link.RepositoryId] = state.GitVersion;
+                // The effective version (design "Effective Package Versions"): an inherited, published parent version while the
+                // repository is still on the commit it was verified for, otherwise the calculated GitVersion.
+                versionByRepo[link.RepositoryId] = EffectiveVersionRules.Expected(
+                    state.GitVersion, state.EffectiveVersionKind, state.EffectiveVersion, state.EffectiveVersionCommitSha, state.HeadCommit);
                 levelByRepo[link.RepositoryId] = state.DependencyLevel;
             }
             else if (isSpecialWorkspace)

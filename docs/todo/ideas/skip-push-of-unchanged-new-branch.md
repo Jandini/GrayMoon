@@ -1,5 +1,7 @@
 # Do not push a new branch that has no commits, unless another repository depends on it
 
+> **Superseded (2026-11-23).** Built as "effective versions and selective push": a branch GrayMoon created that still sits on its branch point is left out of a bulk push when its parent's published packages are reused (verified on the registry) or when nothing in the context uses its version. The "push when another repository depends on it" rule below was replaced by verified package availability. How it works: [03-data-model-and-persistence](../../architecture/03-data-model-and-persistence.md) (effective versions and branch baselines) and [05-user-capability-reference](../../architecture/05-user-capability-reference.md) (Push). The design is `docs/todo/GrayMoon_Effective_Versions_and_Selective_Push_Design.md` in the workspace repository. The text below is kept as the original idea.
+
 Status: idea only, written 2026-11-21. **A full analysis of the code is required before any design.** Nothing below was verified against the push code beyond the two pointers named under "Where to start reading".
 
 Related: [implicit-fallback-actions](../defects/implicit-fallback-actions.md) (GrayMoon publishing something the user did not ask to publish).

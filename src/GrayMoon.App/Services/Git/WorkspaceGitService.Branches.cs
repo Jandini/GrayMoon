@@ -7,6 +7,7 @@ using GrayMoon.App.Hubs;
 using GrayMoon.App.Models;
 using GrayMoon.App.Models.Api;
 using GrayMoon.App.Repositories;
+using GrayMoon.App.Services.Versions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using GrayMoon.Application.Features;
@@ -177,6 +178,7 @@ public sealed partial class WorkspaceGitService
         var checkedOutBranchByRepoId = new ConcurrentDictionary<int, string?>();
         var alreadyExistedByRepoId = new ConcurrentDictionary<int, string>();
         var syncResponseByRepoId = new ConcurrentDictionary<int, CreateBranchResponse>();
+        var createdResponseByRepoId = new ConcurrentDictionary<int, (CreateBranchResponse Response, string BaseBranchName)>();
         var useDefaultBase = string.Equals(baseBranch, "__default__", StringComparison.OrdinalIgnoreCase);
         var completedCount = 0;
         var totalCount = links.Count;
@@ -249,6 +251,8 @@ public sealed partial class WorkspaceGitService
                         alreadyExistedByRepoId[wr.RepositoryId] = repo.RepositoryName ?? string.Empty;
                     if (syncState && createResponse != null)
                         syncResponseByRepoId[wr.RepositoryId] = createResponse;
+                    if (createResponse != null)
+                        createdResponseByRepoId[wr.RepositoryId] = (createResponse, baseBranchName);
                 }
                 else
                 {
@@ -271,12 +275,23 @@ public sealed partial class WorkspaceGitService
         // shared WorkspaceRepositoryLink only for the special Workspace), so a Feature's branch creation
         // never overwrites the Workspace's own branch/version display and always leaves the Feature's own
         // context state populated - which downstream context-scoped dependency-update-plan reads depend on.
+        var isSpecialWorkspace = (await _contextResolver.GetRequiredAsync(contextId, workspaceId, cancellationToken)).IsSpecialWorkspace;
+        var baselineWarnings = new List<string>();
         foreach (var wr in links)
         {
             if (!branchNameByRepoId.TryGetValue(wr.RepositoryId, out var branchName))
                 continue;
 
             syncResponseByRepoId.TryGetValue(wr.RepositoryId, out var createResponse);
+
+            // Where the branch started, recorded before its state is applied (effective versions, design 5.2).
+            createdResponseByRepoId.TryGetValue(wr.RepositoryId, out var created);
+            var baselineWarning = await BranchBaselineRecorder.RecordAsync(
+                _stateWriter, contextId, isSpecialWorkspace, wr.WorkspaceRepositoryId, wr.Repository?.RepositoryName ?? $"#{wr.RepositoryId}",
+                newBranchName, created.BaseBranchName ?? baseBranch, created.Response, DateTime.UtcNow, _logger, cancellationToken);
+            if (baselineWarning != null)
+                baselineWarnings.Add(baselineWarning);
+            var newBranchHead = created.Response is { AlreadyExisted: false } ? created.Response.BaseCommitSha : null;
 
             // Hooks were suppressed when syncState is set - persist all state returned inline so the next
             // step (dependency update) sees a complete, consistent database for this context.
@@ -285,6 +300,8 @@ public sealed partial class WorkspaceGitService
                 IdentityProbed = true,
                 BranchName = branchName,
                 CheckedOutTag = null,
+                // A new branch starts on its base commit; the post-checkout hook reports the same SHA when it runs.
+                HeadCommit = newBranchHead,
                 GitVersionProbed = !string.IsNullOrWhiteSpace(createResponse?.Version),
                 GitVersion = createResponse?.Version,
                 CommitCountsProbed = createResponse != null,
@@ -329,6 +346,7 @@ public sealed partial class WorkspaceGitService
         {
             Skipped = eligibility.Skipped,
             AlreadyExistedByRepositoryId = new Dictionary<int, string>(alreadyExistedByRepoId),
+            BaselineWarnings = baselineWarnings,
         };
     }
 

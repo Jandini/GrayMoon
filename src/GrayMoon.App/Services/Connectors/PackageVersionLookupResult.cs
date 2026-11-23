@@ -1,7 +1,7 @@
 namespace GrayMoon.App.Services.Connectors;
 
 /// <summary>Why a package-version registry query did or did not treat the version as present. Informational; the boolean decision stays on <see cref="PackageVersionLookupResult.Exists"/>.</summary>
-internal enum PackageVersionLookupKind
+public enum PackageVersionLookupKind
 {
     Available,
     VersionNotFound,

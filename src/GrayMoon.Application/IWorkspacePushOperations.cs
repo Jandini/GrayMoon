@@ -5,7 +5,20 @@ namespace GrayMoon.Application;
 public sealed record WorkspacePushPlan(
     IReadOnlySet<int> RepositoryIds,
     IReadOnlySet<string> RequiredPackageIds,
-    bool HasUnpushed);
+    bool HasUnpushed)
+{
+    /// <summary>
+    /// Set when the push must not start: the published packages of a repository in scope could not be verified
+    /// (registry authentication, timeout or failure). The plan is then empty and nothing was changed.
+    /// </summary>
+    public string? StopMessage { get; init; }
+
+    /// <summary>
+    /// Repositories that need no push although they have no remote branch yet, one sentence each: no commits, and their
+    /// packages are reused or nobody needs them. Reported as "no work", separately from policy skips.
+    /// </summary>
+    public IReadOnlyList<string> NoWork { get; init; } = [];
+}
 
 public interface IWorkspacePushOperations
 {

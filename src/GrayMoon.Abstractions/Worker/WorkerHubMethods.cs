@@ -44,6 +44,9 @@ public static class WorkerHubMethods
     /// <summary>App → Worker: for configured .csproj version files, resolve which PackageReference Include name each version-pattern line refers to (read-only, no file writes).</summary>
     public const string ResolveGeneratedPackageReferences = "ResolveGeneratedPackageReferences";
 
+    /// <summary>App -> Worker: the parent branch version at a branch point and whether the commit is on origin/&lt;parent&gt; (read-only: <c>git merge-base --is-ancestor</c>, GitVersion <c>/b /c /nocache</c>).</summary>
+    public const string GetGitVersionAtBranchPoint = "GetGitVersionAtBranchPoint";
+
     /// <summary>Worker → App: an unsolicited Git Changes status snapshot for one repository (watcher-driven or post-mutation refresh).</summary>
     public const string GitChangesSnapshotUpdated = "GitChangesSnapshotUpdated";
 

@@ -180,6 +180,8 @@ public sealed class WorkspaceUpdateAndPushOperations(
                 return Finish(start, runId, UpdateAndPushStatus.UpdateFailed, "Update stopped. Nothing was pushed.", update: update);
 
             var plan = await pushOperations.GetPlanAsync(workspaceId, contextId, start.MaxLevel, cancellationToken);
+            if (plan.StopMessage is { } stopMessage)
+                return Finish(start, runId, UpdateAndPushStatus.PushFailed, stopMessage, update: update);
             if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
                 return Finish(start, runId, UpdateAndPushStatus.NothingToPush, NothingToPushSummary(start.MaxLevel), update: update);
 
@@ -233,6 +235,8 @@ public sealed class WorkspaceUpdateAndPushOperations(
         {
             // Never reuse the old plan: push only what is still pending and approved.
             var plan = await pushOperations.GetPlanAsync(workspaceId, contextId, pending.MaxLevel, cancellationToken);
+            if (plan.StopMessage is { } stopMessage)
+                return Finish(approval, runId, UpdateAndPushStatus.PushFailed, stopMessage);
             var repositoryIds = plan.RepositoryIds.Where(pending.RepositoryIds.Contains).ToHashSet();
             if (!plan.HasUnpushed || repositoryIds.Count == 0)
                 return Finish(approval, runId, UpdateAndPushStatus.NothingToPush, NothingToPushSummary(pending.MaxLevel));

@@ -47,13 +47,42 @@ public sealed class GitVersionParityTests : IDisposable
         await AssertParityAsync(origin, repoPath);
     }
 
-    // Known mismatch found by R3, reported in Part F of the release plan (06). `dotnet-gitversion /c <sha>` is
-    // ignored for a local repository (it only applies to a remote /url checkout), so the Worker reports the
-    // version of the CHECKED-OUT branch, not of origin/<default>. Remove Skip when the fix lands.
-    [FactIfGitVersion(Skip = "Known mismatch (R3, plan 06 Part F): GitVersion ignores /c for a local repo, so GetGitVersionAtDefaultTip returns the Feature branch version. Un-skip when fixed.")]
+    // Found by R3: `/c <sha>` alone never changes the branch GitVersion versions, so the command reported the version
+    // of the CHECKED-OUT branch. It now passes `/b <default> /c <sha> /nocache` (effective versions, design 5.3).
+    [FactIfGitVersion]
     public async Task Default_tip_version_matches_a_fresh_checkout_when_the_repo_is_on_a_Feature_branch_and_origin_moved_on()
     {
         var (origin, seed) = await CreateOriginWithHistoryAsync();
+        var repoPath = await MoveOriginOnWhileOnAFeatureBranchAsync(origin, seed);
+
+        // The Workspace pulled its default branch (here: fast-forward the local ref without a checkout).
+        await RunGitAsync(repoPath, "branch -f main origin/main");
+
+        await AssertParityAsync(origin, repoPath);
+    }
+
+    // With `/b main` GitVersion versions the tip of the LOCAL main when the requested commit is not in it, and still
+    // exits 0. The command checks the output's branch and SHA and refuses that answer instead of reporting it.
+    [FactIfGitVersion]
+    public async Task Default_tip_version_is_refused_when_the_local_default_branch_is_behind_origin()
+    {
+        var (origin, seed) = await CreateOriginWithHistoryAsync();
+        var repoPath = await MoveOriginOnWhileOnAFeatureBranchAsync(origin, seed);
+
+        var response = await _command.ExecuteAsync(new GetGitVersionAtDefaultTipRequest
+        {
+            WorkspaceRoot = _root,
+            WorkspaceName = "ws",
+            RepositoryName = "repo",
+        });
+
+        Assert.False(response.Success);
+        Assert.Null(response.Version);
+        Assert.Contains("does not contain it", response.ErrorMessage);
+    }
+
+    private async Task<string> MoveOriginOnWhileOnAFeatureBranchAsync(string origin, string seed)
+    {
         var repoPath = await CloneIntoWorkspaceAsync(origin);
 
         // The Feature worktree is on its own branch with local commits...
@@ -69,8 +98,7 @@ public sealed class GitVersionParityTests : IDisposable
         await CommitAsync(seed, "upstream-3.txt", "upstream work 3");
         await RunGitAsync(seed, "push origin main");
         await RunGitAsync(repoPath, "fetch origin --tags");
-
-        await AssertParityAsync(origin, repoPath);
+        return repoPath;
     }
 
     private async Task AssertParityAsync(string origin, string repoPath)

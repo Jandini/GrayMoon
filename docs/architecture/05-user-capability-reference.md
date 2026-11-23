@@ -784,6 +784,22 @@ tag/write eligibility
 
 In a Feature context, repositories whose Feature PR is merged get their GitVersion from the default-branch tip before the update ("versions from default", section 32).
 
+### Effective versions
+
+Producers are compared through their **effective version**, not the calculated GitVersion. A repository whose branch GrayMoon created and that still sits on that branch point reuses the version its parent branch already published (data in `03-data-model-and-persistence.md`, section 22). `EffectiveVersionResolver` decides per repository and context:
+
+| Kind | When |
+|---|---|
+| `InheritedVerified` | allowed by `RepositoryOperationPolicy` (Push), a recorded branch point, `HeadCommit` equals it, at least one required package, the Worker's `GetGitVersionAtBranchPoint` says the commit is on `origin/<parent>` and returns the parent's version there, and every required package is `Available` at that version on its mapped connector |
+| `Own` | everything deterministic that is not inheritance: protected by policy, no branch point, not on it, no required packages (or no NuGet / GitVersion in the profile), not on the remote parent, parent version not computable, or a required package `VersionNotFound` (also: no registry has it after a registry sync that answered) |
+| `Unresolved` | on the branch point and otherwise eligible, but a lookup answered with anything else (401/403, timeout, 5xx, malformed, a failed registry sync) |
+
+Required packages are the package ids of the repository (physical and generated, `PackageId` else `ProjectName`) that csproj consumers in the context reference; version consumers also include `{@Repo}` version-file tokens. `PackageAvailabilityVerifier` deduplicates lookups per (connector, package, version), runs them bounded by `MaxParallelOperations`, and caches only `Available` for 2 minutes (`PackageAvailabilityCache`, injected `TimeProvider`); a fresh answer of any other kind clears the cached one.
+
+It runs after every state write for a context (`WorkspaceStateRecomputeScope.RecomputeAsync`, cached answers; a failure is logged and leaves the stored decisions), after each update level's version refresh for the repositories that committed (they left the branch point, so no Worker or registry call), and at the start of an operation with fresh answers (`EffectiveVersionStartCheck`): Update, Update and Push (both lanes and the sequential path run the same update) and Prepare Workspace check after reading the project files and before the first level; bulk Push checks in `WorkspacePushOperations.GetPlanForLinksAsync`. When a repository in scope is `Unresolved` the operation stops before any change with "Cannot verify the published package {id} {version} for {repository}: connector {name} returned HTTP 403. Fix the connector and run again. Nothing was changed." (`WorkspacePushPlan.StopMessage` for Push). A repository that must publish because a package is missing is reported as "{repository}: package {id} {version} is not published; publishing {own version} instead." Push of one named repository does not run the check.
+
+A consumer that references the inherited version gets no update and no unmatched badge; a real mismatch (an older pin) is still rewritten. `{@Repo}` resolves to the effective version, `{@Repo:branch}` and `{@Repo:commit}` are unchanged, and a rewrite is a real commit, after which the repository has its own version. A file that stamps its own repository's `{@Repo}` gets no special rule: it is compared with the effective version while the repository inherits, and with the calculated GitVersion after a commit.
+
 ### Implementation
 
 ```text
@@ -822,6 +838,24 @@ run synchronized push
 run Push Updated workflow
 run Update & Push (two lanes)
 ```
+
+### Which repositories a bulk push selects
+
+`WorkspaceRepository.GetRepositoryIdsNeedingPushAsync` (called by the push plan, the package wait and the push lane, which adds what the update committed) decides from the context's state row, with no Worker call:
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | Not allowed by `RepositoryOperationPolicy` | not pushed (policy skip) |
+| 2 | Outgoing commits | push |
+| 3 | `BranchHasUpstream` is not `false` | not pushed |
+| 4 | No upstream, and no recorded branch point or `HeadCommit` is not on it | push (the rule before effective versions) |
+| 5 | No upstream, on the branch point, inheritance valid for this HEAD | not pushed: "Skipped push of {repository}: no commits, required packages verified at {version}." |
+| 6 | No upstream, on the branch point, `Own` for this HEAD, no version consumer | not pushed: "Skipped push of {repository}: no commits, and no repository in this context uses its version." |
+| 7 | No upstream, on the branch point, `Own`, a version consumer | push: it must publish |
+
+The Repositories grid Version cell shows the effective version when the inheritance is valid (`WorkspaceRepositoryLink.IsVersionInherited`), in `.version-inner--inherited` (the theme's secondary text color, a little brighter than the muted calculated version), titled "Inherited published version {effective} from {parent branch} at {short SHA}. Calculated GitVersion: {calculated}. Click to copy effective version." Otherwise it shows the calculated GitVersion as before; for `Unresolved` the title adds the reason. Click copies the displayed value, and the clicked state is keyed by repository and displayed value (`WorkspaceRepositories.VersionClickKey`). REST and other read models keep `GitVersion`.
+
+An unresolved, missing or stale decision gets row 4's result. Rows 5 and 6 are "no work" (`WorkspacePushPlan.NoWork`, `GetPushNoWorkReasonsAsync`), not policy skips. A consumer that references an inherited version passes the package wait on its first lookup. A push of one repository (`PushSingleAsync`) always pushes, subject to policy. Because a skipped branch has no commits, no pull request can exist for it.
 
 ### Synchronized push
 
@@ -1424,8 +1458,8 @@ Those are future architecture projects and must not be described as current prod
 ### Known gaps
 
 ```text
-"Versions from default" (section 32) runs GitVersion with /c at the origin/<default> tip, which GitVersion
-  ignores for a local repository, so it returns the Feature branch version (GitVersionParityTests, skipped)
+"Versions from default" (section 32) needs the local default branch to contain the origin/<default> tip:
+  GitVersion versions the local branch, so a default branch that is behind fails with "Pull <default>"
 bulk New Branch / Switch Branch (BranchModal) has no worktree-occupancy awareness; a bulk switch can hit
   "already checked out" for a branch held by a Feature
 the context selector has no type-to-filter
@@ -1535,7 +1569,7 @@ GrayMoon never looks for or ends the programs using a Feature (other than CodeGr
 
 ### Versions from default
 
-Inside a Feature, merge the deepest PRs first, then Sync: for repositories whose Feature PR is merged, `WorkspaceGitService.ApplyDefaultTipVersionsForMergedFeatureReposAsync` runs Worker `GetGitVersionAtDefaultTip` (GitVersion at the `origin/<default>` tip, no checkout) and replaces the context GitVersion, so Update Dependencies writes default-branch versions into higher levels. Only when the profile uses repository versioning. This is why per-level Return to Default is not needed in a Feature (see the known gap in section 31).
+Inside a Feature, merge the deepest PRs first, then Sync: for repositories whose Feature PR is merged, `WorkspaceGitService.ApplyDefaultTipVersionsForMergedFeatureReposAsync` runs Worker `GetGitVersionAtDefaultTip` (GitVersion at the `origin/<default>` tip, no checkout) with `/b <default> /c <sha> /nocache`; the answer counts only when GitVersion versioned the default branch at that commit, so a local default branch that is behind `origin/<default>` gives a failure with "Pull <default> and try again" instead of another version) and replaces the context GitVersion, so Update Dependencies writes default-branch versions into higher levels. Only when the profile uses repository versioning. This is why per-level Return to Default is not needed in a Feature (see the known gap in section 31).
 
 ### Branch ownership
 

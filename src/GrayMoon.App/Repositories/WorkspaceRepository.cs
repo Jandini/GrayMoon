@@ -264,14 +264,49 @@ public sealed class WorkspaceRepository(
     /// row nor special-Workspace status is treated as "not needing push" rather than borrowing the Workspace's
     /// answer - see AGENTS.md "Feature-context scoping".
     /// </summary>
+    /// <remarks>
+    /// The selection is the table of the effective versions design (section 9.1): policy first; outgoing commits push;
+    /// a branch with an upstream does not; a branch without one pushes unless it is still on the branch point GrayMoon
+    /// recorded and either reuses its parent's verified packages or has no version consumer in the context. A branch
+    /// without a recorded branch point, or whose stored decision is unresolved or not for its HEAD, keeps the old rule.
+    /// Database reads only.
+    /// </remarks>
     public async Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
         int workspaceId,
         int workspaceFeatureContextId,
         IReadOnlySet<int> repositoryIds,
         CancellationToken cancellationToken = default)
+        => (await DecidePushAsync(workspaceId, workspaceFeatureContextId, repositoryIds, cancellationToken))
+            .Where(d => d.Value.Push)
+            .Select(d => d.Key)
+            .ToHashSet();
+
+    /// <summary>
+    /// The repositories <see cref="GetRepositoryIdsNeedingPushAsync"/> leaves out although they have no remote branch,
+    /// one sentence each (rows 5 and 6 of the selection table): "no work", not a policy skip.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetPushNoWorkReasonsAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        IReadOnlySet<int> repositoryIds,
+        CancellationToken cancellationToken = default)
+        => (await DecidePushAsync(workspaceId, workspaceFeatureContextId, repositoryIds, cancellationToken))
+            .Values
+            .Where(d => d.NoWorkReason != null)
+            .Select(d => d.NoWorkReason!)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private sealed record PushDecision(bool Push, string? NoWorkReason);
+
+    private async Task<Dictionary<int, PushDecision>> DecidePushAsync(
+        int workspaceId,
+        int workspaceFeatureContextId,
+        IReadOnlySet<int> repositoryIds,
+        CancellationToken cancellationToken)
     {
         if (repositoryIds.Count == 0)
-            return new HashSet<int>();
+            return new Dictionary<int, PushDecision>();
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -284,21 +319,28 @@ public sealed class WorkspaceRepository(
         var links = await db.WorkspaceRepositories
             .AsNoTracking()
             .Where(wr => wr.WorkspaceId == workspaceId && repositoryIds.Contains(wr.RepositoryId))
-            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.Role, wr.IsReference, wr.Repository!.Archived })
+            .Select(wr => new { wr.WorkspaceRepositoryId, wr.RepositoryId, wr.CheckedOutTag, wr.OutgoingCommits, wr.BranchHasUpstream, wr.Role, wr.IsReference, wr.Repository!.Archived, Name = wr.Repository.RepositoryName })
             .ToListAsync(cancellationToken);
         if (links.Count == 0)
-            return new HashSet<int>();
+            return new Dictionary<int, PushDecision>();
 
         var linkIds = links.Select(l => l.WorkspaceRepositoryId).ToList();
         var states = await db.WorkspaceRepositoryContextStates
             .AsNoTracking()
             .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId && linkIds.Contains(s.WorkspaceRepositoryId))
-            .Select(s => new { s.WorkspaceRepositoryId, s.CheckedOutTag, s.OutgoingCommits, s.BranchHasUpstream })
+            .Select(s => new
+            {
+                s.WorkspaceRepositoryId, s.CheckedOutTag, s.OutgoingCommits, s.BranchHasUpstream, s.BranchName, s.HeadCommit,
+                s.EffectiveVersion, s.EffectiveVersionKind, s.EffectiveVersionCommitSha,
+            })
             .ToListAsync(cancellationToken);
         var stateByLinkId = states.ToDictionary(s => s.WorkspaceRepositoryId);
         var snapshotLinkIds = await LoadReferenceSnapshotLinkIdsAsync(db, workspaceFeatureContextId, isSpecialWorkspace, linkIds, cancellationToken);
+        var baselines = await GrayMoon.App.Services.Versions.RepositoryBranchBaselineReader.LoadAsync(
+            db, workspaceFeatureContextId, isSpecialWorkspace, states.ToDictionary(s => s.WorkspaceRepositoryId, s => s.BranchName), cancellationToken);
+        Dictionary<int, GrayMoon.App.Services.Versions.VersionConsumers>? consumers = null;
 
-        var result = new HashSet<int>();
+        var result = new Dictionary<int, PushDecision>();
         foreach (var link in links)
         {
             string? checkedOutTag;
@@ -330,10 +372,54 @@ public sealed class WorkspaceRepository(
                 isReference: link.IsReference,
                 isReferenceSnapshot: snapshotLinkIds.Contains(link.WorkspaceRepositoryId),
                 isArchived: link.Archived);
+            // Row 1: policy first.
             if (!RepositoryOperationPolicy.IsAllowed(RepositoryOperation.Push, subject))
                 continue;
-            if ((outgoingCommits ?? 0) > 0 || branchHasUpstream == false)
-                result.Add(link.RepositoryId);
+            // Row 2: commits are always pushed (I3).
+            if ((outgoingCommits ?? 0) > 0)
+            {
+                result[link.RepositoryId] = new PushDecision(true, null);
+                continue;
+            }
+
+            // Row 3: a branch with an upstream (or unknown upstream state) and nothing outgoing has nothing to push.
+            if (branchHasUpstream != false)
+                continue;
+
+            // Row 4: no upstream, and no recorded branch point or no longer on it: the old rule (D6).
+            if (state is null
+                || !baselines.TryGetValue(link.WorkspaceRepositoryId, out var baseline)
+                || !string.Equals(state.HeadCommit?.Trim(), baseline.BaseCommitSha, StringComparison.OrdinalIgnoreCase))
+            {
+                result[link.RepositoryId] = new PushDecision(true, null);
+                continue;
+            }
+
+            var name = link.Name ?? $"#{link.RepositoryId}";
+
+            // Row 5: on the branch point and its packages are reused (I10 holds).
+            if (EffectiveVersionRules.IsInherited(state.EffectiveVersionKind, state.EffectiveVersion, state.EffectiveVersionCommitSha, state.HeadCommit))
+            {
+                result[link.RepositoryId] = new PushDecision(false, $"Skipped push of {name}: no commits, required packages verified at {state.EffectiveVersion}.");
+                continue;
+            }
+
+            // A decision that is unresolved, missing or for another commit is not evidence: the old rule (row 4's result).
+            var ownForThisHead = state.EffectiveVersionKind == (int)EffectiveVersionKind.Own
+                && string.Equals(state.EffectiveVersionCommitSha?.Trim(), state.HeadCommit?.Trim(), StringComparison.OrdinalIgnoreCase);
+            if (!ownForThisHead)
+            {
+                result[link.RepositoryId] = new PushDecision(true, null);
+                continue;
+            }
+
+            // Rows 6 and 7: its own version; it must publish only when a repository of this context uses that version.
+            consumers ??= await GrayMoon.App.Services.Versions.VersionConsumerReader.LoadAsync(
+                db, workspaceId, workspaceFeatureContextId, isSpecialWorkspace, cancellationToken);
+            var hasConsumer = consumers.TryGetValue(link.RepositoryId, out var used) && used.HasVersionConsumer;
+            result[link.RepositoryId] = hasConsumer
+                ? new PushDecision(true, null)
+                : new PushDecision(false, $"Skipped push of {name}: no commits, and no repository in this context uses its version.");
         }
         return result;
     }

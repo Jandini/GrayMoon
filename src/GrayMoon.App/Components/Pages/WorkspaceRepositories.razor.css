@@ -536,6 +536,12 @@
     border-color: #5a6268;
 }
 
+/* Inherited published version (effective versions): the same box, slightly higher contrast than the muted calculated
+   version. Hover and the clicked state are the shared version rules above, which are more specific. */
+::deep .repositories-table .version-inner.version-inner--inherited {
+    color: var(--text-secondary);
+}
+
 /* Version GitVersion could not compute: same box as the version, in red, and nothing to copy or highlight. */
 ::deep .repositories-table .version-inner.version-inner--unresolved,
 ::deep .repositories-table .version-inner.version-inner--unresolved:hover {

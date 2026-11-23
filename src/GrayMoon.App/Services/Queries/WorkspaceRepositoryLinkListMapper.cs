@@ -38,6 +38,13 @@ internal static class WorkspaceRepositoryLinkListMapper
             FeatureSourceBranchName = dto.FeatureSourceBranchName,
             Role = dto.Role,
             GitVersionPending = dto.GitVersionPending,
+            EffectiveVersion = dto.EffectiveVersion,
+            EffectiveVersionKind = dto.EffectiveVersionKind,
+            EffectiveVersionCommitSha = dto.EffectiveVersionCommitSha,
+            EffectiveVersionReasonCode = dto.EffectiveVersionReasonCode,
+            VersionHeadCommit = dto.VersionHeadCommit,
+            BaselineParentBranchName = dto.BaselineParentBranchName,
+            BaselineCommitSha = dto.BaselineCommitSha,
             Repository = new Repository
             {
                 RepositoryId = dto.RepositoryId,

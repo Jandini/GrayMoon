@@ -162,6 +162,10 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<GitHubActionsCiProvider>();
         services.AddScoped<IWorkspaceCiProviderResolver, WorkspaceCiProviderResolver>();
         services.AddScoped<PackageRegistrySyncService>();
+        services.AddSingleton<GrayMoon.App.Services.Versions.PackageAvailabilityCache>();
+        services.AddScoped<GrayMoon.App.Services.Versions.PackageAvailabilityVerifier>();
+        services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionResolver>();
+        services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>();
         services.AddScoped<IWorkspaceFileSearchService, WorkspaceFileSearchService>();
         services.AddScoped<WorkspaceFileVersionService>();
         services.AddScoped<WorkspaceCommitSyncHandler>();

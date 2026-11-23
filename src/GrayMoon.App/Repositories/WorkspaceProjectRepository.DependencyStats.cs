@@ -57,30 +57,27 @@ public sealed partial class WorkspaceProjectRepository
 
         var (repoIdsInWorkspace, nameToRepoId, workspaceRoleRepoIds) = BuildGraphMembership(links);
 
-        // The Feature's own checked-out version is what unmatched-dependency comparisons must use; the shared
-        // link's GitVersion is only correct for the special Workspace context (see design §6.4).
-        var contextVersionByLinkId = await dbContext.WorkspaceRepositoryContextStates
-            .AsNoTracking()
-            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId
-                && links.Select(l => l.WorkspaceRepositoryId).Contains(s.WorkspaceRepositoryId))
-            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersion, s.GitVersionPending })
-            .ToListAsync(cancellationToken);
-        var contextVersionByLink = contextVersionByLinkId.ToDictionary(x => x.WorkspaceRepositoryId, x => x.GitVersion);
-
         // A Feature row whose own GitVersion has not been computed yet cannot be compared against: its edges are
         // pending, never matched or mismatched. The special Workspace context never carries the flag.
+        // A Feature without its own state row for a repository does not know that repository's version either; it is
+        // never the Workspace's (I6), so its edges are pending too.
+        var contextStateFlags = await dbContext.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == workspaceFeatureContextId)
+            .Select(s => new { s.WorkspaceRepositoryId, s.GitVersionPending })
+            .ToListAsync(cancellationToken);
+        var linkIdsWithState = contextStateFlags.Select(s => s.WorkspaceRepositoryId).ToHashSet();
         var pendingRepoIds = isSpecialWorkspace
             ? new HashSet<int>()
             : links
-                .Where(l => contextVersionByLinkId.Any(s => s.WorkspaceRepositoryId == l.WorkspaceRepositoryId && s.GitVersionPending == true))
+                .Where(l => !linkIdsWithState.Contains(l.WorkspaceRepositoryId)
+                    || contextStateFlags.Any(s => s.WorkspaceRepositoryId == l.WorkspaceRepositoryId && s.GitVersionPending == true))
                 .Select(l => l.RepositoryId)
                 .ToHashSet();
 
-        var versionByRepo = links.ToDictionary(
-            x => x.RepositoryId,
-            x => isSpecialWorkspace
-                ? x.GitVersion
-                : contextVersionByLink.GetValueOrDefault(x.WorkspaceRepositoryId, x.GitVersion));
+        // The same expected version the update plan compares against (the effective version), so a badge and the
+        // update plan always agree.
+        var (versionByRepo, _) = await GetContextVersionAndLevelByRepoAsync(workspaceId, workspaceFeatureContextId, cancellationToken);
 
         var byProject = workspaceProjects.Count > 0 ? workspaceProjects.ToDictionary(p => p.ProjectId) : new Dictionary<int, WorkspaceProject>();
         var edgeSets = await BuildRepoDependencyEdgeSetsAsync(

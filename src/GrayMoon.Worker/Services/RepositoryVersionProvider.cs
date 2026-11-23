@@ -20,7 +20,7 @@ public sealed class GitVersionRepositoryVersionProvider(IGitService git, GitVers
 
     private async Task<RepositoryVersionResult> RunAsync(string repoPath, RepositoryVersionOptions options, CancellationToken ct)
     {
-        var (result, error) = await git.GetVersionAsync(repoPath, options.NonNormalize, options.CommitSha, ct);
+        var (result, error) = await git.GetVersionAsync(repoPath, options.NonNormalize, options.CommitSha, options.BranchName, ct);
         return new RepositoryVersionResult(Probed: true, result, error);
     }
 }

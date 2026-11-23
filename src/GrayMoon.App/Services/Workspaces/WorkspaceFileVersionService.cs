@@ -410,14 +410,14 @@ public sealed class WorkspaceFileVersionService(
         }
 
         var contextInfo = await contextResolver.GetRequiredAsync(contextId, workspace.WorkspaceId, cancellationToken);
-        Dictionary<int, WorkspaceRepositoryContextState>? contextStates = null;
-        if (!contextInfo.IsSpecialWorkspace)
-        {
-            contextStates = await dbContext.WorkspaceRepositoryContextStates
-                .AsNoTracking()
-                .Where(s => s.WorkspaceFeatureContextId == contextId.Value)
-                .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
-        }
+        var contextStates = await dbContext.WorkspaceRepositoryContextStates
+            .AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value)
+            .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
+
+        // {@Repo} is the expected version, the same one the dependency update plan uses (the effective version).
+        var (expectedVersionByRepoId, _) = await workspaceProjectRepository.GetContextVersionAndLevelByRepoAsync(
+            workspace.WorkspaceId, contextId.Value, cancellationToken);
 
         var tokenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var commitRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -432,14 +432,14 @@ public sealed class WorkspaceFileVersionService(
                 continue;
             }
 
-            var gitVersion = link.GitVersion;
-            var branchName = link.BranchName;
-            if (contextStates != null
-                && contextStates.TryGetValue(link.WorkspaceRepositoryId, out var state))
-            {
-                gitVersion = state.GitVersion ?? gitVersion;
-                branchName = state.BranchName ?? branchName;
-            }
+            // Values come from this context only. A Feature without its own state row has no value: it never borrows the
+            // Workspace's version or branch (I6). The special Workspace reads its link when it has no state row yet.
+            var gitVersion = expectedVersionByRepoId.GetValueOrDefault(link.RepositoryId);
+            string? branchName;
+            if (contextStates.TryGetValue(link.WorkspaceRepositoryId, out var state))
+                branchName = state.BranchName;
+            else
+                branchName = contextInfo.IsSpecialWorkspace ? link.BranchName : null;
 
             switch (token.Kind)
             {
