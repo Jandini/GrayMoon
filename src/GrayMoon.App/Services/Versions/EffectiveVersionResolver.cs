@@ -75,7 +75,9 @@ public sealed class EffectiveVersionResolver(
     /// <summary>
     /// Resolves <paramref name="repositoryIds"/> (all repositories of the Workspace when null) in
     /// <paramref name="contextId"/>. <paramref name="bypassCache"/> asks the registry even for versions it confirmed a
-    /// moment ago; the start of an operation always sets it. Without it (the refresh after every state write, which runs
+    /// moment ago; the start of an operation always sets it. Even then a parent version stored for the current HEAD (an
+    /// inherited decision) is reused instead of running GitVersion again, since it does not change for that commit: only the
+    /// registry is asked again. Without it (the refresh after every state write, which runs
     /// in the hook sync queue that operations wait for), a repository whose stored decision came from a branch point check
     /// for its current HEAD and the same kind of consumers keeps that decision: the Worker and the registry are not asked
     /// again. Cancellation writes nothing. With <paramref name="progress"/> (the start check of an operation) each finished
@@ -131,7 +133,7 @@ public sealed class EffectiveVersionResolver(
         var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
 
         var decisions = new Dictionary<int, EffectiveVersionDecision>();
-        var probes = new List<(Candidate Candidate, BranchBaseline Baseline, IReadOnlyList<RequiredPackage> Required)>();
+        var probes = new List<Probe>();
         foreach (var candidate in candidates)
         {
             baselines.TryGetValue(candidate.WorkspaceRepositoryId, out var baseline);
@@ -149,7 +151,7 @@ public sealed class EffectiveVersionResolver(
             else if (!bypassCache && StoredProbeDecision(candidate, states[candidate.WorkspaceRepositoryId], required.Count > 0) is { } stored)
                 decisions[candidate.RepositoryId] = stored;
             else
-                probes.Add((candidate, baseline!, required));
+                probes.Add(new Probe(candidate, baseline!, required, StoredParentVersion(candidate, states[candidate.WorkspaceRepositoryId])));
         }
 
         if (probes.Count > 0)
@@ -190,31 +192,44 @@ public sealed class EffectiveVersionResolver(
     private async Task<List<EffectiveVersionDecision>> ProbeAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
-        List<(Candidate Candidate, BranchBaseline Baseline, IReadOnlyList<RequiredPackage> Required)> probes,
+        List<Probe> probes,
         bool bypassCache,
         IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         var results = new List<EffectiveVersionDecision>();
 
-        // 1. Parent version at the branch point, per repository (Worker, bounded).
-        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        // 1. Parent version at the branch point, per repository. A version stored for this same HEAD is reused: the
+        //    parent version at a fixed commit does not change, so only the registry is asked again. The rest run
+        //    GitVersion on the Worker (bounded) and are counted.
         var parentVersions = new ConcurrentDictionary<int, BranchPointResult>();
-        var options = new ParallelOptions
+        foreach (var probe in probes.Where(p => p.KnownParentVersion != null))
+            parentVersions[probe.Candidate.RepositoryId] = new BranchPointResult(probe.KnownParentVersion, OnRemoteParent: true, null);
+
+        var toCalculate = probes.Where(p => p.KnownParentVersion == null).ToList();
+        if (toCalculate.Count > 0)
         {
-            MaxDegreeOfParallelism = Math.Max(1, workspaceOptions.Value.MaxParallelOperations),
-            CancellationToken = cancellationToken,
-        };
-        var checkedCount = 0;
-        await Parallel.ForEachAsync(probes, options, async (probe, ct) =>
-        {
-            parentVersions[probe.Candidate.RepositoryId] = await GetParentVersionAsync(workerArgs, probe.Candidate.RepositoryName, probe.Baseline, ct);
-            var done = Interlocked.Increment(ref checkedCount);
-            progress.Report(VerifiedMessage(done, probes.Count), done, probes.Count);
-        });
+            var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+            var options = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(1, workspaceOptions.Value.MaxParallelOperations),
+                CancellationToken = cancellationToken,
+            };
+            var checkedCount = 0;
+            await Parallel.ForEachAsync(toCalculate, options, async (probe, ct) =>
+            {
+                parentVersions[probe.Candidate.RepositoryId] = await GetParentVersionAsync(workerArgs, probe.Candidate.RepositoryName, probe.Baseline, ct);
+                var done = Interlocked.Increment(ref checkedCount);
+                progress.Report(CheckedMessage(done, toCalculate.Count), done, toCalculate.Count);
+            });
+        }
+
+        logger.LogDebug(
+            "Effective version: {Reused} parent versions reused for an unchanged commit, {Calculated} calculated by the Worker",
+            probes.Count - toCalculate.Count, toCalculate.Count);
 
         var lookups = new List<(Candidate Candidate, string ParentVersion, IReadOnlyList<RequiredPackage> Required)>();
-        foreach (var (candidate, baseline, required) in probes)
+        foreach (var (candidate, baseline, required, _) in probes)
         {
             var parent = parentVersions[candidate.RepositoryId];
             if (parent.OnRemoteParent == false)
@@ -387,11 +402,23 @@ public sealed class EffectiveVersionResolver(
     internal const string TerminalLabel = "versions";
 
     /// <summary>
-    /// The progress text after each branch point check (one GitVersion run per repository), with
-    /// <see cref="OperationProgress.Completed"/> and <see cref="OperationProgress.Total"/> set. An operation may show its
-    /// own text for the same counts (Push: "Push prepared for x of y repositories...").
+    /// The progress text after each branch point GitVersion run on the Worker, with <see cref="OperationProgress.Completed"/>
+    /// and <see cref="OperationProgress.Total"/> set. Parent versions reused for an unchanged commit are not counted.
     /// </summary>
-    internal static string VerifiedMessage(int done, int total) => $"Verified {done} of {total} repositories...";
+    internal static string CheckedMessage(int done, int total) => $"Checked {done} of {total} repositories...";
+
+    /// <summary>
+    /// The parent version stored for the current HEAD: an inherited decision records the parent branch version at the
+    /// branch point, which does not change for that commit. Null when nothing valid is stored, and for every other kind
+    /// (an own version does not record the parent's), so the Worker calculates it.
+    /// </summary>
+    private static string? StoredParentVersion(Candidate candidate, StoredState state) =>
+        EffectiveVersionRules.IsInherited(state.EffectiveVersionKind, state.EffectiveVersion, state.EffectiveVersionCommitSha, candidate.HeadCommit)
+            ? state.EffectiveVersion!.Trim()
+            : null;
+
+    /// <summary>One repository whose effective version needs its parent version; <see cref="KnownParentVersion"/> skips the Worker.</summary>
+    private sealed record Probe(Candidate Candidate, BranchBaseline Baseline, IReadOnlyList<RequiredPackage> Required, string? KnownParentVersion);
 
     /// <summary>One overlay terminal line for a decision: the version dependents use and why.</summary>
     internal static string TerminalLine(EffectiveVersionDecision decision) => decision.Kind switch

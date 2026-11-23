@@ -39,7 +39,7 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
-        JobService.StartJob(PageJobKey, "Preparing push...", async (job, ct) =>
+        JobService.StartJob(PageJobKey, GrayMoon.App.Services.Application.WorkspacePushOperations.CheckingVersionsMessage, async (job, ct) =>
         {
             PreparedPush? prepared;
             try

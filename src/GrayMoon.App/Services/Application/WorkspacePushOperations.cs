@@ -22,21 +22,12 @@ public sealed class WorkspacePushOperations(
     ILogger<WorkspacePushOperations> logger,
     GrayMoon.App.Services.Versions.EffectiveVersionStartCheck effectiveVersionStartCheck) : IWorkspacePushOperations
 {
-    /// <summary>The overlay text while the plan is built and before the first repository is verified.</summary>
-    internal const string PreparingPushMessage = "Preparing push...";
-
-    /// <summary>The overlay text for the counted part of the plan: "Preparing push..." until a repository is verified.</summary>
-    internal static string PreparedMessage(int? completed, int? total) =>
-        completed is > 0 && total is > 0
-            ? $"Push prepared for {completed} of {total} repositories..."
-            : PreparingPushMessage;
-
-    /// <summary>Shows the start check's counts in the push's own words (<see cref="PreparedMessage"/>).</summary>
-    private sealed class PreparedCountProgress(IProgress<OperationProgress> inner) : IProgress<OperationProgress>
-    {
-        public void Report(OperationProgress value) =>
-            inner.Report(new OperationProgress(PreparedMessage(value.Completed, value.Total), value.Completed, value.Total));
-    }
+    /// <summary>
+    /// The overlay text while the plan is built. Nothing is prepared: the plan checks which repositories to push (archived
+    /// state, effective versions, selection). The version check then counts its GitVersion runs ("Checked x of y
+    /// repositories...", <see cref="Versions.EffectiveVersionResolver.CheckedMessage"/>).
+    /// </summary>
+    internal const string CheckingVersionsMessage = "Checking versions...";
 
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
@@ -46,7 +37,7 @@ public sealed class WorkspacePushOperations(
         IProgress<OperationProgress>? progress = null)
     {
         // A repository marked archived is left out of the plan, so ask the provider first whether it still is.
-        progress.Report(PreparingPushMessage);
+        progress.Report(CheckingVersionsMessage);
         await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -79,8 +70,7 @@ public sealed class WorkspacePushOperations(
         // Start check (effective versions, D3): the selection below reads the effective version kinds, so they are resolved
         // with fresh registry answers first. An unverifiable package stops the push before anything is pushed.
         var resolution = await effectiveVersionStartCheck.RunAsync(
-            workspaceId, contextId, repositoryIds: null, "Push", cancellationToken,
-            progress is null ? null : new PreparedCountProgress(progress));
+            workspaceId, contextId, repositoryIds: null, "Push", cancellationToken, progress);
         if (resolution.StopMessage is { } stopMessage)
         {
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false)

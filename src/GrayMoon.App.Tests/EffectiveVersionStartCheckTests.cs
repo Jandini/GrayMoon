@@ -1,5 +1,6 @@
 using System.Net;
 using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Models;
 using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Versions;
@@ -43,7 +44,7 @@ public sealed class EffectiveVersionStartCheckTests
     }
 
     [Fact]
-    public async Task Bulk_push_plan_says_preparing_then_counts_prepared_repositories_and_writes_every_decision_to_the_job_terminal()
+    public async Task Bulk_push_plan_counts_the_GitVersion_runs_and_writes_every_decision_to_the_job_terminal()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
         var steps = new RecordingProgress();
@@ -53,7 +54,7 @@ public sealed class EffectiveVersionStartCheckTests
         using (TerminalSinkContext.Use(terminal))
             await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special, progress: steps);
 
-        Assert.Equal(["Preparing push...", "Push prepared for 1 of 1 repositories..."], steps.Messages);
+        Assert.Equal(["Checking versions...", "Checked 1 of 1 repositories..."], steps.Messages);
         var lines = terminal.GetSnapshot();
         Assert.Contains(lines, l => l.StreamLabel == EffectiveVersionResolver.TerminalLabel
             && l.Kind == WorkerCommandStreamKind.Stdout
@@ -88,13 +89,40 @@ public sealed class EffectiveVersionStartCheckTests
         Assert.Empty(terminal.GetSnapshot());
     }
 
-    [Theory]
-    [InlineData(null, null, "Preparing push...")]
-    [InlineData(0, 4, "Preparing push...")]
-    [InlineData(3, 14, "Push prepared for 3 of 14 repositories...")]
-    public void The_push_overlay_counts_prepared_repositories_without_names(int? completed, int? total, string expected)
+    [Fact]
+    public async Task A_second_push_on_the_same_commit_reuses_the_parent_version_and_only_asks_the_registry_again()
     {
-        Assert.Equal(expected, GrayMoon.App.Services.Application.WorkspacePushOperations.PreparedMessage(completed, total));
+        await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
+        await using (var first = s.Ctx.CreateScope())
+            await first.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special);
+        var branchPointCalls = s.BranchPointCalls;
+        var lookups = s.Registry.Lookups;
+        var steps = new RecordingProgress();
+
+        await using var scope = s.Ctx.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special, progress: steps);
+
+        Assert.Equal(branchPointCalls, s.BranchPointCalls);
+        Assert.Equal(lookups + 1, s.Registry.Lookups);
+        Assert.Equal(["Checking versions..."], steps.Messages);
+        var state = await s.ReadStateAsync(s.ProducerLinkId);
+        Assert.Equal((int)EffectiveVersionKind.InheritedVerified, state.EffectiveVersionKind);
+        Assert.Equal(EffectiveVersionScenario.ParentVersion, state.EffectiveVersion);
+    }
+
+    [Fact]
+    public async Task A_push_after_the_commit_moved_calculates_the_parent_version_again()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
+        await s.ResolveAsync(bypassCache: true);
+        // The stored decision belongs to another commit now: nothing may be reused for this HEAD.
+        await s.MutateStateAsync(s.ProducerLinkId, state => state.EffectiveVersionCommitSha = EffectiveVersionScenario.MovedSha);
+        var branchPointCalls = s.BranchPointCalls;
+
+        await using var scope = s.Ctx.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special);
+
+        Assert.Equal(branchPointCalls + 1, s.BranchPointCalls);
     }
 
     [Theory]

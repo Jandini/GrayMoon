@@ -61,9 +61,10 @@ public sealed class EffectiveVersionResolverTests
         Assert.Equal(branchPointCalls, s.BranchPointCalls);
         Assert.Equal(lookups, s.Registry.Lookups);
 
-        // The start of an operation always asks again.
+        // The start of an operation asks the registry again, but reuses the parent version stored for this commit.
         await s.ResolveAsync(bypassCache: true);
-        Assert.True(s.BranchPointCalls > branchPointCalls);
+        Assert.Equal(branchPointCalls, s.BranchPointCalls);
+        Assert.True(s.Registry.Lookups > lookups);
     }
 
     [Fact]
