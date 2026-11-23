@@ -991,11 +991,11 @@ Readers have context-scoped overloads: `GetByWorkspaceIdAsync`, dependency edges
 The version dependents and `{@Repo}` tokens use is the **effective version**, stored per context on `WorkspaceRepositoryContextStates` (strict step 21). `GitVersion` stays the calculated GitVersion; it is never rewritten.
 
 ```text
-EffectiveVersion            the version dependents use (InheritedVerified), or the calculated GitVersion it was resolved with (Own)
-EffectiveVersionKind        int: Own = 0, InheritedVerified = 1, Unresolved = 2; null = never resolved
+EffectiveVersion            the version dependents use (InheritedVerified, InheritedUnverified), or the calculated GitVersion it was resolved with (Own)
+EffectiveVersionKind        int: Own = 0, InheritedVerified = 1, Unresolved = 2, InheritedUnverified = 3; null = never resolved
 EffectiveVersionCommitSha   the HeadCommit it was resolved for
 EffectiveVersionReasonCode  EffectiveVersionReasonCodes: Verified, NotOnBaseline, NoBaseline, BaselineNotOnRemoteParent,
-                            PolicyProtected, NoRequiredPackages, ParentVersionUnavailable, PackageNotPublished,
+                            PolicyProtected, NoRequiredPackages, TokenConsumersOnly, ParentVersionUnavailable, PackageNotPublished,
                             RegistryAuthenticationFailed, RegistryFailure, RegistryTimeout, RegistryUnexpectedResponse
 ```
 

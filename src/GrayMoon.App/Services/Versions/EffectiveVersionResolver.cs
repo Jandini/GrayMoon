@@ -50,9 +50,11 @@ public sealed record EffectiveVersionResolution(IReadOnlyList<EffectiveVersionDe
 /// writes it through <see cref="WorkspaceRepositoryStateWriter.WriteEffectiveVersionAsync"/>. A repository inherits the
 /// published version of its parent branch only when its HEAD is the recorded branch point, that commit is on
 /// <c>origin/&lt;parent&gt;</c>, and every package a consumer in the context requires is available at the parent version on
-/// its mapped connector. A confirmed missing package gives the repository its own version; any other registry answer
-/// leaves it unresolved. The Worker and the registry are asked only for repositories that are on their branch point and
-/// have required packages; no database transaction is open meanwhile.
+/// its mapped connector. A repository that only version-file <c>{@Repo}</c> tokens use has no package to look up and
+/// inherits on the first two conditions alone (<see cref="EffectiveVersionKind.InheritedUnverified"/>). A confirmed
+/// missing package gives the repository its own version; any other registry answer leaves it unresolved. The Worker is
+/// asked only for repositories that are on their branch point and have a version consumer, the registry only for those
+/// with required packages; no database transaction is open meanwhile.
 /// </summary>
 /// <remarks>Scoped. It reads and writes through the scope's <see cref="AppDbContext"/>, so a caller never runs two
 /// resolutions on one scope at once; work that is not on a page's own flow resolves its own scope.</remarks>
@@ -125,11 +127,13 @@ public sealed class EffectiveVersionResolver(
         foreach (var candidate in candidates)
         {
             baselines.TryGetValue(candidate.WorkspaceRepositoryId, out var baseline);
-            var required = consumers.GetValueOrDefault(candidate.RepositoryId, VersionConsumers.None).RequiredPackages;
+            var consumer = consumers.GetValueOrDefault(candidate.RepositoryId, VersionConsumers.None);
+            // Without NuGet packages in the profile there is nothing to look up; a token consumer still needs a version.
+            IReadOnlyList<RequiredPackage> required = capabilities.UsesNuGetPackages ? consumer.RequiredPackages : [];
             var reason = !allowed.Contains(candidate.RepositoryId) ? EffectiveVersionReasonCodes.PolicyProtected
                 : baseline is null ? EffectiveVersionReasonCodes.NoBaseline
                 : !string.Equals(candidate.HeadCommit?.Trim(), baseline.BaseCommitSha, StringComparison.OrdinalIgnoreCase) ? EffectiveVersionReasonCodes.NotOnBaseline
-                : required.Count == 0 || !capabilities.UsesNuGetPackages ? EffectiveVersionReasonCodes.NoRequiredPackages
+                : required.Count == 0 && !consumer.HasTokenConsumer ? EffectiveVersionReasonCodes.NoRequiredPackages
                 : !capabilities.UsesGitVersion ? EffectiveVersionReasonCodes.ParentVersionUnavailable
                 : null;
             if (reason != null)
@@ -161,7 +165,7 @@ public sealed class EffectiveVersionResolver(
         logger.LogDebug(
             "Effective versions resolved for workspace {WorkspaceId} context {ContextId}: {Count} repositories, {Probed} checked, {Inherited} inherited, {Unresolved} unresolved in {ElapsedMs} ms",
             workspaceId, contextId.Value, ordered.Count, probes.Count,
-            ordered.Count(d => d.Kind == EffectiveVersionKind.InheritedVerified),
+            ordered.Count(d => d.Kind is EffectiveVersionKind.InheritedVerified or EffectiveVersionKind.InheritedUnverified),
             ordered.Count(d => d.Kind == EffectiveVersionKind.Unresolved),
             stopwatch.ElapsedMilliseconds);
         return new EffectiveVersionResolution(ordered);
@@ -201,6 +205,14 @@ public sealed class EffectiveVersionResolver(
                     "Effective version: no parent version for {Repository} ({Parent} at {Commit}): {Error}",
                     candidate.RepositoryName, baseline.ParentBranchName, baseline.BaseCommitSha, parent.Error);
                 results.Add(Own(candidate, EffectiveVersionReasonCodes.ParentVersionUnavailable, null));
+            }
+            else if (required.Count == 0)
+            {
+                // Only version-file tokens use it: there is no package to look up, so its code being the parent's is enough.
+                results.Add(new EffectiveVersionDecision(
+                    candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
+                    EffectiveVersionKind.InheritedUnverified, parent.Version!.Trim(), candidate.GitVersion, candidate.HeadCommit,
+                    EffectiveVersionReasonCodes.TokenConsumersOnly, null));
             }
             else
                 lookups.Add((candidate, parent.Version!.Trim(), required));

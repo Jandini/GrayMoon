@@ -673,7 +673,10 @@
         {
             var sha = link.BaselineCommitSha ?? link.EffectiveVersionCommitSha ?? "";
             var shortSha = sha.Length > 7 ? sha[..7] : sha;
-            return $"Inherited published version {link.EffectiveVersion} from {link.BaselineParentBranchName ?? "the parent branch"} at {shortSha}. Calculated GitVersion: {link.GitVersion}. Click to copy effective version.";
+            var parent = link.BaselineParentBranchName ?? "the parent branch";
+            return link.EffectiveVersionKind == (int)EffectiveVersionKind.InheritedUnverified
+                ? $"Inherited version {link.EffectiveVersion} from {parent} at {shortSha} (used by version files only, no package to check). Calculated GitVersion: {link.GitVersion}. Click to copy effective version."
+                : $"Inherited published version {link.EffectiveVersion} from {parent} at {shortSha}. Calculated GitVersion: {link.GitVersion}. Click to copy effective version.";
         }
 
         if (link.EffectiveVersionKind == (int)EffectiveVersionKind.Unresolved)

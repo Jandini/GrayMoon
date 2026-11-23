@@ -130,6 +130,26 @@ public sealed class EffectiveVersionDependencyTests
     }
 
     [Fact]
+    public async Task A_version_file_token_of_a_repository_no_csproj_uses_expects_the_parent_version_on_its_branch_point()
+    {
+        // A service image stamped in a compose file: no package edge, only a {@Repo} token. On the old rule the token
+        // expected the branch GitVersion 2.3.1-abc.3, so Update rewrote the file and the service was pushed to publish it.
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await s.WithDbAsync(db =>
+        {
+            db.ProjectDependencies.RemoveRange(db.ProjectDependencies);
+            return Task.CompletedTask;
+        });
+        await AddVersionFileAsync(s);
+        await s.ResolveAsync();
+
+        var expected = await CheckFileVersionsAsync(s, s.Special);
+
+        Assert.Contains(EffectiveVersionScenario.ParentVersion, expected);
+        Assert.DoesNotContain(EffectiveVersionScenario.CalculatedVersion, expected);
+    }
+
+    [Fact]
     public async Task A_file_that_stamps_its_own_repository_compares_against_the_effective_version_then_the_calculated_one()
     {
         // Characterization (red test 5, T18): no special rule for a self-stamping file. While the producer inherits, its

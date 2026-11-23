@@ -400,7 +400,9 @@ public sealed class WorkspaceRepository(
             // Row 5: on the branch point and its packages are reused (I10 holds).
             if (EffectiveVersionRules.IsInherited(state.EffectiveVersionKind, state.EffectiveVersion, state.EffectiveVersionCommitSha, state.HeadCommit))
             {
-                result[link.RepositoryId] = new PushDecision(false, $"Skipped push of {name}: no commits, required packages verified at {state.EffectiveVersion}.");
+                result[link.RepositoryId] = new PushDecision(false, state.EffectiveVersionKind == (int)EffectiveVersionKind.InheritedUnverified
+                    ? $"Skipped push of {name}: no commits, version files use the parent version {state.EffectiveVersion}."
+                    : $"Skipped push of {name}: no commits, required packages verified at {state.EffectiveVersion}.");
                 continue;
             }
 

@@ -113,11 +113,40 @@ public sealed class SelectivePushSelectionTests
     }
 
     [Fact]
-    public async Task A_version_file_consumer_makes_an_own_version_publish()
+    public async Task A_repository_only_version_files_use_inherits_on_its_branch_point_and_is_not_pushed()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync();
-        // The consumer stamps the producer's version in a file; nothing references the producer's package any more.
-        await s.WithDbAsync(async db =>
+        await UseOnlyVersionFileConsumerAsync(s);
+        await s.ResolveAsync();
+
+        var producer = await s.ReadStateAsync(s.ProducerLinkId);
+        Assert.Equal((int)EffectiveVersionKind.InheritedUnverified, producer.EffectiveVersionKind);
+        Assert.Equal(EffectiveVersionScenario.ParentVersion, producer.EffectiveVersion);
+        // There is no package to check, so the registry is never asked.
+        Assert.Equal(0, s.Registry.Lookups);
+        Assert.DoesNotContain(s.ProducerId, await NeedingPushAsync(s));
+        await using var scope = s.Ctx.CreateScope();
+        var reasons = await scope.ServiceProvider.GetRequiredService<WorkspaceRepository>()
+            .GetPushNoWorkReasonsAsync(s.Ctx.WorkspaceId, s.Special.Value, new HashSet<int> { s.ProducerId });
+        Assert.Contains(reasons, r => r.Contains("version files use the parent version", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_repository_only_version_files_use_gets_its_own_version_and_is_pushed_after_a_commit()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await UseOnlyVersionFileConsumerAsync(s);
+        await s.MutateStateAsync(s.ProducerLinkId, state => { state.HeadCommit = EffectiveVersionScenario.MovedSha; state.OutgoingCommits = 1; });
+        await s.ResolveAsync();
+
+        var producer = await s.ReadStateAsync(s.ProducerLinkId);
+        Assert.Equal((int)EffectiveVersionKind.Own, producer.EffectiveVersionKind);
+        Assert.Contains(s.ProducerId, await NeedingPushAsync(s));
+    }
+
+    /// <summary>The consumer stamps the producer's version in a file; nothing references the producer's package any more.</summary>
+    private static Task UseOnlyVersionFileConsumerAsync(EffectiveVersionScenario s)
+        => s.WithDbAsync(async db =>
         {
             db.ProjectDependencies.RemoveRange(db.ProjectDependencies);
             var file = new WorkspaceFile { WorkspaceId = s.Ctx.WorkspaceId, RepositoryId = s.ConsumerId, FilePath = "version.props", FileName = "version.props" };
@@ -125,12 +154,6 @@ public sealed class SelectivePushSelectionTests
             await db.SaveChangesAsync();
             db.WorkspaceFileVersionConfigs.Add(new WorkspaceFileVersionConfig { FileId = file.FileId, VersionPattern = $"API={{@{EffectiveVersionScenario.ProducerName}}}" });
         });
-        await s.ResolveAsync();
-
-        var producer = await s.ReadStateAsync(s.ProducerLinkId);
-        Assert.Equal((int)EffectiveVersionKind.Own, producer.EffectiveVersionKind);
-        Assert.Contains(s.ProducerId, await NeedingPushAsync(s));
-    }
 
     [Fact]
     public async Task A_policy_protected_repository_is_left_out()
