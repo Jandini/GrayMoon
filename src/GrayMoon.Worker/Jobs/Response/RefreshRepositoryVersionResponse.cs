@@ -13,6 +13,10 @@ public sealed class RefreshRepositoryVersionResponse
     [JsonPropertyName("tag")]
     public string? Tag { get; set; }
 
+    /// <summary>Full commit hash of HEAD; null when the repository has no commit.</summary>
+    [JsonPropertyName("commit")]
+    public string? Commit { get; set; }
+
     [JsonPropertyName("outgoingCommits")]
     public int? OutgoingCommits { get; set; }
 

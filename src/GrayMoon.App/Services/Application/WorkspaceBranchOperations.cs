@@ -383,6 +383,7 @@ public sealed class WorkspaceBranchOperations(
                 await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     CheckedOutTag = checkedOutTag,
+                    HeadCommit = tagCheckout?.Commit,
                     IdentityProbed = true,
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
 
@@ -429,6 +430,8 @@ public sealed class WorkspaceBranchOperations(
                 await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     BranchName = localBranchName,
+                    // The effective version is decided per HEAD; the checkout moved it.
+                    HeadCommit = checkoutResponse?.Commit,
                     IdentityProbed = true,
                 }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
             }

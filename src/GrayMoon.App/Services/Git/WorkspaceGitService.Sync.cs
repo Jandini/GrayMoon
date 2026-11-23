@@ -481,6 +481,7 @@ public sealed partial class WorkspaceGitService
         {
             BranchName = info.Branch,
             CheckedOutTag = info.Tag,
+            HeadCommit = info.Commit,
             GitVersion = info.Version == "-" ? null : info.Version,
             DefaultBranchName = info.DefaultBranch,
             OutgoingCommits = info.OutgoingCommits,

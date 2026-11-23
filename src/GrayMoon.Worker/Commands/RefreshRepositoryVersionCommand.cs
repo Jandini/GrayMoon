@@ -35,6 +35,10 @@ public sealed class RefreshRepositoryVersionCommand(
             // not cost the repository its branch.
             branch = await reader.ResolveBranchAsync(versionResult.Result, repoPath, cancellationToken) ?? "-";
 
+            // The App decides the effective version per HEAD commit. This command runs right after GrayMoon's own
+            // commits (Update, version files), whose hooks are switched off, so it is what moves the stored HEAD.
+            var headCommit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
+
             // Detect tag/detached HEAD; when on a tag we don't have a real branch.
             var currentTag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
             if (currentTag != null)
@@ -76,6 +80,7 @@ public sealed class RefreshRepositoryVersionCommand(
                 Version = version,
                 Branch = branch,
                 Tag = currentTag,
+                Commit = headCommit,
                 OutgoingCommits = outgoingCommits,
                 IncomingCommits = incomingCommits,
                 GitVersionError = versionError,

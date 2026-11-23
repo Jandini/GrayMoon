@@ -21,7 +21,7 @@ public sealed class WorkerVersionBranchResponse
     [JsonPropertyName("tag")]
     public string? Tag { get; set; }
 
-    /// <summary>Full commit hash of HEAD when <see cref="Tag"/> is set.</summary>
+    /// <summary>Full commit hash of HEAD, on a branch or a tag. Null when the repository has no commit (unborn branch).</summary>
     [JsonPropertyName("commit")]
     public string? Commit { get; set; }
 
