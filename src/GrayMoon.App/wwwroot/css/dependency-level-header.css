@@ -241,3 +241,15 @@
     margin-left: auto;
     padding-left: 0.5rem;
 }
+
+/* Small "Push Updated" on the level the header's "Push Updated > Level N Only" names: the header's yellow button,
+   scaled down so the row keeps its height (line box of the 0.875rem title). */
+:root .table .dependency-level-header .dependency-level-push-updated {
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: 0.05rem 0.45rem;
+    margin-block: -0.15rem;
+    border-radius: 0.2rem;
+    flex-shrink: 0;
+}

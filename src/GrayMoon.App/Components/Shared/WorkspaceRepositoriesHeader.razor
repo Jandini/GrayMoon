@@ -492,7 +492,14 @@
         IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || IsRestoringPackages || RepositoriesCount == 0;
 
     private bool UpdateDisabled =>
-        IsReadOnlyContext || WorkspaceName == null || RepositoriesCount == 0 || IsSyncing || IsUpdating || IsPushing || WorkerTasksPendingCount > 0;
+        DetermineUpdateDisabled(IsReadOnlyContext, WorkspaceName != null, RepositoriesCount, IsSyncing || IsUpdating || IsPushing, WorkerTasksPendingCount);
+
+    /// <summary>
+    /// Pure rule for a disabled Update / Push Updated control. Shared with the level header's "Push Updated" button, so
+    /// both are enabled and disabled together.
+    /// </summary>
+    internal static bool DetermineUpdateDisabled(bool isReadOnlyContext, bool hasWorkspace, int repositoriesCount, bool isJobRunning, int workerTasksPendingCount) =>
+        isReadOnlyContext || !hasWorkspace || repositoriesCount == 0 || isJobRunning || workerTasksPendingCount > 0;
 
     private bool BranchActionsDisabled =>
         IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || WorkerTasksPendingCount > 0;

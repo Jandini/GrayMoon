@@ -121,6 +121,20 @@ public sealed partial class WorkspaceRepositories
         || JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
     private bool _pendingRefreshAfterJob;
     private int WorkerTasksPendingCount => WorkerQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
+
+    /// <summary>
+    /// The level header's "Push Updated" button shows on the level the header's "Push Updated > Level N Only" item names,
+    /// and only while the header shows Push Updated (same rule as the header, so the two never disagree).
+    /// </summary>
+    private bool ShowsLevelPushUpdated(int? levelKey) =>
+        WorkspaceRepositoriesLevelHeader.DetermineShowsPushUpdated(
+            levelKey,
+            lowestLevelNeedingWork,
+            WorkspaceRepositoriesHeader.DetermineUpdateControl(_presentation.ShowDependencyUpdateActions, hasUnmatchedDependencies, hasIncomingCommits));
+
+    /// <summary>Disabled exactly when the header's Push Updated is.</summary>
+    private bool LevelPushUpdatedDisabled =>
+        WorkspaceRepositoriesHeader.DetermineUpdateDisabled(_isReadOnlyContext, workspace != null, _headerState?.TotalCount ?? 0, IsJobRunning, WorkerTasksPendingCount);
     private const int RefreshDebounceMs = 200;
     private CancellationTokenSource? _refreshDebounceCts;
     private readonly object _refreshDebounceLock = new();

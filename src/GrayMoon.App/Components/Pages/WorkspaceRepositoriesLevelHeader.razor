@@ -16,6 +16,17 @@
             }
         </div>
         <div class="dependency-level-header-end">
+            @if (ShowPushUpdated)
+            {
+                <button type="button"
+                        class="btn btn-warning dependency-level-push-updated text-nowrap"
+                        title="Update and push @Title only (the same as Push Updated > @Title Only)"
+                        disabled="@PushUpdatedDisabled"
+                        @onclick="HandlePushUpdated"
+                        @onclick:stopPropagation>
+                    Push Updated
+                </button>
+            }
             <span class="dependency-level-count gm-menu-trigger"
                   tabindex="0"
                   aria-haspopup="true"
@@ -117,6 +128,25 @@
     [Parameter] public bool HasMergedPr { get; set; }
     /// <summary>True when at least one repository in this level has incoming or outgoing commits - "Sync Commits" is highlighted. No-upstream does not count.</summary>
     [Parameter] public bool HasSyncCommits { get; set; }
+
+    /// <summary>
+    /// True on the one level the header's "Push Updated > Level N Only" item names, while the header shows Push Updated.
+    /// The button then runs that same item.
+    /// </summary>
+    [Parameter] public bool ShowPushUpdated { get; set; }
+    [Parameter] public bool PushUpdatedDisabled { get; set; }
+    [Parameter] public EventCallback OnPushUpdated { get; set; }
+
+    /// <summary>Pure rule for <see cref="ShowPushUpdated"/>: the level "Level N Only" names, while the header shows Push Updated.</summary>
+    internal static bool DetermineShowsPushUpdated(int? levelKey, int? lowestLevelNeedingWork, GrayMoon.App.Components.Shared.WorkspaceRepositoriesHeader.HeaderUpdateControl headerControl) =>
+        levelKey.HasValue
+        && levelKey == lowestLevelNeedingWork
+        && headerControl == GrayMoon.App.Components.Shared.WorkspaceRepositoriesHeader.HeaderUpdateControl.PushUpdated;
+
+    private async Task HandlePushUpdated()
+    {
+        if (!PushUpdatedDisabled) await OnPushUpdated.InvokeAsync();
+    }
 
     private string Title => TitleText ?? (LevelKey == null ? "No dependencies" : $"Level {LevelKey}");
 

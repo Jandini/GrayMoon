@@ -210,6 +210,34 @@ public sealed class WorkspaceGridPresentationTests
         Assert.True(p.ShowPackageRestore);
     }
 
+    [Theory]
+    [InlineData(2, 2, "PushUpdated", true)]
+    [InlineData(3, 2, "PushUpdated", false)]
+    [InlineData(null, 2, "PushUpdated", false)]
+    [InlineData(2, null, "PushUpdated", false)]
+    [InlineData(2, 2, "Update", false)]
+    [InlineData(2, 2, "None", false)]
+    public void Level_header_push_updated_shows_only_on_the_level_only_level_while_the_header_shows_push_updated(
+        int? levelKey, int? lowestLevelNeedingWork, string headerControl, bool expected)
+    {
+        var control = Enum.Parse<WorkspaceRepositoriesHeader.HeaderUpdateControl>(headerControl);
+
+        Assert.Equal(expected, WorkspaceRepositoriesLevelHeader.DetermineShowsPushUpdated(levelKey, lowestLevelNeedingWork, control));
+    }
+
+    [Theory]
+    [InlineData(false, true, 5, false, 0, false)]
+    [InlineData(true, true, 5, false, 0, true)]
+    [InlineData(false, false, 5, false, 0, true)]
+    [InlineData(false, true, 0, false, 0, true)]
+    [InlineData(false, true, 5, true, 0, true)]
+    [InlineData(false, true, 5, false, 3, true)]
+    public void Push_updated_is_disabled_by_one_rule_for_the_header_and_the_level_button(
+        bool readOnly, bool hasWorkspace, int repositories, bool jobRunning, int workerTasks, bool expected)
+    {
+        Assert.Equal(expected, WorkspaceRepositoriesHeader.DetermineUpdateDisabled(readOnly, hasWorkspace, repositories, jobRunning, workerTasks));
+    }
+
     [Fact]
     public void Basic_offers_file_version_update_only_while_a_file_is_out_of_date()
     {

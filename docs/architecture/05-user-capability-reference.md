@@ -767,7 +767,7 @@ choose commit-message behavior
 optionally continue to push
 ```
 
-While dependencies are unmatched and nothing is incoming, the header shows a yellow **Push Updated** split button instead of Update and Push (`DetermineUpdateControl`; menu: Level N Only, Update Only, Update Files, Push Only, and Undo Push Commits when a push is recommended).
+While dependencies are unmatched and nothing is incoming, the header shows a yellow **Push Updated** split button instead of Update and Push (`DetermineUpdateControl`; menu: Level N Only, Update Only, Update Files, Push Only, and Undo Push Commits when a push is recommended). The header of that level N in the grid also shows a small yellow **Push Updated** button in front of its repository count (`WorkspaceRepositoriesLevelHeader.DetermineShowsPushUpdated`); it runs Level N Only and is disabled by the same rule as the header button (`DetermineUpdateDisabled`). No other level shows it, and it is absent while the header shows Update.
 
 ### Internal plan
 
