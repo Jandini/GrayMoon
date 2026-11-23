@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 using GrayMoon.Abstractions.Worker;
 using GrayMoon.App.Data;
 using GrayMoon.App.Models;
+using GrayMoon.App.Services.Jobs;
+using GrayMoon.Application;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Repositories.Policy;
 using GrayMoon.Application.Workspaces;
@@ -76,14 +78,17 @@ public sealed class EffectiveVersionResolver(
     /// moment ago; the start of an operation always sets it. Without it (the refresh after every state write, which runs
     /// in the hook sync queue that operations wait for), a repository whose stored decision came from a branch point check
     /// for its current HEAD and the same kind of consumers keeps that decision: the Worker and the registry are not asked
-    /// again. Cancellation writes nothing.
+    /// again. Cancellation writes nothing. With <paramref name="progress"/> (the start check of an operation) each step is
+    /// reported, each branch point check is counted, and every decision is written as one line to the job's overlay
+    /// terminal (<see cref="TerminalLine"/>).
     /// </summary>
     public async Task<EffectiveVersionResolution> ResolveAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? repositoryIds,
         bool bypassCache,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<OperationProgress>? progress = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var isSpecialWorkspace = await dbContext.WorkspaceFeatureContexts
@@ -149,7 +154,7 @@ public sealed class EffectiveVersionResolver(
 
         if (probes.Count > 0)
         {
-            foreach (var decision in await ProbeAsync(workspaceId, contextId, probes, bypassCache, cancellationToken))
+            foreach (var decision in await ProbeAsync(workspaceId, contextId, probes, bypassCache, progress, cancellationToken))
                 decisions[decision.RepositoryId] = decision;
         }
 
@@ -159,6 +164,12 @@ public sealed class EffectiveVersionResolver(
             contextId,
             ordered.Select(d => new EffectiveVersionWrite(d.WorkspaceRepositoryId, d.Kind, d.EffectiveVersion, d.ResolvedForCommitSha, d.ReasonCode)).ToList(),
             cancellationToken);
+
+        if (progress != null && TerminalSinkContext.Current is { } terminal)
+        {
+            foreach (var decision in ordered)
+                terminal.Append(TerminalLabel, decision.Kind == EffectiveVersionKind.Unresolved ? WorkerCommandStreamKind.Stderr : WorkerCommandStreamKind.Stdout, TerminalLine(decision));
+        }
 
         foreach (var decision in ordered.Where(d => d.Kind != EffectiveVersionKind.Own || d.ReasonCode is EffectiveVersionReasonCodes.PackageNotPublished))
         {
@@ -181,6 +192,7 @@ public sealed class EffectiveVersionResolver(
         WorkspaceFeatureContextId contextId,
         List<(Candidate Candidate, BranchBaseline Baseline, IReadOnlyList<RequiredPackage> Required)> probes,
         bool bypassCache,
+        IProgress<OperationProgress>? progress,
         CancellationToken cancellationToken)
     {
         var results = new List<EffectiveVersionDecision>();
@@ -193,9 +205,13 @@ public sealed class EffectiveVersionResolver(
             MaxDegreeOfParallelism = Math.Max(1, workspaceOptions.Value.MaxParallelOperations),
             CancellationToken = cancellationToken,
         };
+        var checkedCount = 0;
+        progress.Report(CheckingVersionsMessage(0, probes.Count, null), 0, probes.Count);
         await Parallel.ForEachAsync(probes, options, async (probe, ct) =>
         {
             parentVersions[probe.Candidate.RepositoryId] = await GetParentVersionAsync(workerArgs, probe.Candidate.RepositoryName, probe.Baseline, ct);
+            var done = Interlocked.Increment(ref checkedCount);
+            progress.Report(CheckingVersionsMessage(done, probes.Count, probe.Candidate.RepositoryName), done, probes.Count);
         });
 
         var lookups = new List<(Candidate Candidate, string ParentVersion, IReadOnlyList<RequiredPackage> Required)>();
@@ -275,6 +291,7 @@ public sealed class EffectiveVersionResolver(
             plan.Add((candidate, parentVersion, packages));
         }
 
+        progress.Report("Checking packages on the registry...");
         var outcomes = await verifier.VerifyAsync(
             plan.SelectMany(p => p.Packages).Where(p => p.Request != null).Select(p => p.Request!),
             bypassCache,
@@ -367,6 +384,29 @@ public sealed class EffectiveVersionResolver(
             ? new BranchPointResult(payload.Version, payload.BaselineOnRemoteParent, null)
             : new BranchPointResult(null, payload.BaselineOnRemoteParent, payload.ErrorMessage);
     }
+
+    /// <summary>Stream label of the effective version lines in the overlay terminal.</summary>
+    internal const string TerminalLabel = "versions";
+
+    /// <summary>The overlay step text while the branch point versions are calculated (one GitVersion run per repository).</summary>
+    internal static string CheckingVersionsMessage(int done, int total, string? lastRepositoryName) =>
+        lastRepositoryName is null
+            ? $"Checking versions 0/{total}..."
+            : $"Checking versions {done}/{total}: {lastRepositoryName}...";
+
+    /// <summary>One overlay terminal line for a decision: the version dependents use and why.</summary>
+    internal static string TerminalLine(EffectiveVersionDecision decision) => decision.Kind switch
+    {
+        EffectiveVersionKind.InheritedVerified =>
+            $"{decision.RepositoryName}: uses the published parent version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
+        EffectiveVersionKind.InheritedUnverified =>
+            $"{decision.RepositoryName}: uses the parent version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
+        EffectiveVersionKind.Unresolved =>
+            $"{decision.RepositoryName}: cannot verify its packages ({decision.Message ?? EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
+        _ => string.IsNullOrWhiteSpace(decision.EffectiveVersion)
+            ? $"{decision.RepositoryName}: own version ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})"
+            : $"{decision.RepositoryName}: own version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
+    };
 
     private static EffectiveVersionDecision Own(Candidate candidate, string reasonCode, string? message) => new(
         candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,

@@ -152,7 +152,7 @@ public sealed partial class WorkspaceRepositories
         IReadOnlySet<string> requiredPackageIds;
         try
         {
-            var plan = await BuildPushPlanAsync(jobContextId, "No repositories to push.", ct);
+            var plan = await BuildPushPlanAsync(jobContextId, "No repositories to push.", ct, progress: job.ToOperationProgress());
             if (plan == null) return;
             (pushRepoIds, requiredPackageIds) = plan.Value;
         }

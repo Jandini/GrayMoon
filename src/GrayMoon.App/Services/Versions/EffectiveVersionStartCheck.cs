@@ -16,9 +16,10 @@ public sealed class EffectiveVersionStartCheck(EffectiveVersionResolver resolver
         WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? repositoryIds,
         string operationName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<GrayMoon.Application.OperationProgress>? progress = null)
     {
-        var resolution = await resolver.ResolveAsync(workspaceId, contextId, repositoryIds, bypassCache: true, cancellationToken);
+        var resolution = await resolver.ResolveAsync(workspaceId, contextId, repositoryIds, bypassCache: true, cancellationToken, progress);
         var unresolved = resolution.Unresolved;
         if (unresolved.Count > 0)
         {

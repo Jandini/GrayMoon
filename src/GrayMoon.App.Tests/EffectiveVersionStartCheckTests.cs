@@ -1,5 +1,8 @@
 using System.Net;
+using GrayMoon.Abstractions.Worker;
+using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Orchestration;
+using GrayMoon.App.Services.Versions;
 using GrayMoon.App.Tests.Policy.Characterization;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,6 +40,72 @@ public sealed class EffectiveVersionStartCheckTests
         Assert.Null(plan.StopMessage);
         Assert.False(plan.HasUnpushed);
         Assert.Equal(2, plan.NoWork.Count);
+    }
+
+    [Fact]
+    public async Task Bulk_push_plan_reports_each_step_and_writes_every_decision_to_the_job_terminal()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
+        var steps = new RecordingProgress();
+        var terminal = new JobTerminalBuffer();
+
+        await using var scope = s.Ctx.CreateScope();
+        using (TerminalSinkContext.Use(terminal))
+            await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special, progress: steps);
+
+        Assert.Equal(
+            [
+                "Checking archived repositories...",
+                "Checking versions...",
+                "Checking versions 0/1...",
+                $"Checking versions 1/1: {EffectiveVersionScenario.ProducerName}...",
+                "Checking packages on the registry...",
+                "Building push plan...",
+            ],
+            steps.Messages);
+        var lines = terminal.GetSnapshot();
+        Assert.Contains(lines, l => l.StreamLabel == EffectiveVersionResolver.TerminalLabel
+            && l.Kind == WorkerCommandStreamKind.Stdout
+            && l.Text.StartsWith($"{EffectiveVersionScenario.ProducerName}: uses the published parent version {EffectiveVersionScenario.ParentVersion}", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Text.StartsWith($"{EffectiveVersionScenario.ConsumerName}: own version", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_unverifiable_package_is_a_red_terminal_line()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
+        s.Registry.Answers(EffectiveVersionScenario.PackageId, HttpStatusCode.Forbidden);
+        var terminal = new JobTerminalBuffer();
+
+        await using var scope = s.Ctx.CreateScope();
+        using (TerminalSinkContext.Use(terminal))
+            await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special, progress: new RecordingProgress());
+
+        Assert.Contains(terminal.GetSnapshot(), l => l.Kind == WorkerCommandStreamKind.Stderr
+            && l.Text.StartsWith($"{EffectiveVersionScenario.ProducerName}: cannot verify its packages", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_background_refresh_writes_nothing_to_a_job_terminal()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
+        var terminal = new JobTerminalBuffer();
+
+        using (TerminalSinkContext.Use(terminal))
+            await s.ResolveAsync(bypassCache: false);
+
+        Assert.Empty(terminal.GetSnapshot());
+    }
+
+    /// <summary>Collects progress synchronously, in order (<see cref="Progress{T}"/> posts to the thread pool).</summary>
+    private sealed class RecordingProgress : IProgress<OperationProgress>
+    {
+        private readonly object _lock = new();
+        public List<string> Messages { get; } = [];
+        public void Report(OperationProgress value)
+        {
+            lock (_lock) Messages.Add(value.Message);
+        }
     }
 
     [Fact]

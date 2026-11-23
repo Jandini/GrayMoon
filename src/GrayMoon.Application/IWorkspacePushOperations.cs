@@ -22,11 +22,17 @@ public sealed record WorkspacePushPlan(
 
 public interface IWorkspacePushOperations
 {
+    /// <summary>
+    /// Builds the push plan: checks archived repositories with the provider, runs the effective version start check
+    /// (one GitVersion run per repository on its branch point, then the registry) and selects what to push.
+    /// <paramref name="progress"/> receives each step, so a caller can show it while the plan is built.
+    /// </summary>
     Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int? maxLevel = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IProgress<OperationProgress>? progress = null);
 
     /// <summary>Lightweight check (no dependency-package lookup) for which of the given repositories have unpushed commits or a branch never pushed upstream, scoped to <paramref name="contextId"/>.</summary>
     Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(

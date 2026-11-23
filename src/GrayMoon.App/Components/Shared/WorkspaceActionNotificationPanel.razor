@@ -882,7 +882,7 @@
         await using var scope = ServiceScopeFactory.CreateAsyncScope();
         var pushOps = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
 
-        var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct);
+        var plan = await pushOps.GetPlanAsync(workspaceId, contextId, maxLevel, ct, job.ToOperationProgress());
         if (plan.StopMessage is { } stopMessage)
         {
             if (!_disposed) _ = InvokeAsync(() => ToastService.ShowError(stopMessage));

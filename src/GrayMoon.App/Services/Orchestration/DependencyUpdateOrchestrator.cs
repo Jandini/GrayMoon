@@ -125,7 +125,7 @@ public sealed class DependencyUpdateOrchestrator(
         // Start check (effective versions, D3): with fresh registry answers, decide which repositories reuse their parent's
         // published packages. A repository whose packages cannot be verified stops the run here, before any change.
         setProgress("Verifying published packages...");
-        var startCheck = await ResolveEffectiveVersionsAsync(workspaceId, contextId, repositoryIds: null, startCheck: true, cancellationToken);
+        var startCheck = await ResolveEffectiveVersionsAsync(workspaceId, contextId, repositoryIds: null, startCheck: true, cancellationToken, progress);
         if (startCheck.StopMessage is { } stopMessage)
         {
             OnLevelError(0, stopMessage);
@@ -552,13 +552,14 @@ public sealed class DependencyUpdateOrchestrator(
         WorkspaceFeatureContextId contextId,
         IReadOnlySet<int>? repositoryIds,
         bool startCheck,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<OperationProgress>? progress = null)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         if (startCheck)
         {
             return await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>()
-                .RunAsync(workspaceId, contextId, repositoryIds, "Update", cancellationToken);
+                .RunAsync(workspaceId, contextId, repositoryIds, "Update", cancellationToken, progress);
         }
 
         return await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Versions.EffectiveVersionResolver>()
