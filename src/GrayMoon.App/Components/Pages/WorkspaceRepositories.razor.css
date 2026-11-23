@@ -374,17 +374,17 @@
     text-overflow: clip;
 }
 
-/* Commits badge: yellow when new branch not upstreamed (see GetCommitsBadge) */
+/* Commits badge: gray when the branch has no upstream and no commits (a push skips it; see CommitsBadge) */
 ::deep .repositories-table .commits-badge.commits-badge-not-upstreamed {
-    background-color: #ffc107 !important;
-    color: #000 !important;
+    background-color: #6c757d !important;
+    color: #fff !important;
 }
 
-/* Force black icon (Bootstrap Icons use ::before; color must apply to .bi and its ::before) */
+/* Force white icon (Bootstrap Icons use ::before; color must apply to .bi and its ::before) */
 ::deep .repositories-table .commits-badge.commits-badge-not-upstreamed .bi,
 ::deep .repositories-table .commits-badge.commits-badge-not-upstreamed .bi::before {
-    color: #000 !important;
-    -webkit-text-fill-color: #000 !important;
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
 }
 
 /* Cloud-arrow-up icon when branch needs to be upstreamed: icon only, same height as badge */
@@ -397,13 +397,13 @@
 ::deep .repositories-table .commits-badge-icon-up .bi {
     font-size: 1em;
 }
-::deep .repositories-table .commits-badge-icon-up--black {
-    color: #000 !important;
+::deep .repositories-table .commits-badge-icon-up--white {
+    color: #fff !important;
 }
-::deep .repositories-table .commits-badge-icon-up--black .bi,
-::deep .repositories-table .commits-badge-icon-up--black .bi::before {
-    color: #000 !important;
-    -webkit-text-fill-color: #000 !important;
+::deep .repositories-table .commits-badge-icon-up--white .bi,
+::deep .repositories-table .commits-badge-icon-up--white .bi::before {
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
 }
 
 ::deep .col-version {

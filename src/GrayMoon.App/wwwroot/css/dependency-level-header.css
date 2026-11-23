@@ -246,7 +246,7 @@
    scaled down so the row keeps its height (line box of the 0.875rem title). */
 :root .table .dependency-level-header .dependency-level-push-updated {
     font-size: 0.7rem;
-    font-weight: 600;
+    font-weight: 400;
     line-height: 1.2;
     padding: 0.05rem 0.45rem;
     margin-block: -0.15rem;
