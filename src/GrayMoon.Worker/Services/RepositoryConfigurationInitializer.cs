@@ -9,8 +9,10 @@ namespace GrayMoon.Worker.Services;
 /// repository opens a short-lived <see cref="Repository"/> under a mutating <see cref="IRepositoryAccess"/> lease
 /// (so a folder under removal is never written to) and disposes it before returning. Successes are remembered in a
 /// small bounded set so the hot paths (every Feature create/remove) cost a lookup; failures are never remembered,
-/// so they are retried. The memory is per process: a setting someone unsets externally is reconciled on the next
-/// Worker start (or when the bounded set rolls over), not on every call.
+/// so they are retried. A remembered success holds the config file it checked and that file's last write time, and
+/// counts only while the file is unchanged: a repository deleted and cloned again at the same path (a new config
+/// file), or a config edited since, is read again. Without that, a re-clone in the same Worker process kept no
+/// <c>core.longpaths</c> and GitVersion (libgit2) failed with "path too long" in its Feature worktrees.
 /// Lock order: access lease, then the path's stripe lock; the stripe lock is never held while waiting on anything else.
 /// </summary>
 public sealed class RepositoryConfigurationInitializer(
@@ -28,7 +30,7 @@ public sealed class RepositoryConfigurationInitializer(
     private readonly bool _windows = isWindows ?? OperatingSystem.IsWindows();
     private readonly object[] _stripes = Enumerable.Range(0, StripeCount).Select(_ => new object()).ToArray();
     private readonly object _memoLock = new();
-    private readonly HashSet<string> _configured = new(PathComparer);
+    private readonly Dictionary<string, (string ConfigFile, DateTime WrittenUtc)> _configured = new(PathComparer);
 
     public RepositoryConfigurationResult EnsureWindowsLongPaths(string repositoryPath, CancellationToken ct)
     {
@@ -59,11 +61,12 @@ public sealed class RepositoryConfigurationInitializer(
                 return RepositoryConfigurationResult.AlreadyConfigured;
 
             RepositoryConfigurationResult result;
+            string configFile;
             try
             {
                 ct.ThrowIfCancellationRequested();
                 lease?.Yield.ThrowIfCancellationRequested();
-                result = ReadAndSet(repositoryPath);
+                (result, configFile) = ReadAndSet(repositoryPath);
             }
             catch (OperationCanceledException)
             {
@@ -90,7 +93,7 @@ public sealed class RepositoryConfigurationInitializer(
                 return RepositoryConfigurationResult.Failed;
             }
 
-            Remember(key);
+            Remember(key, configFile);
             ct.ThrowIfCancellationRequested();
             return result;
         }
@@ -99,18 +102,19 @@ public sealed class RepositoryConfigurationInitializer(
     // Opens the repository, reads only the repository-local level (never the layered effective value, so an inherited
     // global "true" does not stop GrayMoon from recording its own policy), writes when it is not true, and closes.
     // Config.Set(..., Local) targets the common repository config, which every linked worktree shares.
-    private RepositoryConfigurationResult ReadAndSet(string repositoryPath)
+    private (RepositoryConfigurationResult Result, string ConfigFile) ReadAndSet(string repositoryPath)
     {
         // libgit2 gives a linked worktree its own (empty) repository-level config, so the shared config is reached by
         // opening the common git directory itself. Never touches config.worktree, global or system.
         using var repository = new Repository(ResolveCommonGitDir(repositoryPath) ?? repositoryPath);
+        var configFile = Path.Combine(repository.Info.Path, "config");
         var local = repository.Config.Get<bool>(LongPathsKey, ConfigurationLevel.Local);
         if (local?.Value == true)
-            return RepositoryConfigurationResult.AlreadyConfigured;
+            return (RepositoryConfigurationResult.AlreadyConfigured, configFile);
 
         repository.Config.Set(LongPathsKey, true, ConfigurationLevel.Local);
         logger?.LogDebug("Set {Key}=true in the local config of {RepoPath}.", LongPathsKey, repositoryPath);
-        return RepositoryConfigurationResult.Configured;
+        return (RepositoryConfigurationResult.Configured, configFile);
     }
 
     // For a linked worktree: the main repository's git directory (found through the worktree's "commondir" file).
@@ -129,19 +133,47 @@ public sealed class RepositoryConfigurationInitializer(
         return relative.Length == 0 ? null : Path.GetFullPath(Path.Combine(gitDir, relative));
     }
 
+    // Remembered only while the config file checked then is still the same file, unchanged: one file time read.
     private bool IsRemembered(string key)
     {
+        (string ConfigFile, DateTime WrittenUtc) entry;
         lock (_memoLock)
-            return _configured.Contains(key);
+        {
+            if (!_configured.TryGetValue(key, out entry))
+                return false;
+        }
+
+        if (LastWriteUtc(entry.ConfigFile) == entry.WrittenUtc)
+            return true;
+
+        lock (_memoLock)
+            _configured.Remove(key);
+        return false;
     }
 
-    private void Remember(string key)
+    private void Remember(string key, string configFile)
     {
+        var writtenUtc = LastWriteUtc(configFile);
+        if (writtenUtc is null)
+            return;
+
         lock (_memoLock)
         {
             if (_configured.Count >= MaxRemembered)
                 _configured.Clear(); // bounded: paths get reused and configs change, so forgetting is always safe
-            _configured.Add(key);
+            _configured[key] = (configFile, writtenUtc.Value);
+        }
+    }
+
+    private static DateTime? LastWriteUtc(string file)
+    {
+        try
+        {
+            return File.Exists(file) ? File.GetLastWriteTimeUtc(file) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 }

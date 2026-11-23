@@ -18,10 +18,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? _emptyHooksPath;
 
-    // The clone's own checkout must already allow paths over 260 characters on Windows, before any repository config
-    // exists to say so. Command-scoped (-c): nothing is written to global or system config; the persistent local
-    // setting is written afterwards by IRepositoryConfigurationInitializer.
-    private static string CloneLongPathsPrefix => OperatingSystem.IsWindows() ? "-c core.longpaths=true " : "";
+    // On Windows a clone must allow paths over 260 characters for its own checkout and keep allowing them afterwards.
+    // "git clone -c core.longpaths=true" writes the setting into the new repository's own config before anything is
+    // checked out, so a fresh clone never depends on IRepositoryConfigurationInitializer having run: libgit2 (used by
+    // GitVersion) refuses long paths without it. "git -c ... clone" would apply it to the clone process only.
+    // Nothing is written to global or system config.
+    internal static string CloneLongPathsOption => OperatingSystem.IsWindows() ? "-c core.longpaths=true " : "";
 
 
     public async Task<GitCloneResult> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
@@ -36,7 +38,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         // --progress forces git to report progress on stderr even though it is not a terminal; that stream is the
         // liveness signal the runner's idle timeout watches (see GitProcessOptions.CloneIdleTimeoutSeconds).
-        var args = $"{CloneLongPathsPrefix}clone --progress \"{cloneUrl}\"";
+        var args = $"clone {CloneLongPathsOption}--progress \"{cloneUrl}\"";
 
         var cloneFolderName = CloneFolderName(cloneUrl);
         var cloneTarget = cloneFolderName == null ? null : Path.Combine(workingDir, cloneFolderName);
@@ -1187,7 +1189,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(targetDir))
             Directory.CreateDirectory(targetDir);
 
-        var args = $"{CloneLongPathsPrefix}clone --progress \"{cloneUrl}\" .";
+        var args = $"clone {CloneLongPathsOption}--progress \"{cloneUrl}\" .";
 
         if (Directory.EnumerateFileSystemEntries(targetDir).Any())
         {

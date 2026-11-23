@@ -471,7 +471,7 @@ Rules for new Worker code:
 - App side, `ErrorCode = "PathUnderRemoval"` from `GetGitChangeStatus` is an expected outcome, not an error. `IWorkspaceGitChangesMonitoringPause` is only an optimization; the Worker is authoritative.
 - A `RepositoryAccessException` means the Worker could not release its own handles. Treat it as a defect, not an outcome to handle.
 
-Git configuration rules: `core.longpaths=true` only on Windows, only in the repository's common local config (`RepositoryConfigurationInitializer`); `git config --global --add safe.directory` only after `CheckRepoSafeAsync` reports dubious ownership; no other global or system config writes.
+Git configuration rules: `core.longpaths=true` only on Windows, only in the repository's common local config (`RepositoryConfigurationInitializer`, and `git clone -c` for a new clone); `git config --global --add safe.directory` only after `CheckRepoSafeAsync` reports dubious ownership; no other global or system config writes.
 
 ---
 
