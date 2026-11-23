@@ -91,7 +91,7 @@ public sealed partial class WorkspaceActions
     private async Task RunFullRefreshAsync(bool replaceToken)
     {
         var targets = rows
-            .Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName))
+            .Where(r => !string.IsNullOrWhiteSpace(r.CiBranchName))
             .ToList();
         if (targets.Count == 0) return;
 
@@ -261,7 +261,7 @@ public sealed partial class WorkspaceActions
 
                 var runningRows = rows
                     .Where(r =>
-                        !string.IsNullOrWhiteSpace(r.Link.BranchName) &&
+                        !string.IsNullOrWhiteSpace(r.CiBranchName) &&
                         r.WorkflowLines.Any(line => IsLineRunningForBranch(r, line)))
                     .ToList();
 
@@ -297,7 +297,7 @@ public sealed partial class WorkspaceActions
 
     private async Task RefreshRowAsync(WorkspaceActionRow row, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(row.Link.BranchName)) return;
+        if (string.IsNullOrWhiteSpace(row.CiBranchName)) return;
 
         try
         {
@@ -315,7 +315,7 @@ public sealed partial class WorkspaceActions
                 FeatureContextIdForCi,
                 row.Link.WorkspaceRepositoryId,
                 row.Repo,
-                row.Link.BranchName!,
+                row.CiBranchName!,
                 cancellationToken);
 
             if (!cancellationToken.IsCancellationRequested && list != null)
@@ -340,7 +340,7 @@ public sealed partial class WorkspaceActions
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error refreshing action for {Repo}/{Branch}", row.Repo.RepositoryName, row.Link.BranchName);
+            Logger.LogError(ex, "Error refreshing action for {Repo}/{Branch}", row.Repo.RepositoryName, row.CiBranchName);
             row.ErrorMessage = GetFriendlyErrorMessage(ex);
         }
         finally

@@ -170,6 +170,27 @@ public sealed partial class WorkspaceRepositories
         }
 
         var repo = TryGetLink(repositoryId);
+        if (repo != null && GrayMoon.App.Services.Policy.UnpublishedBranchRules.HasNoUpstreamAndNoCommits(repo.BranchHasUpstream, repo.OutgoingCommits))
+        {
+            ShowConfirm(
+                UpstreamOnlyPushMessage(repo.Repository?.RepositoryName ?? $"repo {repositoryId}", branchName),
+                () => PushBadgeClickConfirmedAsync(repositoryId, branchName),
+                "Set upstream");
+            return;
+        }
+
+        await PushBadgeClickConfirmedAsync(repositoryId, branchName);
+    }
+
+    /// <summary>Confirmation for the gray cloud badge: the branch has no commits, so the push only sets its upstream.</summary>
+    internal static string UpstreamOnlyPushMessage(string repositoryName, string? branchName) =>
+        string.IsNullOrWhiteSpace(branchName)
+            ? $"No commits were made in {repositoryName}. Push the branch anyway to set its upstream?"
+            : $"No commits were made on {branchName} in {repositoryName}. Push the branch anyway to set its upstream?";
+
+    private async Task PushBadgeClickConfirmedAsync(int repositoryId, string? branchName)
+    {
+        var repo = TryGetLink(repositoryId);
         if (repo != null
             && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
             && string.Equals(repo.BranchName, repo.DefaultBranchName, StringComparison.Ordinal))

@@ -68,7 +68,7 @@ else
     private bool Clickable => !Disabled && !IsOnTag && (PullOnly ? Y > 0 : (HasCommits || NotUpstreamed));
     private string BgColor => DetermineColors(X, Y, NotUpstreamed).Background;
     private string TextColor => DetermineColors(X, Y, NotUpstreamed).Text;
-    private string CssClass => NotUpstreamed && X == 0 ? "badge commits-badge commits-badge-not-upstreamed" : "badge";
+    private string CssClass => !IsOnTag && GrayMoon.App.Services.Policy.UnpublishedBranchRules.HasNoUpstreamAndNoCommits(BranchHasUpstream, Outgoing) ?"badge commits-badge commits-badge-not-upstreamed" : "badge";
 
     /// <summary>
     /// Badge colors: red for incoming commits, yellow for outgoing commits, green when in sync.
@@ -85,7 +85,7 @@ else
     private string DisplayText => $"↑{X} ↓{Y}";
     private string Title => PullOnly && Y == 0
         ? PullOnlyTitle ?? "Read only repository. GrayMoon does not push it."
-        : NotUpstreamed ? "Push to set upstream" : (Y > 0 ? "Click to pull" : "Click to push");
+        : NotUpstreamed ? (X > 0 ? "Push to set upstream" : "No commits on this branch. Click to set its upstream") : (Y > 0 ? "Click to pull" : "Click to push");
     private bool ShowPlaceholder => IsOnTag || (!Outgoing.HasValue && !Incoming.HasValue && BranchHasUpstream != false);
 
     private async Task HandleClick()

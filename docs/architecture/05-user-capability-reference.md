@@ -864,7 +864,7 @@ The Push button builds its plan inside the page job (`WorkspaceRepositories.OnPu
 
 ### When Push asks for attention
 
-`RepositoryOperationPolicyExpressions.HasCommitsToPush(outgoingCommits)` is the one rule: a repository asks for a push only when it has outgoing commits. The header's yellow Push button (`IsPushRecommended`, the four header queries of `WorkspaceRepositoryLinkListQueryService`, expanded by `ExpandRepositoryPolicy`), the yellow commits badge (`CommitsBadge.DetermineColors`) and the notification panel (`WorkspacePendingActionsService`) all use it, after the Push policy. A branch without an upstream and without commits does not count; its commits badge is the neutral gray cloud (`--badge-neutral-bg`, the gray of the PR "none" and dependencies "none" badges). Push stays available as the plain button and still pushes such a branch when the selection table above says so (rows 4 and 7).
+`RepositoryOperationPolicyExpressions.HasCommitsToPush(outgoingCommits)` is the one rule: a repository asks for a push only when it has outgoing commits. The header's yellow Push button (`IsPushRecommended`, the four header queries of `WorkspaceRepositoryLinkListQueryService`, expanded by `ExpandRepositoryPolicy`), the yellow commits badge (`CommitsBadge.DetermineColors`) and the notification panel (`WorkspacePendingActionsService`) all use it, after the Push policy. A branch without an upstream and without commits does not count; its commits badge is the neutral gray cloud (`--badge-neutral-bg`, the gray of the PR "none" and dependencies "none" badges). Push stays available as the plain button and still pushes such a branch when the selection table above says so (rows 4 and 7). Clicking the gray cloud badge first asks to confirm (`WorkspaceRepositories.UpstreamOnlyPushMessage`: no commits were made, push the branch anyway to set its upstream?); Set upstream goes on with the usual single-repository push.
 
 ### Synchronized push
 
@@ -1342,11 +1342,13 @@ run/re-run one dependency level or the Workspace repository
 open logs
 ```
 
+Each repository row shows the runs of one branch, its CI branch (`UnpublishedBranchRules.CiBranch`, resolved per row from the snapshot of the viewed context by `WorkspaceActions.ResolveCiBranch`). It is the checked-out branch, except while that branch has no upstream and no commits (the gray cloud badge): GitHub has never run anything on it, so the row shows, refreshes, re-runs and starts the workflows of the recorded parent branch (the Feature row or the branch baseline, without `origin/`), and the Branch column shows that parent with an arrow icon and a tooltip naming both branches. A branch with no recorded parent stays on its own branch. Once the branch has a commit or an upstream the row switches to it on the next sync.
+
 In a .NET Dependency Workspace the grid is grouped like the Repositories grid: the Workspace repository first (when it has a connector), then `Level N` from the highest level down, then `No dependencies`. A Feature uses its own levels. Inside a group the order is unchanged (errors, failed, aborted, running, success, then name), so a running workflow moves to the top of its own level and never leaves it; each header appears once. A group whose rows are all hidden by the status chips or the search is not rendered, header included. A Basic Workspace keeps the flat list with no headers.
 
 Each group header shows, right after its title, how many workflows of the group failed or are running (there is no dependency-graph link here), and ends with "N repositories" (all repositories of the group, hidden or not). Hovering it opens a menu:
 
-- **Run** starts every workflow of the group that supports `workflow_dispatch` and is not already running, on the repository's current branch. It is disabled when there is none.
+- **Run** starts every workflow of the group that supports `workflow_dispatch` and is not already running, on the CI branch of each repository (above). It is disabled when there is none.
 - **Re-run** is listed only when the group has failed workflows, and re-runs each of them.
 - **Abort** cancels every running workflow of the group on GitHub. It is disabled when nothing in the group is running. Read only and tag-pinned repositories are included, as with Abort on a single row; the overlay then waits until the runs stop showing as running.
 

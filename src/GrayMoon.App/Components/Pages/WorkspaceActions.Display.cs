@@ -36,7 +36,7 @@ public sealed partial class WorkspaceActions
             if (!IsLineIncludedWhenAiFiltered(line))
                 continue;
             var a = line.Action;
-            if (a == null || !string.Equals(a.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase))
+            if (a == null || !string.Equals(a.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase))
                 continue;
             var o = a.Status switch
             {
@@ -58,27 +58,27 @@ public sealed partial class WorkspaceActions
 
     private static bool IsLineFailedForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
         line.Action != null &&
-        string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(line.Action.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(line.Action.Status, "failed", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLineRunningForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
         line.Action != null &&
-        string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(line.Action.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(line.Action.Status, "running", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLineSuccessForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
         line.Action != null &&
-        string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(line.Action.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(line.Action.Status, "success", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLineAbortedForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
         line.Action != null &&
-        string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(line.Action.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(line.Action.Status, "aborted", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLineNoneForBranch(WorkspaceActionRow row, WorkflowActionLine line) =>
         line.Action == null ||
-        !string.Equals(line.Action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(line.Action.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(line.Action.Status, "none", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Case-insensitive match on the GitHub-reported workflow name/path only - never reads workflow YAML file contents.</summary>
@@ -95,13 +95,17 @@ public sealed partial class WorkspaceActions
     private bool CountsTowardStatus(WorkspaceActionRow row, WorkflowActionLine line) =>
         string.IsNullOrWhiteSpace(row.ErrorMessage) && IsLineIncludedWhenAiFiltered(line);
 
+    /// <summary>Tooltip of a row that shows the parent branch because the checked-out branch has no upstream and no commits.</summary>
+    internal static string ParentBranchTitle(WorkspaceActionRow row) =>
+        $"{row.Link.BranchName} has no commits and no upstream yet, so this shows its parent branch {row.CiBranchName}.";
+
     internal static bool CanRerun(WorkspaceActionRow row, WorkflowActionLine line) =>
         IsLineFailedForBranch(row, line) && (line.Action?.RunId ?? 0) > 0;
 
     internal static bool CanRun(WorkspaceActionRow row, WorkflowActionLine line) =>
         (line.Action?.SupportsWorkflowDispatch ?? false) &&
         (line.Action?.WorkflowId ?? 0) > 0 &&
-        !string.IsNullOrWhiteSpace(row.Link.BranchName);
+        !string.IsNullOrWhiteSpace(row.CiBranchName);
 
     /// <summary>Failed run that also supports workflow_dispatch: show Re-run as a split button with a "Run again" (new dispatch) option.</summary>
     internal static bool CanRunAgain(WorkspaceActionRow row, WorkflowActionLine line) =>

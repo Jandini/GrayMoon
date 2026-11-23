@@ -334,9 +334,16 @@
                                                     <td class="col-branch">
                                                         @if (showRepoBranchInRow)
                                                         {
-                                                            @if (!string.IsNullOrWhiteSpace(row.Link.BranchName))
+                                                            @if (!string.IsNullOrWhiteSpace(row.CiBranchName))
                                                             {
-                                                                <span class="text-muted">@row.Link.BranchName</span>
+                                                                @if (row.ShowsParentBranch)
+                                                                {
+                                                                    <span class="text-muted" title="@ParentBranchTitle(row)">@row.CiBranchName <i class="bi bi-arrow-90deg-up" aria-hidden="true"></i></span>
+                                                                }
+                                                                else
+                                                                {
+                                                                    <span class="text-muted">@row.CiBranchName</span>
+                                                                }
                                                             }
                                                             else
                                                             {
@@ -432,7 +439,7 @@
                                                                                     <button class="dropdown-item" type="button" role="menuitem"
                                                                                             @onclick="() => HandleRunAgainClick(row, line)"
                                                                                             disabled="@line.RunInProgress"
-                                                                                            title="@($"Run a new workflow on branch {row.Link.BranchName}")">
+                                                                                            title="@($"Run a new workflow on branch {row.CiBranchName}")">
                                                                                         Run again
                                                                                     </button>
                                                                                 </li>

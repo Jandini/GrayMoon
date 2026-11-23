@@ -46,6 +46,7 @@ public sealed class WorkspaceActionsSearchTests
     private static WorkspaceActions.WorkspaceActionRow CreateRow(string repositoryName) => new()
     {
         Link = new WorkspaceRepositoryLink { BranchName = "main" },
+        CiBranchName = "main",
         Repo = new GitHubRepositoryEntry { RepositoryName = repositoryName, OrgName = "acme", ConnectorName = "GitHub" }
     };
 

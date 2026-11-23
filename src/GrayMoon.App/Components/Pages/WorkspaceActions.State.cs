@@ -25,6 +25,16 @@ public sealed partial class WorkspaceActions
         public required WorkspaceRepositoryLink Link { get; set; }
         public required GitHubRepositoryEntry Repo { get; init; }
 
+        /// <summary>
+        /// Branch whose runs the row fetches, shows and starts: the parent branch while the checked-out branch has no
+        /// upstream and no commits (see <see cref="GrayMoon.App.Services.Policy.UnpublishedBranchRules.CiBranch"/>), else the checked-out branch.
+        /// </summary>
+        public string? CiBranchName { get; set; }
+
+        /// <summary>True when <see cref="CiBranchName"/> is the parent branch, not the checked-out branch.</summary>
+        public bool ShowsParentBranch =>
+            !string.IsNullOrWhiteSpace(CiBranchName) && !string.Equals(CiBranchName, Link.BranchName, StringComparison.Ordinal);
+
         /// <summary>Dependency level in the selected context (see <see cref="ResolveDependencyLevel"/>); null is "No dependencies".</summary>
         public int? DependencyLevel { get; set; }
 
