@@ -78,9 +78,9 @@ public sealed class EffectiveVersionResolver(
     /// moment ago; the start of an operation always sets it. Without it (the refresh after every state write, which runs
     /// in the hook sync queue that operations wait for), a repository whose stored decision came from a branch point check
     /// for its current HEAD and the same kind of consumers keeps that decision: the Worker and the registry are not asked
-    /// again. Cancellation writes nothing. With <paramref name="progress"/> (the start check of an operation) each step is
-    /// reported, each branch point check is counted, and every decision is written as one line to the job's overlay
-    /// terminal (<see cref="TerminalLine"/>).
+    /// again. Cancellation writes nothing. With <paramref name="progress"/> (the start check of an operation) each finished
+    /// branch point check is counted (<see cref="VerifiedMessage"/>), and every decision is written as one line to the
+    /// job's overlay terminal (<see cref="TerminalLine"/>).
     /// </summary>
     public async Task<EffectiveVersionResolution> ResolveAsync(
         int workspaceId,
@@ -206,12 +206,11 @@ public sealed class EffectiveVersionResolver(
             CancellationToken = cancellationToken,
         };
         var checkedCount = 0;
-        progress.Report(CheckingVersionsMessage(0, probes.Count, null), 0, probes.Count);
         await Parallel.ForEachAsync(probes, options, async (probe, ct) =>
         {
             parentVersions[probe.Candidate.RepositoryId] = await GetParentVersionAsync(workerArgs, probe.Candidate.RepositoryName, probe.Baseline, ct);
             var done = Interlocked.Increment(ref checkedCount);
-            progress.Report(CheckingVersionsMessage(done, probes.Count, probe.Candidate.RepositoryName), done, probes.Count);
+            progress.Report(VerifiedMessage(done, probes.Count), done, probes.Count);
         });
 
         var lookups = new List<(Candidate Candidate, string ParentVersion, IReadOnlyList<RequiredPackage> Required)>();
@@ -291,7 +290,6 @@ public sealed class EffectiveVersionResolver(
             plan.Add((candidate, parentVersion, packages));
         }
 
-        progress.Report("Checking packages on the registry...");
         var outcomes = await verifier.VerifyAsync(
             plan.SelectMany(p => p.Packages).Where(p => p.Request != null).Select(p => p.Request!),
             bypassCache,
@@ -388,11 +386,12 @@ public sealed class EffectiveVersionResolver(
     /// <summary>Stream label of the effective version lines in the overlay terminal.</summary>
     internal const string TerminalLabel = "versions";
 
-    /// <summary>The overlay step text while the branch point versions are calculated (one GitVersion run per repository).</summary>
-    internal static string CheckingVersionsMessage(int done, int total, string? lastRepositoryName) =>
-        lastRepositoryName is null
-            ? $"Checking versions 0/{total}..."
-            : $"Checking versions {done}/{total}: {lastRepositoryName}...";
+    /// <summary>
+    /// The progress text after each branch point check (one GitVersion run per repository), with
+    /// <see cref="OperationProgress.Completed"/> and <see cref="OperationProgress.Total"/> set. An operation may show its
+    /// own text for the same counts (Push: "Push prepared for x of y repositories...").
+    /// </summary>
+    internal static string VerifiedMessage(int done, int total) => $"Verified {done} of {total} repositories...";
 
     /// <summary>One overlay terminal line for a decision: the version dependents use and why.</summary>
     internal static string TerminalLine(EffectiveVersionDecision decision) => decision.Kind switch

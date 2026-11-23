@@ -43,7 +43,7 @@ public sealed class EffectiveVersionStartCheckTests
     }
 
     [Fact]
-    public async Task Bulk_push_plan_reports_each_step_and_writes_every_decision_to_the_job_terminal()
+    public async Task Bulk_push_plan_says_preparing_then_counts_prepared_repositories_and_writes_every_decision_to_the_job_terminal()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
         var steps = new RecordingProgress();
@@ -53,16 +53,7 @@ public sealed class EffectiveVersionStartCheckTests
         using (TerminalSinkContext.Use(terminal))
             await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special, progress: steps);
 
-        Assert.Equal(
-            [
-                "Checking archived repositories...",
-                "Checking versions...",
-                "Checking versions 0/1...",
-                $"Checking versions 1/1: {EffectiveVersionScenario.ProducerName}...",
-                "Checking packages on the registry...",
-                "Building push plan...",
-            ],
-            steps.Messages);
+        Assert.Equal(["Preparing push...", "Push prepared for 1 of 1 repositories..."], steps.Messages);
         var lines = terminal.GetSnapshot();
         Assert.Contains(lines, l => l.StreamLabel == EffectiveVersionResolver.TerminalLabel
             && l.Kind == WorkerCommandStreamKind.Stdout
@@ -95,6 +86,24 @@ public sealed class EffectiveVersionStartCheckTests
             await s.ResolveAsync(bypassCache: false);
 
         Assert.Empty(terminal.GetSnapshot());
+    }
+
+    [Theory]
+    [InlineData(null, null, "Preparing push...")]
+    [InlineData(0, 4, "Preparing push...")]
+    [InlineData(3, 14, "Push prepared for 3 of 14 repositories...")]
+    public void The_push_overlay_counts_prepared_repositories_without_names(int? completed, int? total, string expected)
+    {
+        Assert.Equal(expected, GrayMoon.App.Services.Application.WorkspacePushOperations.PreparedMessage(completed, total));
+    }
+
+    [Theory]
+    [InlineData(0, "No repositories to push.")]
+    [InlineData(1, "No repositories to push. 1 branch without an upstream has no commits and needs no push.")]
+    [InlineData(12, "No repositories to push. 12 branches without an upstream have no commits and need no push.")]
+    public void Nothing_to_push_is_one_brief_sentence_whatever_the_number_of_branches(int noWorkCount, string expected)
+    {
+        Assert.Equal(expected, GrayMoon.App.Components.Pages.WorkspaceRepositories.NothingToPushMessage(noWorkCount));
     }
 
     /// <summary>Collects progress synchronously, in order (<see cref="Progress{T}"/> posts to the thread pool).</summary>

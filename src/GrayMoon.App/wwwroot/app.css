@@ -40,7 +40,10 @@
     --text-primary: #cccccc;
     --text-secondary: #858585;
     --text-muted: #6a6a6a;
-    
+
+    /* The one gray of a grid badge that asks for nothing: PR "none", dependencies "none", the no-upstream cloud. */
+    --badge-neutral-bg: #495057;
+
     --border-color: #3e3e42;
     --border-hover: #4e4e52;
     --border-light: #5a5a5a;
@@ -1412,7 +1415,7 @@ table.resizable-columns th:hover .resize-handle::after {
     font-weight: 400;
 }
 .repositories-table td.col-pr .pr-badge-none {
-    background-color: #495057;
+    background-color: var(--badge-neutral-bg);
     color: #fff !important;
 }
 .repositories-table td.col-pr .pr-badge-create {

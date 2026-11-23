@@ -103,7 +103,8 @@ public sealed class CounterCharacterizationTests
 
         Assert.Equal(1, header.TotalCount);
         Assert.Equal(onTag, header.HasTaggedRepos);
-        Assert.Equal(!onTag, header.IsPushRecommended);
+        // Push asks for attention only for commits to push: a never-pushed branch without commits does not count.
+        Assert.Equal(!onTag && !neverPushed, header.IsPushRecommended);
         Assert.Equal(!onTag, header.HasIncomingCommits);
         Assert.Equal(!onTag, header.HasCreatablePr);
         Assert.Equal(!onTag && dependencyGraph, header.HasUnmatchedDependencies);
@@ -190,9 +191,12 @@ public sealed class CounterCharacterizationTests
         Assert.Equal([("a", 2), ("b", 1)], NotificationPanelRepoSets.WithOutgoing(links));
     }
 
-    /// <summary>Known difference 1: the header recommends a push for a branch never pushed upstream; the notification does not.</summary>
+    /// <summary>
+    /// The former known difference 1 is gone: a branch never pushed upstream and without commits makes neither the header
+    /// Push button nor the notification ask for a push (<c>RepositoryOperationPolicyExpressions.HasCommitsToPush</c>).
+    /// </summary>
     [Fact]
-    public async Task Known_difference_header_push_counts_a_never_pushed_branch_and_the_notification_does_not()
+    public async Task A_never_pushed_branch_without_commits_makes_neither_the_header_nor_the_notification_ask_for_a_push()
     {
         await using var ctx = await CreateAsync();
         await ctx.MutateLinkAsync(link =>
@@ -209,7 +213,7 @@ public sealed class CounterCharacterizationTests
             .GetAllSnapshotsAsync(ctx.WorkspaceId, special, true);
         var notification = WorkspacePendingActionsService.ComputeNotification(ctx.WorkspaceId, "test-ws", links);
 
-        Assert.True(header.IsPushRecommended);
+        Assert.False(header.IsPushRecommended);
         Assert.Null(notification);
         Assert.Empty(NotificationPanelRepoSets.WithOutgoing(links));
     }

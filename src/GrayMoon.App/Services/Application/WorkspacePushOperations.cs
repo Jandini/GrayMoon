@@ -22,6 +22,22 @@ public sealed class WorkspacePushOperations(
     ILogger<WorkspacePushOperations> logger,
     GrayMoon.App.Services.Versions.EffectiveVersionStartCheck effectiveVersionStartCheck) : IWorkspacePushOperations
 {
+    /// <summary>The overlay text while the plan is built and before the first repository is verified.</summary>
+    internal const string PreparingPushMessage = "Preparing push...";
+
+    /// <summary>The overlay text for the counted part of the plan: "Preparing push..." until a repository is verified.</summary>
+    internal static string PreparedMessage(int? completed, int? total) =>
+        completed is > 0 && total is > 0
+            ? $"Push prepared for {completed} of {total} repositories..."
+            : PreparingPushMessage;
+
+    /// <summary>Shows the start check's counts in the push's own words (<see cref="PreparedMessage"/>).</summary>
+    private sealed class PreparedCountProgress(IProgress<OperationProgress> inner) : IProgress<OperationProgress>
+    {
+        public void Report(OperationProgress value) =>
+            inner.Report(new OperationProgress(PreparedMessage(value.Completed, value.Total), value.Completed, value.Total));
+    }
+
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
@@ -30,7 +46,7 @@ public sealed class WorkspacePushOperations(
         IProgress<OperationProgress>? progress = null)
     {
         // A repository marked archived is left out of the plan, so ask the provider first whether it still is.
-        progress.Report("Checking archived repositories...");
+        progress.Report(PreparingPushMessage);
         await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
@@ -62,8 +78,9 @@ public sealed class WorkspacePushOperations(
     {
         // Start check (effective versions, D3): the selection below reads the effective version kinds, so they are resolved
         // with fresh registry answers first. An unverifiable package stops the push before anything is pushed.
-        progress.Report("Checking versions...");
-        var resolution = await effectiveVersionStartCheck.RunAsync(workspaceId, contextId, repositoryIds: null, "Push", cancellationToken, progress);
+        var resolution = await effectiveVersionStartCheck.RunAsync(
+            workspaceId, contextId, repositoryIds: null, "Push", cancellationToken,
+            progress is null ? null : new PreparedCountProgress(progress));
         if (resolution.StopMessage is { } stopMessage)
         {
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false)
@@ -72,8 +89,7 @@ public sealed class WorkspacePushOperations(
             };
         }
 
-        progress.Report("Building push plan...");
-        var noWork = await workspaceRepository.GetPushNoWorkReasonsAsync(workspaceId, contextId.Value, links.Select(l => l.RepositoryId).ToHashSet(), cancellationToken);
+        var noWork =await workspaceRepository.GetPushNoWorkReasonsAsync(workspaceId, contextId.Value, links.Select(l => l.RepositoryId).ToHashSet(), cancellationToken);
         foreach (var line in noWork)
             logger.LogInformation("Push plan for workspace {WorkspaceId} context {ContextId}: {NoWork}", workspaceId, contextId.Value, line);
 

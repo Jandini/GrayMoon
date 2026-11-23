@@ -78,8 +78,8 @@ else
     internal static (string Background, string Text) DetermineColors(int outgoing, int incoming, bool notUpstreamed)
     {
         if (incoming > 0) return ("#dc3545", "#fff");
-        if (outgoing > 0) return ("#ffc107", "#000");
-        if (notUpstreamed) return ("#6c757d", "#fff");
+        if (GrayMoon.App.Services.Policy.RepositoryOperationPolicyExpressions.HasCommitsToPush(outgoing)) return ("#ffc107", "#000");
+        if (notUpstreamed) return ("var(--badge-neutral-bg)", "#fff");
         return ("#198754", "#fff");
     }
     private string DisplayText => $"↑{X} ↓{Y}";

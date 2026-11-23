@@ -110,15 +110,13 @@ public sealed partial class WorkspaceRepositories
 
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
-            // Repositories left out because they have no commits and nothing needs their packages are named ("no work").
-            SafeInvoke(() => ToastService.Show(plan.NoWork.Count == 0 ? "No repositories to push." : $"No repositories to push. {string.Join(" ", plan.NoWork)}"));
+            SafeInvoke(() => ToastService.Show(NothingToPushMessage(plan.NoWork.Count)));
             return null;
         }
 
         if (!dependencyAware)
             return new PreparedPush(plan.RepositoryIds, plan.RequiredPackageIds, ShowDependencyDialog: false, DependencyInfo: null);
 
-        job.ReportProgress("Checking push dependencies...");
         var depInfo = await ScopedExecutor.ExecuteAsync<WorkspaceDependencyService, PushDependencyInfoForRepo?>(svc =>
             svc.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, jobContextId.Value, plan.RepositoryIds, ct));
         var route = PushClickRouter.ForDependencies(
@@ -139,6 +137,17 @@ public sealed partial class WorkspaceRepositories
             ShowDependencyDialog: route == PushClickRoute.ShowDependencyModal,
             depInfo);
     }
+
+    /// <summary>
+    /// The brief toast when nothing is pushed. Repositories without an upstream that need no push ("no work": no commits,
+    /// and their packages are reused or nobody needs them) are counted, not listed; each one's sentence is in the log.
+    /// </summary>
+    internal static string NothingToPushMessage(int noWorkCount) => noWorkCount switch
+    {
+        0 => "No repositories to push.",
+        1 => "No repositories to push. 1 branch without an upstream has no commits and needs no push.",
+        _ => $"No repositories to push. {noWorkCount} branches without an upstream have no commits and need no push.",
+    };
 
     private static IReadOnlySet<string> RequiredPackageIdsOf(PushDependencyInfoForRepo info) =>
         info.PayloadForRepo.RequiredPackages

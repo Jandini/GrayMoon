@@ -32,7 +32,7 @@ public sealed class LevelActionHighlightTests
     }
 
     [Theory]
-    [InlineData(0, 0, true, "#6c757d", "#fff")]  // no upstream, no commits: gray, a push skips it
+    [InlineData(0, 0, true, "var(--badge-neutral-bg)", "#fff")]  // no upstream, no commits: the neutral gray of PR "none"
     [InlineData(2, 0, true, "#ffc107", "#000")]  // no upstream with commits: yellow, a push sends it
     [InlineData(2, 0, false, "#ffc107", "#000")] // outgoing: yellow
     [InlineData(0, 1, false, "#dc3545", "#fff")] // incoming: red

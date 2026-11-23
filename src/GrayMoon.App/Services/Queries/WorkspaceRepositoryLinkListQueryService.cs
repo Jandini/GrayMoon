@@ -83,7 +83,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                         OutOfDateFiles = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateVersionFiles, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                             && (wr.OutOfDateFileRepos ?? 0) > 0),
                         Push = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
-                            && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)),
+                            && RepositoryOperationPolicyExpressions.HasCommitsToPush(wr.OutgoingCommits)),
                         Incoming = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                             && (wr.IncomingCommits ?? 0) > 0),
                         Tagged = g.Count(wr => RepositoryOperationPolicyExpressions.IsOnTag(wr.CheckedOutTag)),
@@ -123,7 +123,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     Unmatched = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.UpdateDependencies, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && ((wr.UnmatchedDeps ?? 0) > 0 || (wr.OutOfDateFileRepos ?? 0) > 0)),
                     Push = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
-                        && ((wr.OutgoingCommits ?? 0) > 0 || wr.BranchHasUpstream == false)),
+                        && RepositoryOperationPolicyExpressions.HasCommitsToPush(wr.OutgoingCommits)),
                     Incoming = g.Count(wr => RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, wr.CheckedOutTag, wr.Role, wr.IsReference, false, wr.Repository!.Archived)
                         && (wr.IncomingCommits ?? 0) > 0),
                     Tagged = g.Count(wr => RepositoryOperationPolicyExpressions.IsOnTag(wr.CheckedOutTag)),
@@ -184,7 +184,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                         && (x.state.OutOfDateFileRepos ?? 0) > 0),
                     Push = g.Count(x => x.state != null
                         && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
-                        && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false)),
+                        && RepositoryOperationPolicyExpressions.HasCommitsToPush(x.state.OutgoingCommits)),
                     Incoming = g.Count(x => x.state != null
                         && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                         && (x.state.IncomingCommits ?? 0) > 0),
@@ -234,7 +234,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     && ((x.state.UnmatchedDeps ?? 0) > 0 || (x.state.OutOfDateFileRepos ?? 0) > 0)),
                 Push = g.Count(x => x.state != null
                     && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Push, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
-                    && ((x.state.OutgoingCommits ?? 0) > 0 || x.state.BranchHasUpstream == false)),
+                    && RepositoryOperationPolicyExpressions.HasCommitsToPush(x.state.OutgoingCommits)),
                 Incoming = g.Count(x => x.state != null
                     && RepositoryOperationPolicyExpressions.Allows(RepositoryOperation.Pull, x.state.CheckedOutTag, x.wr.Role, x.wr.IsReference, x.isReferenceSnapshot, x.archived)
                     && (x.state.IncomingCommits ?? 0) > 0),

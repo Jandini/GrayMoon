@@ -135,7 +135,7 @@ public sealed class WorkspacePendingActionsService(
         link.Allows(RepositoryOperation.UpdateDependencies) && ((link.UnmatchedDeps ?? 0) > 0 || (link.OutOfDateFileRepos ?? 0) > 0);
 
     private static bool NeedsPush(WorkspaceRepositoryLinkListItemDto link) =>
-        link.Allows(RepositoryOperation.Push) && (link.OutgoingCommits ?? 0) > 0;
+        link.Allows(RepositoryOperation.Push) && GrayMoon.App.Services.Policy.RepositoryOperationPolicyExpressions.HasCommitsToPush(link.OutgoingCommits);
 
     private static bool NeedsPull(WorkspaceRepositoryLinkListItemDto link) =>
         link.Allows(RepositoryOperation.Pull) && (link.IncomingCommits ?? 0) > 0;

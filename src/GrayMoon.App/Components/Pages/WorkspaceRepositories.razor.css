@@ -111,8 +111,8 @@
 }
 
 ::deep .repositories-table .build-dep-badge-none {
-    background-color: var(--bs-secondary);
-    color: var(--bs-light);
+    background-color: var(--badge-neutral-bg);
+    color: #fff;
 }
 
 ::deep .repositories-table .build-dep-badge-ok {
@@ -376,7 +376,7 @@
 
 /* Commits badge: gray when the branch has no upstream and no commits (a push skips it; see CommitsBadge) */
 ::deep .repositories-table .commits-badge.commits-badge-not-upstreamed {
-    background-color: #6c757d !important;
+    background-color: var(--badge-neutral-bg) !important;
     color: #fff !important;
 }
 
