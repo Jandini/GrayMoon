@@ -139,7 +139,9 @@ public sealed class FeatureCodeGraphService(
             new { root },
             cancellationToken);
         var outcome = ReadOutcome(response, out var message);
-        if (outcome is "Removed" or "NotInitialized")
+        if (outcome is "Removed" && !string.IsNullOrWhiteSpace(message))
+            logger.LogWarning("CodeGraph uninit for Feature root {Root}: {Outcome}. {Message}", root, outcome, message);
+        else if (outcome is "Removed" or "NotInitialized")
             logger.LogInformation("CodeGraph uninit for Feature root {Root}: {Outcome}", root, outcome);
         else
             logger.LogWarning("CodeGraph uninit for Feature root {Root}: {Outcome}. {Message}", root, outcome, message);

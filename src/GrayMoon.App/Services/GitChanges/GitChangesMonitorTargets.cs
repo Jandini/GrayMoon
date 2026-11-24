@@ -48,10 +48,21 @@ public static class GitChangesMonitorTargets
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
 
+        // A Feature repository whose worktree a removal already unregistered and deleted has no folder to scan or
+        // watch. A removal that failed part-way leaves such rows behind until Remove is run again: scanning them
+        // only produced one "Repository not found" warning per repository in every audit.
+        var removedLinkIds = (await dbContext.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == contextId.Value
+                && r.State == WorkspaceFeatureRepositoryState.Removed)
+            .Select(r => r.WorkspaceRepositoryId)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
         var targets = new List<MonitorTarget>();
         var scannable = string.IsNullOrWhiteSpace(root)
             ? new List<WorkspaceRepositoryLink>()
-            : links.Where(l => l.Workspace != null && l.Repository != null).ToList();
+            : links.Where(l => l.Workspace != null && l.Repository != null
+                && !removedLinkIds.Contains(l.WorkspaceRepositoryId)).ToList();
         var repositoryPaths = await pathResolver.GetRepositoryPathsAsync(
             contextId, scannable.Select(l => l.WorkspaceRepositoryId).ToList(), cancellationToken);
         foreach (var link in scannable)

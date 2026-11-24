@@ -197,6 +197,25 @@ li:has(> .workspace-feature-selector__repo-item:disabled) {
     text-overflow: ellipsis;
 }
 
+/* A Feature item is its name and, while it is not Ready, a state label ("Removing...", "Removal incomplete").
+   As plain inline text the label sat behind the name and was the first thing the ellipsis cut off, so a long
+   name hid it. The name is the part that gives way; the label keeps its width. */
+.workspace-feature-selector__feature-item {
+    display: flex;
+    align-items: baseline;
+}
+
+.workspace-feature-selector__feature-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workspace-feature-selector__feature-state {
+    flex: 0 0 auto;
+}
+
 .workspace-feature-selector__feature-row {
     position: relative;
 }

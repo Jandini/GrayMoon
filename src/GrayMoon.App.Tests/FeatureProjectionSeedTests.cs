@@ -291,6 +291,53 @@ public sealed class FeatureProjectionSeedTests
     }
 
     [Fact]
+    public async Task A_sync_held_for_a_feature_in_create_does_not_hold_up_the_workspace_in_the_sync_queue()
+    {
+        await using var f = new FixtureHolder(await CreateAsync());
+        var coordinator = f.Value.Ctx.Resolve<FeatureFinalizationCoordinator>();
+        var barrier = coordinator.Arm(f.Value.Feature.Value);
+        var queue = new GrayMoon.App.Services.Worker.WorkerSyncNotificationQueue(
+            f.Value.Ctx.Resolve<IServiceScopeFactory>(),
+            new GrayMoon.App.Services.Worker.AppBackgroundWorkStateService(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GrayMoon.App.Services.Worker.WorkerSyncNotificationQueue>.Instance);
+
+        // The Feature's checkout sync arrives first, then a hook sync of the Workspace checkout. In the logs of
+        // 2026-11-24 the second kind waited up to 131 s behind the first.
+        queue.Enqueue(FreshSync(f.Value, f.Value.RepoB, f.Value.PathB, "3.0.0"));
+        queue.Enqueue(new RepositorySyncNotification
+        {
+            WorkspaceId = f.Value.Ctx.WorkspaceId,
+            RepositoryId = f.Value.RepoB,
+            WorkspaceFeatureContextId = f.Value.Special.Value,
+            Version = "1.5.0",
+            Branch = "main",
+            State = WorkerStateTestExtensions.HookState("main", "1.5.0"),
+        });
+        await queue.StartAsync(CancellationToken.None);
+
+        // The Workspace sync is stored while the Feature is still being created; the Feature's is not.
+        await Wait.UntilAsync(() =>
+        {
+            using var db = OpenAsync(f.Value).GetAwaiter().GetResult();
+            return db.WorkspaceRepositoryContextStates.Any(s =>
+                s.WorkspaceFeatureContextId == f.Value.Special.Value && s.GitVersion == "1.5.0");
+        });
+        await using (var db = await OpenAsync(f.Value))
+            Assert.False(await db.WorkspaceRepositoryContextStates.AnyAsync(s =>
+                s.WorkspaceFeatureContextId == f.Value.Feature.Value && s.GitVersion == "3.0.0"));
+
+        await SeedAsync(f.Value);
+        barrier.Dispose();
+        await queue.WaitForPendingAsync(f.Value.Ctx.WorkspaceId, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+        await queue.StopAsync(CancellationToken.None);
+
+        await using var verify = await OpenAsync(f.Value);
+        var libState = await verify.WorkspaceRepositoryContextStates.AsNoTracking()
+            .SingleAsync(s => s.WorkspaceFeatureContextId == f.Value.Feature.Value && s.WorkspaceRepositoryId == f.Value.LinkB);
+        Assert.Equal("3.0.0", libState.GitVersion);
+    }
+
+    [Fact]
     public async Task Sync_arriving_during_finalization_waits_for_the_barrier_and_then_applies()
     {
         await using var f = new FixtureHolder(await CreateAsync());

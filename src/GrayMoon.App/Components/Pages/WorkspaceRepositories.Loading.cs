@@ -556,6 +556,7 @@ public sealed partial class WorkspaceRepositories
             if (_disposed) return;
             try
             {
+                LogGridLoad("refresh");
                 var snapshot = await LoadWorkspaceReloadSnapshotAsync();
                 if (_disposed) return;
                 await InvokeAsync(() => ApplyWorkspaceReloadSnapshotAsync(snapshot));

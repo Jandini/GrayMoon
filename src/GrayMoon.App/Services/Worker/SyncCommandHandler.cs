@@ -49,7 +49,13 @@ public sealed class SyncCommandHandler(
     {
         public AppliedSync? Applied { get; private set; }
 
-        public Task ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId) => Task.CompletedTask;
+        /// <summary>One notification applied on its own waits for its Feature here; nothing else is behind it.</summary>
+        public async Task<bool> ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId, Task<bool>? finalization)
+        {
+            if (finalization is not null)
+                await finalization;
+            return true;
+        }
 
         public void StateWritten(AppliedSync applied) => Applied = applied;
     }
@@ -83,10 +89,6 @@ public sealed class SyncCommandHandler(
             return;
         }
 
-        // Before anything that can wait: the queue completes the batch of another context here, so one Workspace
-        // never waits behind another's Create Feature.
-        await observer.ContextResolvedAsync(n.WorkspaceId, contextId.Value);
-
         var contextInfo = await scope.ServiceProvider
             .GetRequiredService<IWorkspaceFeatureContextResolver>()
             .GetRequiredAsync(contextId.Value, n.WorkspaceId);
@@ -94,24 +96,22 @@ public sealed class SyncCommandHandler(
         // A Feature that is still being created or repaired owns its projections until the seed has finished: the
         // Worker releases its deferred checkout syncs as soon as the worktrees exist, which is before the seed. Applying
         // such a sync afterwards keeps the Feature's own GitVersion (the seed never writes it) and runs the recompute on
-        // the finished graph. This runs on the sync queue, never on a hub invocation, so it cannot stall worker responses.
+        // the finished graph. Who waits is the observer's decision: the sync queue sets the notification aside, so the
+        // notifications of every other context are applied meanwhile.
+        Task<bool>? finalization = null;
         var coordinator = scope.ServiceProvider.GetService<FeatureFinalizationCoordinator>();
         if (coordinator is not null && !contextInfo.IsSpecialWorkspace && coordinator.IsFinalizing(contextId.Value.Value))
         {
             logger.LogInformation(
                 "SyncCommand: holding sync for workspace {WorkspaceId} context {ContextId} repo {RepositoryId} until Feature finalization completes",
                 n.WorkspaceId, contextId.Value.Value, n.RepositoryId);
-            try
-            {
-                await coordinator.WaitForFinalizationAsync(contextId.Value.Value);
-            }
-            catch (TimeoutException)
-            {
-                logger.LogWarning(
-                    "SyncCommand: Feature finalization of context {ContextId} did not finish in time; applying the sync anyway",
-                    contextId.Value.Value);
-            }
+            finalization = WaitForFinalizationAsync(coordinator, contextId.Value.Value);
         }
+
+        // Before the state write: the queue completes the batch of another context here, or takes this notification
+        // back when its Feature is not ready for it.
+        if (!await observer.ContextResolvedAsync(n.WorkspaceId, contextId.Value, finalization))
+            return;
 
         var stateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
         // App and Worker are version-locked, and every Worker notification carries the snapshot with its probe
@@ -205,6 +205,23 @@ public sealed class SyncCommandHandler(
             totalSw.ElapsedMilliseconds, n.WorkspaceId, contextId.Value.Value, n.RepositoryId, n.Version, n.Branch);
     }
 
+    /// <summary>True when the Feature finalization ended; false when the wait ran out and the sync is applied anyway.</summary>
+    private async Task<bool> WaitForFinalizationAsync(FeatureFinalizationCoordinator coordinator, int contextId)
+    {
+        try
+        {
+            await coordinator.WaitForFinalizationAsync(contextId);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            logger.LogWarning(
+                "SyncCommand: Feature finalization of context {ContextId} did not finish in time; applying the sync anyway",
+                contextId);
+            return false;
+        }
+    }
+
     /// <inheritdoc />
     public async Task CompleteAsync(IReadOnlyList<AppliedSync> items)
     {
@@ -248,6 +265,10 @@ public sealed class SyncCommandHandler(
     private async Task BroadcastAsync(IReadOnlyList<AppliedSync> items, int workspaceId, WorkspaceFeatureContextId contextId)
     {
         var isSpecialWorkspace = items[0].IsSpecialWorkspace;
+        // The only trace of a batch that needed no recompute (branch lists only), and of how often a page is told to reload.
+        logger.LogDebug(
+            "SyncCommand broadcast for {Count} notification(s): workspace={WorkspaceId}, context={ContextId}",
+            items.Count, workspaceId, contextId.Value);
         foreach (var repositoryId in items.Select(i => i.RepositoryId).Distinct())
         {
             await hubContext.Clients.All.SendAsync("ContextRepositorySynced", workspaceId, contextId.Value, repositoryId);

@@ -8,7 +8,7 @@ public sealed class UninitCodeGraphResponse
     [JsonPropertyName("outcome")]
     public string? Outcome { get; set; }
 
-    /// <summary>Why the index was not removed; null otherwise.</summary>
+    /// <summary>Why the index was not removed, or what a removal left changed; null otherwise.</summary>
     [JsonPropertyName("message")]
     public string? Message { get; set; }
 }
