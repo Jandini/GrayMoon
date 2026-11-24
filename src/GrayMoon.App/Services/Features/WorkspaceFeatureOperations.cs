@@ -81,6 +81,15 @@ public sealed class WorkspaceFeatureOperations(
                         await WatchCodeGraphAsync(
                             op, workspaceId, createdContextId, overlayProgress, linked.Token, honorDefinitionSwitch: false);
                 }
+                catch (OperationCanceledException)
+                {
+                    // Abort before the intent transaction committed: nothing was created, so this is not a failure.
+                    // An Abort after the commit never gets here; CreateFeatureCoreAsync returns NeedsRepair for it.
+                    logger.LogInformation("Feature Create was cancelled. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", workspaceId, name);
+                    logger.FeatureOperationFinished("Create", workspaceId, null, null, name, startedAt, CreateFeatureResult.CancelledCondition, null);
+                    tcs.TrySetResult(FailCreate(CreateFeatureResult.CancelledCondition, "New feature was cancelled."));
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "Feature Create threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", workspaceId, name);

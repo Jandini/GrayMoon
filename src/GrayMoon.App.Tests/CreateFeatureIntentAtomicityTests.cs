@@ -50,6 +50,38 @@ public sealed class CreateFeatureIntentAtomicityTests
     }
 
     [Fact]
+    public async Task Abort_before_the_Feature_is_saved_returns_Cancelled_not_an_exception_message()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+
+        // The overlay's Abort cancels the operation token while Create waits for the Worker's head commits,
+        // before the intent transaction. Previously this came back as Condition "Exception" with the raw
+        // "The operation was canceled." text, which the dialog showed as an error callout.
+        ctx.WorkerBridge.RespondAsync(
+            WorkerHubMethods.GetHeadCommits,
+            (_, _) => Task.FromException<WorkerCommandResponse>(new OperationCanceledException()));
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var result = await ops.CreateFeatureAsync(
+            ctx.WorkspaceId,
+            "feature/aborted-early",
+            WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+
+        Assert.False(result.Success);
+        Assert.Equal(CreateFeatureResult.CancelledCondition, result.Condition);
+        Assert.Equal("New feature was cancelled.", result.Error);
+        Assert.Null(result.ContextId);
+
+        await using var read = ctx.CreateScope();
+        var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.WorkspaceFeatures.AnyAsync(f =>
+            f.WorkspaceId == ctx.WorkspaceId && f.Name == "feature/aborted-early"));
+        Assert.False(await db.WorkspaceFeatureContexts.AnyAsync(c =>
+            c.WorkspaceId == ctx.WorkspaceId && c.Kind == WorkspaceFeatureContextKind.Feature));
+    }
+
+    [Fact]
     public async Task Exception_while_saving_repo_rows_writes_no_Feature_or_context_row()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: o =>

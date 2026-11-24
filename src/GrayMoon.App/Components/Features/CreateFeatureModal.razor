@@ -8,6 +8,7 @@
 @inject HostInfoCache HostInfo
 @inject IWorkerBridge WorkerBridge
 @inject ILogger<CreateFeatureModal> Logger
+@inject IToastService ToastService
 
 @if (IsVisible)
 {
@@ -231,7 +232,14 @@
                     return;
                 }
 
-                _error = result.Error ?? result.Condition ?? "Feature creation failed.";
+                // Abort before anything was saved: not an error, so no callout; the dialog stays open to try again.
+                if (string.Equals(result.Condition, CreateFeatureResult.CancelledCondition, StringComparison.Ordinal))
+                {
+                    ToastService.Show(result.Error ?? "New feature was cancelled.");
+                    return;
+                }
+
+                _error =result.Error ?? result.Condition ?? "Feature creation failed.";
                 return;
             }
 

@@ -1539,7 +1539,7 @@ optional: start the CodeGraph index build when New Feature's "Create CodeGraph i
   overlay offers Background instead of Abort)
 ```
 
-Uncommitted Workspace changes are not copied. If any repository fails, or the create is aborted after the intent is committed, the Feature is kept in **NeedsRepair** with the error.
+Uncommitted Workspace changes are not copied. If any repository fails, or the create is aborted after the intent is committed, the Feature is kept in **NeedsRepair** with the error. An Abort before that creates nothing: the New feature dialog stays open and a "New feature was cancelled." toast is shown, not an error.
 
 ### Feature Status (repair)
 
