@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using GrayMoon.Common;
 using GrayMoon.Common.Git;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
@@ -789,7 +790,9 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
                 var leaseSpec = $"refs/heads/{name}:{expectedSha.Trim()}";
                 var leaseArgs = $"{hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}";
-                var (leaseExit, leaseStdout, leaseStderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, leaseArgs, repoPath, bearerToken, ct);
+                // The failure output is not mirrored as red stderr up front: a branch the host already deleted
+                // (delete-on-merge) is a success, so only a real failure is shown red, below.
+                var (leaseExit, leaseStdout, leaseStderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, leaseArgs, repoPath, bearerToken, ct, mirrorFailureOutputAsStderr: false);
                 if (leaseExit != 0)
                 {
                     var combined = GitRemoteAuth.WithAuthHint(CombineOutput(leaseStdout, leaseStderr)) ?? "";
@@ -798,6 +801,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                         logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
                         return (true, null);
                     }
+
+                    CommandLineService.MirrorCombinedOutputAsStderr(leaseStdout, leaseStderr);
 
                     if (IsForceWithLeaseRejected(combined))
                     {
@@ -818,7 +823,9 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             }
 
             var args = $"{hooksPrefix}push origin --delete {name}";
-            var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, args, repoPath, bearerToken, ct);
+            // Not mirrored as red stderr up front: a branch the host already deleted (e.g. the PR merge deleted it)
+            // is a success here, so only a real failure is shown red, below.
+            var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, args, repoPath, bearerToken, ct, mirrorFailureOutputAsStderr: false);
             if (exitCode != 0)
             {
                 var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
@@ -827,6 +834,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                     logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
                     return (true, null);
                 }
+                CommandLineService.MirrorCombinedOutputAsStderr(stdout, stderr);
                 logger.LogWarning("Git push --delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, name, exitCode);
                 return (false, combined);
             }

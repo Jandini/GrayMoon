@@ -128,7 +128,8 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         string workingDirectory,
         string? bearerToken,
         CancellationToken ct,
-        Action? beforeAttempt = null)
+        Action? beforeAttempt = null,
+        bool? mirrorFailureOutputAsStderr = null)
     {
         var pipeline = operation switch
         {
@@ -148,16 +149,16 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
         (int ExitCode, string? Stdout, string? Stderr) raw;
         if (string.IsNullOrWhiteSpace(bearerToken))
-            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, intent: intent); }, ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, mirrorFailureOutputAsStderr: mirrorFailureOutputAsStderr, intent: intent); }, ct);
         else if (await SupportsEnvConfigAsync())
         {
             using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment(bearerToken, GitRemoteAuth.ReadExistingConfigCount()));
-            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, intent: intent); }, ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, mirrorFailureOutputAsStderr: mirrorFailureOutputAsStderr, intent: intent); }, ct);
         }
         else
         {
             var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
-            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", authedArguments, workingDirectory, c, intent: intent); }, ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", authedArguments, workingDirectory, c, mirrorFailureOutputAsStderr: mirrorFailureOutputAsStderr, intent: intent); }, ct);
         }
 
         // Stdout and stderr are redacted before any caller can log them. The authorization URL, when valid, is
