@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using GrayMoon.Abstractions.Notifications;
 
@@ -10,8 +11,12 @@ namespace GrayMoon.App.Services.Worker;
 /// </summary>
 public sealed class WorkerSyncNotificationQueue(
     IServiceScopeFactory scopeFactory,
+    AppBackgroundWorkStateService appBackgroundWork,
     ILogger<WorkerSyncNotificationQueue> logger) : BackgroundService, IWorkerSyncNotificationBarrier
 {
+    /// <summary>An item whose queue wait plus apply time is above this is logged as a warning.</summary>
+    internal static readonly TimeSpan SlowItemThreshold = TimeSpan.FromSeconds(2);
+
     private readonly object _pendingLock = new();
     private readonly Dictionary<int, int> _pendingByWorkspace = new();
     private readonly Dictionary<int, List<TaskCompletionSource>> _waitersByWorkspace = new();
@@ -57,10 +62,14 @@ public sealed class WorkerSyncNotificationQueue(
     {
         lock (_pendingLock)
             _pendingByWorkspace[workspaceId] = _pendingByWorkspace.GetValueOrDefault(workspaceId) + 1;
+        appBackgroundWork.Increment(workspaceId);
     }
 
     private void MarkApplied(int workspaceId)
     {
+        // Visibility only: the UI count. The barrier below keeps its own count.
+        appBackgroundWork.Decrement(workspaceId);
+
         List<TaskCompletionSource>? release = null;
         lock (_pendingLock)
         {
@@ -105,6 +114,7 @@ public sealed class WorkerSyncNotificationQueue(
         // concurrent callers per workspace, so burst hooks still result in only one worker round-trip.
         await foreach (var (notification, receivedAt) in _channel.Reader.ReadAllAsync(stoppingToken))
         {
+            var startedAt = Stopwatch.GetTimestamp();
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
@@ -123,6 +133,16 @@ public sealed class WorkerSyncNotificationQueue(
             finally
             {
                 MarkApplied(notification.WorkspaceId);
+
+                // receivedAt is a Stopwatch timestamp (RepositoryStateFreshness.Now).
+                var waited = Stopwatch.GetElapsedTime(receivedAt, startedAt);
+                var applied = Stopwatch.GetElapsedTime(startedAt);
+                if (waited + applied > SlowItemThreshold)
+                {
+                    logger.LogWarning(
+                        "Slow sync notification: workspace {WorkspaceId} repo {RepositoryId} waited {WaitMs} ms in the queue and took {ApplyMs} ms to apply",
+                        notification.WorkspaceId, notification.RepositoryId, (long)waited.TotalMilliseconds, (long)applied.TotalMilliseconds);
+                }
             }
         }
 

@@ -335,6 +335,7 @@ WorkspaceFeatureReconciler apply phase
 Git Changes audits and line-stats passes (each scan is already bounded)
 single-reader queues                         WorkspaceGitChangesWriteQueue, WorkerSyncNotificationQueue
 sync barrier                                 IWorkerSyncNotificationBarrier (implemented by WorkerSyncNotificationQueue): DependencyUpdateOrchestrator.RunAsync awaits it before reading stored state, so hook syncs already received are applied before a run plans or selects push levels
+pending hook syncs shown in the UI           AppBackgroundWorkStateService (singleton, in memory): WorkerSyncNotificationQueue counts an item from Enqueue until its handler returned (also on failure), per Workspace and in total. Display only: WorkerStatusBadge (activity frame, tooltip), the Repositories header line "Applying N repository updates" (the Worker's line wins; no button is disabled by it), and the remaining count in the barrier wait message (PendingSyncNotificationWait). An item that waited plus applied for more than 2 s is logged as a warning
 stale hook snapshot guard                    RepositoryStateFreshness (singleton, in memory): see "Stale hook snapshots" under the hook flow
 FeatureRemovalQueue                          fixed at MaxConcurrentRemovals = 4 workers, FIFO
 Worker DotnetRestoreCommand                  shared obj/ and NuGet cache

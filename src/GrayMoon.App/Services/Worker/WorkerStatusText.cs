@@ -28,7 +28,8 @@ internal static class WorkerStatusText
         string? workerSemVer,
         int pendingCount,
         bool unsecuredWorker,
-        bool installFailed = false)
+        bool installFailed = false,
+        int appPendingCount = 0)
     {
         if (logonPasswordRequired)
             return "The Windows password for the Worker service is no longer valid. Click to install the Worker again.";
@@ -41,6 +42,7 @@ internal static class WorkerStatusText
         {
             WorkerConnectionState.VersionMismatch => $"Worker version mismatch. Worker version: {workerSemVer ?? "unknown"}. Click to update.",
             WorkerConnectionState.Online => (pendingCount > 0 ? "Worker is running tasks" : "Worker connection status:  online")
+                + (appPendingCount > 0 ? $". GrayMoon is applying {appPendingCount} repository update{(appPendingCount == 1 ? "" : "s")}" : string.Empty)
                 + (unsecuredWorker ? ". Reinstall the Worker to finish securing GrayMoon." : string.Empty),
             WorkerConnectionState.Offline => "Worker connection status:  offline",
             WorkerConnectionState.Connecting => "Worker connection status:  connecting",

@@ -23,6 +23,7 @@ public sealed class DependencyUpdateOrchestrator(
     IServiceScopeFactory scopeFactory,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IWorkerSyncNotificationBarrier syncNotificationBarrier,
+    AppBackgroundWorkStateService appBackgroundWork,
     ILogger<DependencyUpdateOrchestrator> logger) : IDependencyUpdateLane
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
@@ -80,8 +81,7 @@ public sealed class DependencyUpdateOrchestrator(
         // Everything below decides from stored repository state (versions, unpushed commits, upstream). Hook syncs the
         // App has already received but not yet applied would otherwise land mid-run: late enough to hide a repository's
         // unpushed commit from the push plan, or to overwrite the state this run has just refreshed.
-        setProgress("Applying pending repository changes...");
-        await syncNotificationBarrier.WaitForPendingAsync(workspaceId, cancellationToken);
+        await PendingSyncNotificationWait.WaitAsync(syncNotificationBarrier, appBackgroundWork, workspaceId, setProgress, cancellationToken);
 
         var hadError = false;
         var allSyncedRepoIds = new HashSet<int>();

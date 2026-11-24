@@ -86,6 +86,7 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<WorkerRestartService>();
         services.AddHostedService<WorkerUpdateDesktopNotifier>();
         services.AddSingleton<WorkerQueueStateService>();
+        services.AddSingleton<AppBackgroundWorkStateService>();
         services.AddSingleton<WorkerCommandCancelSender>();
         services.AddSingleton<OverlayCommandTerminalService>();
         services.AddScoped<IToastService, ToastService>();

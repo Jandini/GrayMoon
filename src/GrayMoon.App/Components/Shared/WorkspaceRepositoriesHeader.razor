@@ -32,7 +32,18 @@
                 {
                     <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
                 }
-                Worker is completing @WorkerTasksPendingCount task@(WorkerTasksPendingCount == 1 ? "" : "s")
+                @BackgroundWorkLine(WorkerTasksPendingCount, AppTasksPendingCount)
+            </span>
+        }
+        else if (AppTasksPendingCount > 0)
+        {
+            @* The App is still applying hook syncs: badges, branches and versions in the grid may still change. *@
+            <span class="workspace-repos-worker-tasks text-muted d-inline-flex align-items-center gap-1">
+                @if (!IsOverlayVisible)
+                {
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                }
+                @BackgroundWorkLine(WorkerTasksPendingCount, AppTasksPendingCount)
             </span>
         }
     </div>
@@ -453,6 +464,8 @@
     [Parameter] public bool IsCommitSyncing { get; set; }
     [Parameter] public bool IsRestoringPackages { get; set; }
     [Parameter] public int WorkerTasksPendingCount { get; set; }
+    /// <summary>Repository updates the App has received for this Workspace and not yet applied. Shown only; never disables a button.</summary>
+    [Parameter] public int AppTasksPendingCount { get; set; }
     [Parameter] public bool IsOverlayVisible { get; set; }
 
     [Parameter] public EventCallback OnShowRepositories { get; set; }
@@ -500,6 +513,19 @@
     /// </summary>
     internal static bool DetermineUpdateDisabled(bool isReadOnlyContext, bool hasWorkspace, int repositoriesCount, bool isJobRunning, int workerTasksPendingCount) =>
         isReadOnlyContext || !hasWorkspace || repositoriesCount == 0 || isJobRunning || workerTasksPendingCount > 0;
+
+    /// <summary>
+    /// Pure rule for the one background-work line in the header: the Worker's tasks win, then the App's pending
+    /// repository updates, else no line (null).
+    /// </summary>
+    internal static string? BackgroundWorkLine(int workerTasksPendingCount, int appTasksPendingCount)
+    {
+        if (workerTasksPendingCount > 0)
+            return $"Worker is completing {workerTasksPendingCount} task{(workerTasksPendingCount == 1 ? "" : "s")}";
+        if (appTasksPendingCount > 0)
+            return $"Applying {appTasksPendingCount} repository update{(appTasksPendingCount == 1 ? "" : "s")}";
+        return null;
+    }
 
     private bool BranchActionsDisabled =>
         IsReadOnlyContext || IsSyncing || IsUpdating || IsPushing || RepositoriesCount == 0 || WorkerTasksPendingCount > 0;

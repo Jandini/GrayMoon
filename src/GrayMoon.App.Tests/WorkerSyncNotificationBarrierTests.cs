@@ -7,9 +7,37 @@ namespace GrayMoon.App.Tests;
 
 public sealed class WorkerSyncNotificationBarrierTests
 {
-    private static WorkerSyncNotificationQueue CreateQueue() =>
+    private static WorkerSyncNotificationQueue CreateQueue(AppBackgroundWorkStateService? state = null) =>
         new(new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            state ?? new AppBackgroundWorkStateService(),
             NullLogger<WorkerSyncNotificationQueue>.Instance);
+
+    [Fact]
+    public async Task A_queued_notification_is_counted_as_App_background_work_until_it_is_applied()
+    {
+        var state = new AppBackgroundWorkStateService();
+        var queue = CreateQueue(state);
+        queue.Enqueue(Notification(1));
+        queue.Enqueue(Notification(1));
+        queue.Enqueue(Notification(2));
+
+        Assert.Equal(2, state.GetPendingCountForWorkspace(1));
+        Assert.Equal(1, state.GetPendingCountForWorkspace(2));
+        Assert.Equal(3, state.GetTotalPendingCount());
+
+        // No SyncCommandHandler is registered, so every item fails in the handler: the failure path must still end at zero.
+        var wait = Task.WhenAll(
+            queue.WaitForPendingAsync(1, CancellationToken.None),
+            queue.WaitForPendingAsync(2, CancellationToken.None));
+        using var cts = new CancellationTokenSource();
+        await queue.StartAsync(cts.Token);
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, state.GetTotalPendingCount());
+        Assert.Equal(0, state.GetPendingCountForWorkspace(1));
+
+        await queue.StopAsync(CancellationToken.None);
+    }
 
     private static RepositorySyncNotification Notification(int workspaceId) =>
         new() { WorkspaceId = workspaceId, RepositoryId = 1 };
