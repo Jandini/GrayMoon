@@ -840,6 +840,43 @@ public sealed class WorkspaceRepositoryStateWriter(
     }
 
     /// <summary>
+    /// Stores the HEAD commit an operation has just read from the checkouts of <paramref name="contextId"/>, keyed by
+    /// RepositoryId. Only existing context state rows are written: a repository without one has no recorded state to
+    /// correct, and none is created from a commit alone. The link is never touched. Returns how many rows changed.
+    /// </summary>
+    public async Task<int> WriteHeadCommitsAsync(
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyDictionary<int, string> headCommitByRepositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        if (headCommitByRepositoryId.Count == 0)
+            return 0;
+
+        var repositoryIds = headCommitByRepositoryId.Keys.ToList();
+        var rows = await (
+            from state in dbContext.WorkspaceRepositoryContextStates
+            join link in dbContext.WorkspaceRepositories on state.WorkspaceRepositoryId equals link.WorkspaceRepositoryId
+            where state.WorkspaceFeatureContextId == contextId.Value && repositoryIds.Contains(link.RepositoryId)
+            select new { State = state, link.RepositoryId })
+            .ToListAsync(cancellationToken);
+
+        var changed = 0;
+        foreach (var row in rows)
+        {
+            var commit = headCommitByRepositoryId[row.RepositoryId].Trim();
+            if (commit.Length == 0 || string.Equals(row.State.HeadCommit, commit, StringComparison.Ordinal))
+                continue;
+
+            row.State.HeadCommit = commit;
+            changed++;
+        }
+
+        if (changed > 0)
+            await dbContext.SaveChangesAsync(cancellationToken);
+        return changed;
+    }
+
+    /// <summary>
     /// Records where a branch of <paramref name="contextId"/> started, after GrayMoon created it. Replaces an earlier row for
     /// the same (context, repository, branch): the branch was created again. Not used for Features, whose
     /// <see cref="WorkspaceFeatureRepository"/> row is the baseline.

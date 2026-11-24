@@ -430,9 +430,16 @@
                                                 {
                                                     <div class="dependency-badge-tooltip-line dependency-badge-tooltip-line--indented">
                                                         <code>@line.TokenName</code>
-                                                        <span class="dependency-badge-tooltip-versions">
-                                                            @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
-                                                        </span>
+                                                        @if (line.IsNotChecked)
+                                                        {
+                                                            <span class="dependency-badge-tooltip-versions">not checked: @line.NotCheckedReason</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="dependency-badge-tooltip-versions">
+                                                                @line.CurrentValue <span class="dependency-badge-tooltip-arrow">→</span> <span class="dependency-badge-tooltip-new-version">@line.ExpectedValue</span>
+                                                            </span>
+                                                        }
                                                     </div>
                                                 }
                                             }
@@ -782,7 +789,9 @@
                 if (!string.IsNullOrEmpty(fileGroup.Key))
                     sb.AppendLine(fileGroup.Key);
                 foreach (var line in fileGroup)
-                    sb.AppendLine($"  {line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
+                    sb.AppendLine(line.IsNotChecked
+                        ? $"  {line.TokenName}: not checked: {line.NotCheckedReason}"
+                        : $"  {line.TokenName}: {line.CurrentValue} -> {line.ExpectedValue}");
             }
         }
         if (CustomDependencyLines.Count > 0)

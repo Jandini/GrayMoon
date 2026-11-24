@@ -205,8 +205,10 @@ public sealed class WorkspaceFileVersionService(
         var workspaceFolderName = workerArgs.WorkspaceFolderName;
         var workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
         var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
-        var tokenValues = await ResolveTokenValuesAsync(
-            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patternsForResolve, cancellationToken);
+        // Live: the commit is written into a file that is then committed, so it is read from the checkout now.
+        var tokenValues = (await ResolveTokenValuesAsync(
+            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patternsForResolve,
+            CommitValueSource.Live, cancellationToken)).Values;
 
         // Collect the files to update. Configs that target the SAME file (same repository + path) form one group
         // and run in order: the Worker edits a file in place, so two concurrent edits of it would race. Distinct
@@ -379,13 +381,38 @@ public sealed class WorkspaceFileVersionService(
         return string.Join("\n", lines);
     }
 
+    /// <summary>Where the value of a <c>{@Repo:commit}</c> token comes from.</summary>
+    private enum CommitValueSource
+    {
+        /// <summary>
+        /// <see cref="WorkspaceRepositoryContextState.HeadCommit"/> of this context: what the last sync, hook or
+        /// operation recorded. No Worker call. For the check, which runs after every hook sync.
+        /// </summary>
+        Stored,
+
+        /// <summary>One Worker <c>GetHeadCommits</c> call. For the update, whose value is written into a file and committed.</summary>
+        Live,
+    }
+
     /// <summary>
-    /// Resolves all token values for the given patterns: GitVersion and branch from workspace links,
-    /// commit SHAs via one batched Worker <c>GetHeadCommits</c> call for repositories that need them.
+    /// The values of the tokens that have one, and for each token the check cannot compare, why not
+    /// (<see cref="WorkspaceFileLineStatus.NotCheckedReason"/>).
+    /// </summary>
+    private sealed record TokenResolution(Dictionary<string, string> Values, Dictionary<string, string> NotChecked);
+
+    /// <summary>The reason shown for a <c>{@Repo:commit}</c> token of a repository whose commit this context has not recorded.</summary>
+    internal static string CommitNotRecordedReason(string repositoryName) =>
+        $"No commit is recorded for {repositoryName}. Sync the repository.";
+
+    /// <summary>
+    /// Resolves all token values for the given patterns: GitVersion and branch from this context's stored state, and
+    /// commit SHAs from <paramref name="commitSource"/>.
     /// GitVersion tokens get no value when <paramref name="usesRepositoryVersioning"/> is false, so they are
     /// neither substituted nor checked - not applicable, rather than a missing version.
+    /// A stored commit that is missing is reported in <see cref="TokenResolution.NotChecked"/>; it is never read from
+    /// another context, the link or the Worker.
     /// </summary>
-    private async Task<Dictionary<string, string>> ResolveTokenValuesAsync(
+    private async Task<TokenResolution> ResolveTokenValuesAsync(
         Workspace workspace,
         WorkspaceFeatureContextId contextId,
         bool usesRepositoryVersioning,
@@ -393,6 +420,7 @@ public sealed class WorkspaceFileVersionService(
         string workspaceFolderName,
         string? workspaceRepositoryName,
         IEnumerable<string?> patterns,
+        CommitValueSource commitSource,
         CancellationToken cancellationToken)
     {
         var tokensByKey = new Dictionary<string, FileVersionToken>(StringComparer.OrdinalIgnoreCase);
@@ -420,7 +448,8 @@ public sealed class WorkspaceFileVersionService(
             workspace.WorkspaceId, contextId.Value, cancellationToken);
 
         var tokenValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var commitRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var notChecked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var liveCommitRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var token in tokensByKey.Values)
         {
@@ -435,11 +464,10 @@ public sealed class WorkspaceFileVersionService(
             // Values come from this context only. A Feature without its own state row has no value: it never borrows the
             // Workspace's version or branch (I6). The special Workspace reads its link when it has no state row yet.
             var gitVersion = expectedVersionByRepoId.GetValueOrDefault(link.RepositoryId);
-            string? branchName;
-            if (contextStates.TryGetValue(link.WorkspaceRepositoryId, out var state))
-                branchName = state.BranchName;
-            else
-                branchName = contextInfo.IsSpecialWorkspace ? link.BranchName : null;
+            contextStates.TryGetValue(link.WorkspaceRepositoryId, out var state);
+            var branchName = state is not null
+                ? state.BranchName
+                : contextInfo.IsSpecialWorkspace ? link.BranchName : null;
 
             switch (token.Kind)
             {
@@ -465,19 +493,72 @@ public sealed class WorkspaceFileVersionService(
                             token.RepositoryName, token.TokenKey);
                     break;
 
+                case FileVersionTokenKind.Commit when commitSource == CommitValueSource.Live:
+                    liveCommitRepos.Add(token.RepositoryName);
+                    break;
+
                 case FileVersionTokenKind.Commit:
-                    commitRepos.Add(token.RepositoryName);
+                    var storedCommit = state?.HeadCommit?.Trim();
+                    if (!string.IsNullOrEmpty(storedCommit))
+                    {
+                        tokenValues[token.TokenKey] = storedCommit;
+                    }
+                    else
+                    {
+                        notChecked[token.TokenKey] = CommitNotRecordedReason(token.RepositoryName);
+                        logger.LogWarning(
+                            "No HEAD commit is recorded for repository {RepoName} in context {ContextId} of workspace {WorkspaceId}; token {TokenKey} is not checked.",
+                            token.RepositoryName, contextId.Value, workspace.WorkspaceId, token.TokenKey);
+                    }
                     break;
             }
         }
 
-        if (commitRepos.Count > 0 && string.IsNullOrWhiteSpace(workspaceRoot))
+        if (liveCommitRepos.Count > 0)
         {
-            logger.LogWarning(
-                "Workspace root is not configured; skipping {Count} :commit token(s).",
-                commitRepos.Count);
+            var live = await ReadLiveHeadCommitsAsync(
+                workspace, workspaceRoot, workspaceFolderName, workspaceRepositoryName, liveCommitRepos, cancellationToken);
+            foreach (var repoName in liveCommitRepos)
+            {
+                var tokenKey = new FileVersionToken(repoName, FileVersionTokenKind.Commit).TokenKey;
+                if (live.Commits.TryGetValue(repoName, out var sha))
+                    tokenValues[tokenKey] = sha;
+                else if (live.Error is null)
+                    logger.LogWarning(
+                        "Could not resolve HEAD commit for repo {RepoName}; token {TokenKey} will be skipped and the existing file value left unchanged.",
+                        repoName, tokenKey);
+            }
         }
-        else if (commitRepos.Count > 0 && workerBridge.IsWorkerConnected)
+
+        return new TokenResolution(tokenValues, notChecked);
+    }
+
+    /// <summary>The HEAD commits the Worker read for <see cref="ReadLiveHeadCommitsAsync"/>; <see cref="Error"/> is set when the read as a whole failed.</summary>
+    private sealed record LiveHeadCommits(Dictionary<string, string> Commits, string? Error);
+
+    /// <summary>
+    /// One Worker <c>GetHeadCommits</c> call for <paramref name="repositoryNames"/>. A repository the Worker could not
+    /// read (missing, unborn) is left out of the result. A failed call is logged and returned as an error.
+    /// </summary>
+    private async Task<LiveHeadCommits> ReadLiveHeadCommitsAsync(
+        Workspace workspace,
+        string? workspaceRoot,
+        string workspaceFolderName,
+        string? workspaceRepositoryName,
+        IReadOnlyCollection<string> repositoryNames,
+        CancellationToken cancellationToken)
+    {
+        var commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? error;
+        if (string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            error = "The Workspace root is not configured.";
+        }
+        else if (!workerBridge.IsWorkerConnected)
+        {
+            error = "The Worker is not connected.";
+        }
+        else
         {
             try
             {
@@ -486,45 +567,90 @@ public sealed class WorkspaceFileVersionService(
                     workspaceName = workspaceFolderName,
                     workspaceRoot,
                     workspaceRepositoryName,
-                    repositoryNames = commitRepos.ToList()
+                    repositoryNames = repositoryNames.ToList()
                 }, cancellationToken);
 
                 if (resp.Success && resp.Data != null)
                 {
                     var result = WorkerResponseJson.DeserializeWorkerResponse<GetHeadCommitsWorkerResponse>(resp.Data);
-                    var commits = new Dictionary<string, string>(
-                        result?.Commits ?? [],
-                        StringComparer.OrdinalIgnoreCase);
-                    foreach (var repoName in commitRepos)
+                    foreach (var (repoName, sha) in result?.Commits ?? [])
                     {
-                        var tokenKey = new FileVersionToken(repoName, FileVersionTokenKind.Commit).TokenKey;
-                        if (commits.TryGetValue(repoName, out var sha) && !string.IsNullOrWhiteSpace(sha))
-                            tokenValues[tokenKey] = sha;
-                        else
-                            logger.LogWarning(
-                                "Could not resolve HEAD commit for repo {RepoName}; token {TokenKey} will be skipped and the existing file value left unchanged.",
-                                repoName, tokenKey);
+                        if (!string.IsNullOrWhiteSpace(sha))
+                            commits[repoName] = sha.Trim();
                     }
+
+                    return new LiveHeadCommits(commits, null);
                 }
-                else
-                {
-                    logger.LogWarning(
-                        "GetHeadCommits failed for workspace {WorkspaceName}: {Error}. Commit tokens will be skipped.",
-                        workspace.Name, resp.Error);
-                }
+
+                error = resp.Error ?? "The Worker returned no commits.";
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "GetHeadCommits failed for workspace {WorkspaceName}; commit tokens will be skipped.", workspace.Name);
+                logger.LogWarning(ex, "GetHeadCommits failed for workspace {WorkspaceName}.", workspace.Name);
+                error = ex.Message;
             }
         }
-        else if (commitRepos.Count > 0)
+
+        logger.LogWarning(
+            "HEAD commits were not read for workspace {WorkspaceName}: {Error} {Count} :commit token(s) have no value.",
+            workspace.Name, error, repositoryNames.Count);
+        return new LiveHeadCommits(commits, error);
+    }
+
+    /// <summary>
+    /// The HEAD commit, read from the Worker now, of every repository a configured <c>{@Repo:commit}</c> token names
+    /// in <paramref name="contextId"/>, keyed by RepositoryId. For an operation that decides from the file-version
+    /// check (Update, Update and Push, Prepare Workspace): it stores the result before its first check, so a HEAD
+    /// moved without a hook GrayMoon hears (git reset, a rebase, a foreign core.hooksPath) cannot make the operation
+    /// decide from an old commit. <c>Error</c> names what could not be read; the operation then stops.
+    /// Empty without an error when no version file uses a commit token: no Worker call is made.
+    /// </summary>
+    public async Task<(IReadOnlyDictionary<int, string> CommitsByRepositoryId, string? Error)> ReadLiveCommitTokenHeadsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+    {
+        var empty = new Dictionary<int, string>();
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
+        if (workspace == null)
+            return (empty, "Workspace not found.");
+
+        var configs = await versionConfigRepository.GetByWorkspaceIdAsync(workspaceId, cancellationToken);
+        ApplyMissingFlagOverlay(configs, await GetMissingFlagsByFileIdAsync(workspaceId, contextId, cancellationToken));
+
+        var repositoryIdByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var link in workspace.Repositories)
         {
-            logger.LogWarning("Worker is not connected; skipping {Count} :commit token(s).", commitRepos.Count);
+            if (!string.IsNullOrEmpty(link.Repository?.RepositoryName))
+                repositoryIdByName.TryAdd(link.Repository.RepositoryName, link.RepositoryId);
         }
 
-        return tokenValues;
+        var names = configs
+            .Where(c => c.File?.Repository != null && c.File.IsMissingOnDisk != true)
+            .SelectMany(c => ExtractTokens(c.VersionPattern))
+            .Where(t => t.Kind == FileVersionTokenKind.Commit && repositoryIdByName.ContainsKey(t.RepositoryName))
+            .Select(t => t.RepositoryName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count == 0)
+            return (empty, null);
+
+        var workerArgs = await pathResolver.GetWorkerArgsAsync(contextId, cancellationToken);
+        var live = await ReadLiveHeadCommitsAsync(
+            workspace, workerArgs.WorkspaceRoot, workerArgs.WorkspaceFolderName, workerArgs.WorkspaceRepositoryName, names, cancellationToken);
+        if (live.Error is not null)
+            return (empty, $"The current commits could not be read: {live.Error}");
+
+        var unread = names.Where(name => !live.Commits.ContainsKey(name)).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList();
+        if (unread.Count > 0)
+        {
+            return (empty,
+                $"The current commit of {string.Join(", ", unread)} could not be read (the repository is missing or has no commit). " +
+                "Version files use it. Sync the Workspace and try again.");
+        }
+
+        return (live.Commits.ToDictionary(c => repositoryIdByName[c.Key], c => c.Value), null);
     }
 
     private sealed class GetHeadCommitsWorkerResponse
@@ -605,8 +731,17 @@ public sealed class WorkspaceFileVersionService(
             .Where(c => c.File?.Repository != null)
             .Select(c => c.VersionPattern)
             .ToList();
-        var tokenValues = await ResolveTokenValuesAsync(
-            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patterns, cancellationToken);
+        // Stored: the check runs after every hook sync, and the state row already holds the commit that sync reported.
+        var resolution = await ResolveTokenValuesAsync(
+            workspace, contextId, capabilities.UsesRepositoryVersioning, workspaceRoot, workspaceFolderName, workspaceRepositoryName, patterns,
+            CommitValueSource.Stored, cancellationToken);
+        var tokenValues = resolution.Values;
+
+        // Filled before the Worker is asked: a token that cannot be compared is reported as not checked. It counts as
+        // out of date, because a file that was not compared must not look up to date.
+        var repoOutOfDateTokens = new Dictionary<int, HashSet<string>>();
+        var newStatuses = new List<WorkspaceFileLineStatus>();
+        var seenStaleTokens = new Dictionary<int, HashSet<string>>();
 
         var items = new List<object>();
         foreach (var cfg in configs)
@@ -617,7 +752,30 @@ public sealed class WorkspaceFileVersionService(
             foreach (var token in tokens)
             {
                 if (tokenValues.TryGetValue(token.TokenKey, out var value))
+                {
                     knownValues[token.TokenKey] = value;
+                }
+                else if (cfg.File.IsMissingOnDisk != true && resolution.NotChecked.TryGetValue(token.TokenKey, out var reason))
+                {
+                    var repoId = cfg.File.RepositoryId;
+                    if (!seenStaleTokens.TryGetValue(repoId, out var seen))
+                        seenStaleTokens[repoId] = seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (!seen.Add(token.TokenKey)) continue;
+
+                    if (!repoOutOfDateTokens.TryGetValue(repoId, out var notCheckedTokens))
+                        repoOutOfDateTokens[repoId] = notCheckedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    notCheckedTokens.Add(token.TokenKey);
+                    newStatuses.Add(new WorkspaceFileLineStatus
+                    {
+                        WorkspaceId = workspaceId,
+                        WorkspaceFeatureContextId = contextId.Value,
+                        RepositoryId = repoId,
+                        FilePath = cfg.File.FilePath,
+                        FileName = cfg.File.FileName,
+                        TokenName = token.TokenKey,
+                        NotCheckedReason = reason
+                    });
+                }
             }
             if (knownValues.Count == 0) continue;
 
@@ -640,16 +798,19 @@ public sealed class WorkspaceFileVersionService(
                 contextInfo.IsSpecialWorkspace,
                 configs,
                 nameToRepoId,
-                repoOutOfDateTokens: new Dictionary<int, HashSet<string>>(),
+                repoOutOfDateTokens,
                 cancellationToken);
 
             await dbContext.WorkspaceFileLineStatuses
                 .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value)
                 .ExecuteDeleteAsync(cancellationToken);
+            if (newStatuses.Count > 0)
+            {
+                dbContext.WorkspaceFileLineStatuses.AddRange(newStatuses);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
 
-            await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
-            if (contextInfo.IsSpecialWorkspace)
-                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+            await BroadcastCheckedAsync(workspaceId, contextId, contextInfo.IsSpecialWorkspace, deferDependencyRecompute, cancellationToken);
             logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} context {ContextId} in {ElapsedMs}ms (no items)", workspaceId, contextId.Value, sw.ElapsedMilliseconds);
             return;
         }
@@ -679,9 +840,6 @@ public sealed class WorkspaceFileVersionService(
                 f => (RepoId: f.RepositoryId, Path: f.FilePath),
                 f => f);
 
-            var repoOutOfDateTokens = new Dictionary<int, HashSet<string>>();
-            var newStatuses = new List<WorkspaceFileLineStatus>();
-            var seenStaleTokens = new Dictionary<int, HashSet<string>>();
             var fileStates = await dbContext.WorkspaceFileContextStates
                 .Where(s => s.WorkspaceFeatureContextId == contextId.Value)
                 .ToDictionaryAsync(s => s.FileId, cancellationToken);
@@ -775,9 +933,7 @@ public sealed class WorkspaceFileVersionService(
             if (missingFlagChanged && capabilities.UsesDependencyGraph && !deferDependencyRecompute)
                 await workspaceProjectRepository.RecomputeAndPersistRepositoryDependencyStatsAsync(workspaceId, contextId.Value, cancellationToken);
 
-            await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
-            if (contextInfo.IsSpecialWorkspace)
-                await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
+            await BroadcastCheckedAsync(workspaceId, contextId, contextInfo.IsSpecialWorkspace, deferDependencyRecompute, cancellationToken);
             logger.LogDebug("CheckAndPersist completed for workspace {WorkspaceId} context {ContextId} in {ElapsedMs}ms", workspaceId, contextId.Value, sw.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) { throw; }
@@ -785,6 +941,26 @@ public sealed class WorkspaceFileVersionService(
         {
             logger.LogError(ex, "Unexpected error checking file version status for workspace {WorkspaceId}", workspaceId);
         }
+    }
+
+    /// <summary>
+    /// Tells the pages the file badges changed. Not sent when the caller deferred the dependency recompute: that
+    /// caller is in the middle of a recompute and broadcasts once it is whole, so no page reloads with new file
+    /// badges next to old dependency badges.
+    /// </summary>
+    private async Task BroadcastCheckedAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        bool isSpecialWorkspace,
+        bool deferDependencyRecompute,
+        CancellationToken cancellationToken)
+    {
+        if (deferDependencyRecompute)
+            return;
+
+        await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value, cancellationToken);
+        if (isSpecialWorkspace)
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
     }
 
     /// <summary>
@@ -1032,7 +1208,7 @@ public sealed class WorkspaceFileVersionService(
     }
 
     /// <summary>Returns out-of-date file-config token rows for the workspace scoped to <paramref name="contextId"/>, grouped by dependent RepositoryId. <see cref="WorkspaceFileLineStatus"/> rows carry their own <c>WorkspaceFeatureContextId</c> (unlike <see cref="WorkspaceFile.IsMissingOnDisk"/>), so this is a plain filter rather than a context-state overlay.</summary>
-    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>>> GetMismatchedFileVersionLinesByRepoAsync(
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue, string? NotCheckedReason)>>> GetMismatchedFileVersionLinesByRepoAsync(
         int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
     {
         var rows = await dbContext.WorkspaceFileLineStatuses
@@ -1043,13 +1219,13 @@ public sealed class WorkspaceFileVersionService(
             .GroupBy(s => s.RepositoryId)
             .ToDictionary(
                 g => g.Key,
-                g => (IReadOnlyList<(string, string, string, string)>)g
-                    .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
+                g => (IReadOnlyList<(string, string, string, string, string?)>)g
+                    .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? "", s.NotCheckedReason))
                     .ToList());
     }
 
     /// <summary>Out-of-date file-config token rows for a single repository scoped to <paramref name="contextId"/> (badge tooltip).</summary>
-    public async Task<IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue)>> GetMismatchedFileVersionLinesForRepoAsync(
+    public async Task<IReadOnlyList<(string FileName, string TokenName, string CurrentValue, string ExpectedValue, string? NotCheckedReason)>> GetMismatchedFileVersionLinesForRepoAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int repositoryId,
@@ -1060,7 +1236,7 @@ public sealed class WorkspaceFileVersionService(
             .Where(s => s.WorkspaceId == workspaceId && s.WorkspaceFeatureContextId == contextId.Value && s.RepositoryId == repositoryId && s.TokenName != "")
             .ToListAsync(cancellationToken);
         return rows
-            .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? ""))
+            .Select(s => (s.FileName, s.TokenName, s.CurrentValue ?? "", s.ExpectedValue ?? "", s.NotCheckedReason))
             .ToList();
     }
 

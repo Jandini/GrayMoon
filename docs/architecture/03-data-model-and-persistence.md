@@ -127,6 +127,7 @@ Current strict steps:
                                                            EffectiveVersionCommitSha, EffectiveVersionReasonCode; WorkspaceRepositoryBranchBaselines table
                                                            with its unique (context, repository, branch) index, section 22. The runner adds the four columns
                                                            before older steps too: step 16 inserts context state rows through EF)
+22  Version file token not-checked reason                  (WorkspaceFileLineStatuses.NotCheckedReason, section 10)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -171,7 +172,7 @@ SQLite allows one writer at a time; `busy_timeout` only waits. GrayMoon keeps co
 
 - Keep Worker, git and HTTP work parallel, but give each parallel task its own factory context, or collect results and persist once. Never share an `AppDbContext` across tasks, and never capture a circuit `AppDbContext` in `Task.Run`, `WorkspaceOperationRunner` or `BackgroundJobService` closures.
 - Batch: mutate, then one `SaveChanges`; never `SaveChanges` in a loop.
-- Serialized write paths: `WorkspaceGitChangesWriteQueue` and `WorkerSyncNotificationQueue` are single-reader channels; `SyncRecomputeCoalescer` runs one recompute per (workspaceId, contextId) burst; `SyncBackgroundService.DefaultMaxConcurrency` = 4 (`Sync:MaxConcurrency` overrides it).
+- Serialized write paths: `WorkspaceGitChangesWriteQueue` and `WorkerSyncNotificationQueue` are single-reader channels; `WorkerSyncNotificationQueue` stores each notification's state and runs one recompute per run of consecutive notifications of one context (04, "Hook sync batches"); `SyncRecomputeCoalescer` keeps that recompute from overlapping a pull's recompute of the same (workspaceId, contextId); `SyncBackgroundService.DefaultMaxConcurrency` = 4 (`Sync:MaxConcurrency` overrides it).
 - Short-lived per-call contexts in background services (`TokenHealthBackgroundService` checks connectors in parallel and persists once in its own scope; `WorkspaceActionRepository` uses a factory context per call; `WorkspaceAiProviderPins` uses the factory).
 
 Runtime concurrency rules are in 04 section 20. `GrayMoon.App.Tests/SqlitePerformanceTests.cs` covers the SQLite setup and contention paths.
@@ -587,11 +588,16 @@ FileName
 TokenName
 CurrentValue
 ExpectedValue
+NotCheckedReason
 ```
 
 Unique: `WorkspaceFeatureContextId + RepositoryId + FilePath + TokenName`.
 
 This table supports diagnostics and dependency badge computation.
+
+A row is either a token that was compared and is out of date (`CurrentValue`, `ExpectedValue`), or a token the check could not compare (`NotCheckedReason` set, the values null). Today the only such case is a `{@Repo:commit}` token of a repository whose HEAD commit the context has not stored. A token that was not checked counts in `OutOfDateFileRepos` like an out-of-date one, so the file never looks up to date; the badge tooltip shows "not checked" and the reason.
+
+The check (`WorkspaceFileVersionService.CheckAndPersistFileVersionStatusAsync`) takes every expected value from the context's stored state: the effective version, `BranchName` and `HeadCommit` of `WorkspaceRepositoryContextStates`. It makes no `GetHeadCommits` call. A Feature never reads the Workspace's row or the link for a value. Only the update (`UpdateAllVersionsAsync`), whose value is written into a file and committed, reads the commit from the checkout.
 
 `WorkspaceFile` and `WorkspaceFileVersionConfig` are shared by all contexts of a Workspace. Per-context file presence (`IsMissingOnDisk`, `LastCheckedAt`) is stored in `WorkspaceFileContextStates`.
 

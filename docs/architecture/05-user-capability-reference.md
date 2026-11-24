@@ -1101,7 +1101,7 @@ configure version patterns
 update versions
 ```
 
-Tokens `{@Repo:branch}` and `{@Repo:commit}` always resolve. `{@Repo}` (the GitVersion version) needs repository versioning: the dialog rejects it with "requires repository versioning (GitVersion) to be enabled for this workspace", and existing `{@Repo}` lines are skipped while versioning is off.
+Tokens `{@Repo:branch}` and `{@Repo:commit}` apply in every Workspace. The out-of-date check compares a `{@Repo:commit}` line with the commit GrayMoon has recorded for that repository in the current context (from the last sync, hook or operation); when none is recorded the badge counts the token and its tooltip says "not checked: No commit is recorded for Repo. Sync the repository." instead of showing the file as up to date. Update, Update and Push and Prepare Workspace read the commits those tokens name from the checkouts once at their start and store them, so a `git reset` or rebase GrayMoon never heard of cannot make them decide from an old commit; when such a commit cannot be read the operation stops before it changes anything and names the repository. Update writes the commit it reads from the checkout at that moment. `{@Repo}` (the GitVersion version) needs repository versioning: the dialog rejects it with "requires repository versioning (GitVersion) to be enabled for this workspace", and existing `{@Repo}` lines are skipped while versioning is off.
 
 ### Version files in graymoon.json
 

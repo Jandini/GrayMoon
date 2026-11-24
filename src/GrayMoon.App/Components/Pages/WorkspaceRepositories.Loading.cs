@@ -638,7 +638,7 @@ public sealed partial class WorkspaceRepositories
             var mismatchFileDict = _mismatchedFileVersionLinesByRepo as Dictionary<int, IReadOnlyList<FileVersionMismatchLine>>
                 ?? _mismatchedFileVersionLinesByRepo.ToDictionary(kv => kv.Key, kv => kv.Value);
             mismatchFileDict[repositoryId] = mismatchedFiles
-                .Select(t => new FileVersionMismatchLine(t.FileName, t.TokenName, t.CurrentValue, t.ExpectedValue))
+                .Select(t => new FileVersionMismatchLine(t.FileName, t.TokenName, t.CurrentValue, t.ExpectedValue, t.NotCheckedReason))
                 .ToList();
             _mismatchedFileVersionLinesByRepo = mismatchFileDict;
             var fileStatusDict = _fileLineStatusByRepo as Dictionary<int, IReadOnlyList<WorkspaceFileLineStatus>>

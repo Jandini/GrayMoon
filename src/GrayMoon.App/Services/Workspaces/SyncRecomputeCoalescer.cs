@@ -1,16 +1,16 @@
 namespace GrayMoon.App.Services.Workspaces;
 
 /// <summary>
-/// Lets many hook syncs for one Feature context share the workspace-wide recompute that follows each of their state
-/// writes. Create Feature releases a sync per repository at about the same time, and each used to run the whole
-/// file-version check and dependency-stat recompute by itself, one after another. <see cref="WorkspaceFileVersionService"/>
-/// gates its file-version check with an instance of its own.
+/// Keeps the context-wide recomputes of one Feature context from overlapping. The hook sync queue has one reader, so
+/// its own recomputes never meet each other (it runs one per batch, see <c>WorkerSyncNotificationQueue</c>); the callers
+/// that do meet are a hook batch and a pull's refresh of the same context (<c>WorkspaceCommitSyncHandler</c>).
+/// <see cref="WorkspaceFileVersionService"/> gates its file-version check with an instance of its own.
 /// </summary>
 /// <remarks>
 /// At most one run per key executes at a time. A caller that arrives while a run is in progress waits for the next run,
 /// which starts after that caller's own state write, and callers that arrive meanwhile share that single next run.
 /// So when <see cref="RunAsync"/> returns, a run that started after the caller's write has finished: nothing a caller
-/// wrote is left out of the recompute, a burst of N syncs just costs two runs instead of N.
+/// wrote is left out of the recompute, and N callers that arrive together cost two runs instead of N.
 /// </remarks>
 public sealed class SyncRecomputeCoalescer
 {

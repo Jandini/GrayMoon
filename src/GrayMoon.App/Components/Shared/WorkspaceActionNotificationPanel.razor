@@ -497,10 +497,7 @@
         {
             try
             {
-                await using var scope = ServiceScopeFactory.CreateAsyncScope();
-                var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-                var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
-                await PendingActionsService.RefreshAsync(workspaceId, workspaceRepo, projectRepo);
+                await RefreshPendingActionsAsync(workspaceId);
             }
             catch (Exception ex)
             {
@@ -509,8 +506,8 @@
         });
 
         // Feature contexts raise only the Context* events (the legacy WorkspaceSynced is Workspace-context only).
+        // ContextRepositorySynced is not subscribed: a ContextSynced always follows it.
         _hubConnection.On<int, int>("ContextSynced", (workspaceId, contextId) => RefreshForSelectedContextAsync(workspaceId, contextId));
-        _hubConnection.On<int, int, int>("ContextRepositorySynced", (workspaceId, contextId, _) => RefreshForSelectedContextAsync(workspaceId, contextId));
 
         // Never throws and logs a failed start; the popup then simply gets no live refresh until the next navigation.
         await WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
@@ -523,15 +520,30 @@
             await using var scope = ServiceScopeFactory.CreateAsyncScope();
             var selected = await ResolveOperationContextAsync(scope.ServiceProvider, workspaceId, CancellationToken.None);
             if (selected.Value != syncedContextId) return;
-            var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
-            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
-            await PendingActionsService.RefreshAsync(workspaceId, workspaceRepo, projectRepo);
+            await RefreshPendingActionsAsync(workspaceId);
         }
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Failed to process context sync for workspace {WorkspaceId} context {ContextId}", workspaceId, syncedContextId);
         }
     }
+
+    /// <summary>
+    /// One refresh per Workspace at a time. An event that arrives during a refresh waits for the next one, which
+    /// starts after it and is shared by every event that arrives meanwhile: a burst of events costs two refreshes,
+    /// and an older refresh can never finish after a newer one and overwrite its result.
+    /// </summary>
+    private readonly GrayMoon.App.Services.Workspaces.SyncRecomputeCoalescer _refreshCoalescer = new();
+
+    private Task RefreshPendingActionsAsync(int workspaceId) =>
+        _refreshCoalescer.RunAsync(workspaceId.ToString(), async () =>
+        {
+            if (_disposed) return;
+            await using var scope = ServiceScopeFactory.CreateAsyncScope();
+            var workspaceRepo = scope.ServiceProvider.GetRequiredService<WorkspaceRepository>();
+            var projectRepo = scope.ServiceProvider.GetRequiredService<WorkspaceProjectRepository>();
+            await PendingActionsService.RefreshAsync(workspaceId, workspaceRepo, projectRepo);
+        });
 
     private void OnServiceChanged()
     {

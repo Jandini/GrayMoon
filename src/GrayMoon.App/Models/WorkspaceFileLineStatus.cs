@@ -3,7 +3,10 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace GrayMoon.App.Models;
 
-/// <summary>One row per out-of-date file-config repository token on a dependent repo. Powers dependency badge tooltips.</summary>
+/// <summary>
+/// One row per file-config repository token on a dependent repo that is out of date, or that the check could not
+/// compare (<see cref="NotCheckedReason"/>). Powers dependency badge tooltips.
+/// </summary>
 [Table("WorkspaceFileLineStatuses")]
 public sealed class WorkspaceFileLineStatus
 {
@@ -30,6 +33,14 @@ public sealed class WorkspaceFileLineStatus
 
     [MaxLength(100)]
     public string? ExpectedValue { get; set; }
+
+    /// <summary>
+    /// Why the check could not compare this token (for example no commit is recorded for the repository). Null for a
+    /// token that was compared and is out of date. A token that was not checked counts as out of date: a file that
+    /// was not compared must not look up to date.
+    /// </summary>
+    [MaxLength(400)]
+    public string? NotCheckedReason { get; set; }
 
     /// <summary>Legacy aggregate fields; retained for schema compatibility.</summary>
     public int TotalMatchedLines { get; set; }

@@ -272,7 +272,16 @@ public sealed partial class WorkspaceGitService
     }
 
     /// <summary>Refreshes version for a single repo and persists. Returns (success, errorMessage) for caller to report and optionally stop workflow.</summary>
-    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(int repositoryId, int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
+    /// <param name="checkFileVersions">
+    /// False only for a caller that refreshes several repositories side by side and runs one file-version check for
+    /// all of them afterwards (the dependency update).
+    /// </param>
+    public async Task<(bool Success, string? ErrorMessage)> SyncSingleRepositoryAsync(
+        int repositoryId,
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default,
+        bool checkFileVersions = true)
     {
         var repo = await _repositoryRepository.GetByIdAsync(repositoryId, cancellationToken);
         if (repo == null)
@@ -329,7 +338,7 @@ public sealed partial class WorkspaceGitService
         var isInSync = allLinks.Count > 0 && allLinks.All(s => s == RepoSyncStatus.InSync);
         await _workspaceRepository.UpdateSyncMetadataAsync(workspaceId, DateTime.UtcNow, isInSync);
 
-        if (_fileVersionService != null)
+        if (_fileVersionService != null && checkFileVersions)
             await _fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
         await _recomputeScope.RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);

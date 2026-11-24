@@ -13,18 +13,49 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Services.Worker;
 
-/// <summary>Handles SyncCommand from the worker (hook flow): attribute path to a Feature context, persist state, recompute deps, broadcast.</summary>
+/// <summary>
+/// Handles SyncCommand from the worker (hook flow) in two steps. <see cref="ApplyAsync"/> is the per-repository part:
+/// attribute the path to a context and persist that repository's state. <see cref="CompleteAsync"/> is the per-context
+/// part: one recompute and the broadcasts for every notification applied since the last completion.
+/// <see cref="WorkerSyncNotificationQueue"/> applies a burst item by item and completes it once.
+/// </summary>
 public sealed class SyncCommandHandler(
     IServiceScopeFactory scopeFactory,
     IHubContext<WorkspaceSyncHub> hubContext,
-    ILogger<SyncCommandHandler> logger)
+    ILogger<SyncCommandHandler> logger) : ISyncNotificationHandler
 {
+    /// <summary>Applies one notification and completes it at once. The sync queue batches instead.</summary>
     /// <param name="n">The notification the Worker sent.</param>
     /// <param name="receivedAt">
     /// <see cref="RepositoryStateFreshness.Now"/> read when the notification reached the App, before it waited in the
     /// sync queue. Null means it is applied as it stands.
     /// </param>
     public async Task HandleAsync(RepositorySyncNotification n, long? receivedAt = null)
+    {
+        var observer = new SingleSyncObserver();
+        try
+        {
+            await ApplyAsync(n, receivedAt, observer);
+        }
+        finally
+        {
+            // A state write that succeeded is recomputed and announced even when a later step of the apply threw.
+            if (observer.Applied is { } applied)
+                await CompleteAsync([applied]);
+        }
+    }
+
+    private sealed class SingleSyncObserver : ISyncApplyObserver
+    {
+        public AppliedSync? Applied { get; private set; }
+
+        public Task ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId) => Task.CompletedTask;
+
+        public void StateWritten(AppliedSync applied) => Applied = applied;
+    }
+
+    /// <inheritdoc />
+    public async Task ApplyAsync(RepositorySyncNotification n, long? receivedAt, ISyncApplyObserver observer)
     {
         var totalSw = Stopwatch.StartNew();
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -51,6 +82,10 @@ public sealed class SyncCommandHandler(
                 n.WorkspaceId, n.RepositoryId, n.RepositoryPath);
             return;
         }
+
+        // Before anything that can wait: the queue completes the batch of another context here, so one Workspace
+        // never waits behind another's Create Feature.
+        await observer.ContextResolvedAsync(n.WorkspaceId, contextId.Value);
 
         var contextInfo = await scope.ServiceProvider
             .GetRequiredService<IWorkspaceFeatureContextResolver>()
@@ -115,6 +150,10 @@ public sealed class SyncCommandHandler(
             ReconcilePullRequest = !n.FreshWorktree && !refsOnly,
         });
 
+        // From here the repository's state is stored: the completion of this context covers it, whatever happens below.
+        observer.StateWritten(new AppliedSync(
+            n.WorkspaceId, contextId.Value, contextInfo.IsSpecialWorkspace, n.RepositoryId, NeedsRecompute: !refsOnly));
+
         var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
 
         // Persist tags and compute HasNewerTag when the worker includes a tag list (checkout-to-tag sync).
@@ -143,34 +182,7 @@ public sealed class SyncCommandHandler(
         }
 
         if (!refsOnly)
-        {
             await UpdateContextSyncFlagsAsync(dbContext, contextId.Value, n.WorkspaceId, contextInfo.IsSpecialWorkspace);
-
-            var depsSw = Stopwatch.StartNew();
-            var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-            // Create Feature releases a sync per repository at once: share one recompute instead of running N in a row.
-            var coalescer = scope.ServiceProvider.GetService<SyncRecomputeCoalescer>();
-            if (coalescer is null)
-                await recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value);
-            else
-                await coalescer.RunAsync($"{n.WorkspaceId}:{contextId.Value.Value}", () => recomputeScope.RecomputeAsync(n.WorkspaceId, contextId.Value));
-            logger.LogDebug(
-                "SyncCommand dependency stats persisted in {ElapsedMs}ms for workspace={WorkspaceId}, repo={RepositoryId}",
-                depsSw.ElapsedMilliseconds, n.WorkspaceId, n.RepositoryId);
-        }
-
-        // Context-aware broadcasts. Legacy WorkspaceSynced/RepositorySynced remain for special Workspace
-        // so existing page listeners keep working during the Features cutover.
-        await hubContext.Clients.All.SendAsync(
-            "ContextRepositorySynced", n.WorkspaceId, contextId.Value.Value, n.RepositoryId);
-        await hubContext.Clients.All.SendAsync(
-            "ContextSynced", n.WorkspaceId, contextId.Value.Value);
-
-        if (contextInfo.IsSpecialWorkspace)
-        {
-            await hubContext.Clients.All.SendAsync("RepositorySynced", n.WorkspaceId, n.RepositoryId);
-            await hubContext.Clients.All.SendAsync("WorkspaceSynced", n.WorkspaceId);
-        }
 
         if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
             await hubContext.Clients.All.SendAsync("RepositoryError", n.WorkspaceId, n.RepositoryId, n.ErrorMessage);
@@ -182,6 +194,61 @@ public sealed class SyncCommandHandler(
         logger.LogDebug(
             "SyncCommand persisted in {ElapsedMs}ms: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}, branch={Branch}",
             totalSw.ElapsedMilliseconds, n.WorkspaceId, contextId.Value.Value, n.RepositoryId, n.Version, n.Branch);
+    }
+
+    /// <inheritdoc />
+    public async Task CompleteAsync(IReadOnlyList<AppliedSync> items)
+    {
+        if (items.Count == 0)
+            return;
+
+        var workspaceId = items[0].WorkspaceId;
+        var contextId = items[0].ContextId;
+        if (items.Any(i => i.WorkspaceId != workspaceId || i.ContextId != contextId))
+            throw new ArgumentException("A completion covers the notifications of one context.", nameof(items));
+
+        try
+        {
+            // Refs-only notifications report branch lists and nothing the recompute reads.
+            if (items.Any(i => i.NeedsRecompute))
+            {
+                var recomputeSw = Stopwatch.StartNew();
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
+                // The recompute is a full rebuild from the stored rows, so one run covers every state write before it.
+                // The coalescer keeps it from overlapping the recompute of a commit sync on the same context.
+                await scope.ServiceProvider.GetRequiredService<SyncRecomputeCoalescer>().RunAsync(
+                    $"{workspaceId}:{contextId.Value}",
+                    () => recomputeScope.RecomputeAsync(workspaceId, contextId));
+                logger.LogDebug(
+                    "SyncCommand recompute for {Count} notification(s) took {ElapsedMs}ms: workspace={WorkspaceId}, context={ContextId}",
+                    items.Count, recomputeSw.ElapsedMilliseconds, workspaceId, contextId.Value);
+            }
+        }
+        finally
+        {
+            // Sent also when the recompute threw: the state rows changed and the grid has no other trigger.
+            await BroadcastAsync(items, workspaceId, contextId);
+        }
+    }
+
+    /// <summary>
+    /// The repository events first, then the context event once. Legacy WorkspaceSynced/RepositorySynced remain for the
+    /// special Workspace so existing page listeners keep working during the Features cutover.
+    /// </summary>
+    private async Task BroadcastAsync(IReadOnlyList<AppliedSync> items, int workspaceId, WorkspaceFeatureContextId contextId)
+    {
+        var isSpecialWorkspace = items[0].IsSpecialWorkspace;
+        foreach (var repositoryId in items.Select(i => i.RepositoryId).Distinct())
+        {
+            await hubContext.Clients.All.SendAsync("ContextRepositorySynced", workspaceId, contextId.Value, repositoryId);
+            if (isSpecialWorkspace)
+                await hubContext.Clients.All.SendAsync("RepositorySynced", workspaceId, repositoryId);
+        }
+
+        await hubContext.Clients.All.SendAsync("ContextSynced", workspaceId, contextId.Value);
+        if (isSpecialWorkspace)
+            await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId);
     }
 
     private static async Task UpdateContextSyncFlagsAsync(

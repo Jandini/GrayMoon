@@ -100,6 +100,7 @@ public static class GrayMoonServiceRegistration
         services.AddSingleton<IGitHubApiUsageRecorder, GitHubApiUsageRecorder>();
         services.AddHostedService<GitHubApiUsageLoggerBackgroundService>();
         services.AddScoped<SyncCommandHandler>();
+        services.AddScoped<ISyncNotificationHandler>(sp => sp.GetRequiredService<SyncCommandHandler>());
         services.AddScoped<IWorkerBridge, WorkerBridge>();
         services.AddScoped<WorkspaceService>();
         services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();

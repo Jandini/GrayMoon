@@ -151,6 +151,9 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryLinkListQueryService>();
         services.AddScoped<WorkspaceSyncHandler>();
         services.AddScoped<SyncCommandHandler>();
+        services.AddScoped<ISyncNotificationHandler>(sp => sp.GetRequiredService<SyncCommandHandler>());
+        // Per-host singleton, like the file-version check coalescer below.
+        services.AddSingleton<SyncRecomputeCoalescer>();
         services.AddScoped<WorkspaceBranchUpdateHandler>();
         services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
         services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();

@@ -22,39 +22,15 @@ public sealed partial class WorkspaceRepositories
             _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
             {
                 if (workspaceId != WorkspaceId) return;
-                if (IsBackgroundJobRunning)
-                {
-                    _pendingRefreshAfterJob = true;
-                    return;
-                }
-                CancellationTokenSource cts;
-                lock (_refreshDebounceLock)
-                {
-                    _refreshDebounceCts?.Cancel();
-                    _refreshDebounceCts?.Dispose();
-                    _refreshDebounceCts = new CancellationTokenSource();
-                    cts = _refreshDebounceCts;
-                }
-                try
-                {
-                    await Task.Delay(RefreshDebounceMs, cts.Token);
-                    await InvokeAsync(RefreshFromSync);
-                }
-                catch (OperationCanceledException)
-                {
-                    /* debounced */
-                }
-                finally
-                {
-                    lock (_refreshDebounceLock)
-                    {
-                        if (cts == _refreshDebounceCts)
-                        {
-                            _refreshDebounceCts?.Dispose();
-                            _refreshDebounceCts = null;
-                        }
-                    }
-                }
+                await RefreshFromSyncDebouncedAsync();
+            });
+            // A hook sync of a Feature raises only the Context* events (WorkspaceSynced is sent for the special
+            // Workspace), so without this a Feature grid showed a commit or checkout made in a terminal only at its
+            // next reload. The special Workspace keeps WorkspaceSynced: it is always sent with its ContextSynced.
+            _hubConnection.On<int, int>("ContextSynced", async (workspaceId, contextId) =>
+            {
+                if (workspaceId != WorkspaceId || !_isFeatureContext || _selectedContextId?.Value != contextId) return;
+                await RefreshFromSyncDebouncedAsync();
             });
             _hubConnection.On<int, int, string>("RepositoryError", (workspaceId, repositoryId, msg) =>
             {
@@ -95,6 +71,44 @@ public sealed partial class WorkspaceRepositories
                 }
             });
             _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
+        }
+    }
+
+    /// <summary>Reloads the grid after a sync event, once for a run of events; deferred to the end of a running job.</summary>
+    private async Task RefreshFromSyncDebouncedAsync()
+    {
+        if (IsBackgroundJobRunning)
+        {
+            _pendingRefreshAfterJob = true;
+            return;
+        }
+        CancellationTokenSource cts;
+        lock (_refreshDebounceLock)
+        {
+            _refreshDebounceCts?.Cancel();
+            _refreshDebounceCts?.Dispose();
+            _refreshDebounceCts = new CancellationTokenSource();
+            cts = _refreshDebounceCts;
+        }
+        try
+        {
+            await Task.Delay(RefreshDebounceMs, cts.Token);
+            await InvokeAsync(RefreshFromSync);
+        }
+        catch (OperationCanceledException)
+        {
+            /* debounced */
+        }
+        finally
+        {
+            lock (_refreshDebounceLock)
+            {
+                if (cts == _refreshDebounceCts)
+                {
+                    _refreshDebounceCts?.Dispose();
+                    _refreshDebounceCts = null;
+                }
+            }
         }
     }
 
