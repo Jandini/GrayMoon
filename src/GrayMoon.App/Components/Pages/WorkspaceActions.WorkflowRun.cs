@@ -425,7 +425,7 @@ public sealed partial class WorkspaceActions
                 WorkspaceId,
                 row.Repo.OrgName,
                 row.Repo.RepositoryName,
-                row.Link.BranchName,
+                row.CiBranchName,
                 line.Action?.WorkflowName,
                 line.Action?.WorkflowId);
             row.ErrorMessage = GetFriendlyErrorMessage(ex);
@@ -448,6 +448,6 @@ public sealed partial class WorkspaceActions
         RepositoryName = row.Repo.RepositoryName,
         WorkflowName = line.Action?.WorkflowName ?? string.Empty,
         Status = string.Empty,
-        HeadBranch = row.Link.BranchName
+        HeadBranch = row.CiBranchName
     };
 }

@@ -238,12 +238,14 @@ public sealed class SyncRepositoryCommand(
 
             branch = GitVersionBranch.Choose(versionResult.Result, gitBranch) ?? "-";
 
+            // HEAD is reported on a branch too: the App decides the effective version per HEAD commit, so a sync that
+            // leaves the stored HEAD behind keeps an inheritance alive after the branch got commits of its own.
+            var headCommit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
+
             // Detect tag/detached HEAD; if on a tag we don't have a real branch so wipe the version branch echo.
-            string? headCommit = null;
             if (refs.CurrentTag != null)
             {
                 branch = "-";
-                headCommit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
                 if (!WorkspaceDefinitionTagPin.TryNormalize(refs.CurrentTag, headCommit, repositoryName, out _, out headCommit, out var pinError))
                 {
                     return new SyncRepositoryResponse

@@ -767,7 +767,7 @@ choose commit-message behavior
 optionally continue to push
 ```
 
-While dependencies are unmatched and nothing is incoming, the header shows a yellow **Push Updated** split button instead of Update and Push (`DetermineUpdateControl`; menu: Level N Only, Update Only, Update Files, Push Only, and Undo Push Commits when a push is recommended).
+While dependencies are unmatched and nothing is incoming, the header shows a yellow **Push Updated** split button instead of Update and Push (`DetermineUpdateControl`; menu: Level N Only, Update Only, Update Files, Push Only, and Undo Push Commits when a push is recommended). The header of that level N in the grid also shows a small yellow **Push Updated** button in front of its repository count (`WorkspaceRepositoriesLevelHeader.DetermineShowsPushUpdated`); it runs Level N Only and is disabled by the same rule as the header button (`DetermineUpdateDisabled`). No other level shows it, and it is absent while the header shows Update.
 
 ### Internal plan
 
@@ -783,6 +783,25 @@ tag/write eligibility
 ```
 
 In a Feature context, repositories whose Feature PR is merged get their GitVersion from the default-branch tip before the update ("versions from default", section 32).
+
+### Effective versions
+
+Producers are compared through their **effective version**, not the calculated GitVersion. A repository whose branch GrayMoon created and that still sits on that branch point reuses the version its parent branch already published (data in `03-data-model-and-persistence.md`, section 22). `EffectiveVersionResolver` decides per repository and context:
+
+| Kind | When |
+|---|---|
+| `InheritedVerified` | allowed by `RepositoryOperationPolicy` (Push), a recorded branch point, `HeadCommit` equals it, at least one required package, the Worker's `GetGitVersionAtBranchPoint` says the commit is on `origin/<parent>` and returns the parent's version there, and every required package is `Available` at that version on its mapped connector |
+| `InheritedUnverified` | the same first conditions, no required packages, and at least one `{@Repo}` version-file token uses its version (a service image stamped in a compose `.env`, for example): there is no package to look up, so it inherits the parent version without a registry call (reason `TokenConsumersOnly`) |
+| `Own` | everything deterministic that is not inheritance: protected by policy, no branch point, not on it, no version consumer at all (or no GitVersion in the profile), not on the remote parent, parent version not computable, or a required package `VersionNotFound` (also: no registry has it after a registry sync that answered) |
+| `Unresolved` | on the branch point and otherwise eligible, but a lookup answered with anything else (401/403, timeout, 5xx, malformed, a failed registry sync); also a read only snapshot whose source branch version cannot be calculated while something uses its version |
+
+**Read only snapshots.** A Feature holds a read only repository as a detached worktree (`IsReferenceSnapshot`). GitVersion on a detached HEAD versions "(no branch)", not the branch the commit was taken from: a commit three commits after tag `1.2.0` on `main` is `1.2.1-main.3` in the Workspace and `1.2.0` in the snapshot. A snapshot is therefore never `Own` because of policy. When it was taken from a branch (`SourceBranchName`), its effective version is that branch's version at the snapshot's `HeadCommit`, asked from the Worker with the same `GetGitVersionAtBranchPoint` (`RepositoryBranchBaselineReader.LoadReferenceSnapshotSourceBranchesAsync` gives the branch): `InheritedUnverified`, reason `ReferenceSnapshot`, with or without a version consumer, and without a registry lookup (a snapshot never publishes, and the Workspace uses that version without a lookup too). When the Worker gives no version (the commit is not on `origin/<source>`, or GitVersion fails) and a repository in the Feature uses the snapshot's version, it is `Unresolved` and operations stop with "Cannot calculate the version of the read only snapshot {repository}: ... Nothing was changed."; when nothing uses it, it is `Own` with reason `BaselineNotOnRemoteParent` or `ParentVersionUnavailable`. A snapshot taken from a tag or from a detached Source has no source branch and stays `Own` (`PolicyProtected`): its detached GitVersion is what the Workspace calculates too. The stored version is reused for the same HEAD like any inherited decision; a decision stored before this rule (`PolicyProtected`) is replaced on the next refresh.
+
+Required packages are the package ids of the repository (physical and generated, `PackageId` else `ProjectName`) that csproj consumers in the context reference; version consumers also include `{@Repo}` version-file tokens. `PackageAvailabilityVerifier` deduplicates lookups per (connector, package, version), runs them bounded by `MaxParallelOperations`, and caches only `Available` for 2 minutes (`PackageAvailabilityCache`, injected `TimeProvider`); a fresh answer of any other kind clears the cached one.
+
+It runs after every state write for a context (`WorkspaceStateRecomputeScope.RecomputeAsync`, which runs in the hook sync queue that "Applying pending repository changes..." waits for: a decision that came from a branch point check of the current HEAD for the same kind of consumers is kept without a Worker or registry call, anything else is checked with cached answers; a failure is logged and leaves the stored decisions), after each update level's version refresh for the repositories that committed (they left the branch point, so no Worker or registry call), and at the start of an operation with fresh answers (`EffectiveVersionStartCheck`): Update, Update and Push (both lanes and the sequential path run the same update) and Prepare Workspace check after reading the project files and before the first level; bulk Push checks in `WorkspacePushOperations.GetPlanForLinksAsync`. When a repository in scope is `Unresolved` the operation stops before any change with "Cannot verify the published package {id} {version} for {repository}: connector {name} returned HTTP 403. Fix the connector and run again. Nothing was changed." (`WorkspacePushPlan.StopMessage` for Push). A repository that must publish because a package is missing is reported as "{repository}: package {id} {version} is not published; publishing {own version} instead." Push of one named repository does not run the check.
+
+A consumer that references the inherited version gets no update and no unmatched badge; a real mismatch (an older pin) is still rewritten. `{@Repo}` resolves to the effective version, `{@Repo:branch}` and `{@Repo:commit}` are unchanged, and a rewrite is a real commit, after which the repository has its own version. A file that stamps its own repository's `{@Repo}` gets no special rule: it is compared with the effective version while the repository inherits, and with the calculated GitVersion after a commit.
 
 ### Implementation
 
@@ -822,6 +841,32 @@ run synchronized push
 run Push Updated workflow
 run Update & Push (two lanes)
 ```
+
+### Which repositories a bulk push selects
+
+`WorkspaceRepository.GetRepositoryIdsNeedingPushAsync` (called by the push plan, the package wait and the push lane, which adds what the update committed) decides from the context's state row, with no Worker call:
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | Not allowed by `RepositoryOperationPolicy` | not pushed (policy skip) |
+| 2 | Outgoing commits | push |
+| 3 | `BranchHasUpstream` is not `false` | not pushed |
+| 4 | No upstream, and no recorded branch point or `HeadCommit` is not on it | push (the rule before effective versions) |
+| 5 | No upstream, on the branch point, inheritance valid for this HEAD | not pushed: "Skipped push of {repository}: no commits, required packages verified at {version}." (`InheritedUnverified`: "Skipped push of {repository}: no commits, version files use the parent version {version}.") |
+| 6 | No upstream, on the branch point, `Own` for this HEAD, no version consumer | not pushed: "Skipped push of {repository}: no commits, and no repository in this context uses its version." |
+| 7 | No upstream, on the branch point, `Own`, a version consumer | push: it must publish |
+
+The Repositories grid Version cell shows the effective version when the inheritance is valid (`WorkspaceRepositoryLink.IsVersionInherited`), in `.version-inner--inherited` (the theme's secondary text color, a little brighter than the muted calculated version), titled "Inherited published version {effective} from {parent branch} at {short SHA}. Calculated GitVersion: {calculated}. Click to copy effective version." (for `InheritedUnverified`: "Inherited version ... (used by version files only, no package to check). ..."; for a read only snapshot: "Version {effective} of {source branch} at {short SHA}, the commit this read only snapshot stays at. GitVersion of the detached checkout: {calculated}. Click to copy version.") Otherwise it shows the calculated GitVersion as before; for `Unresolved` the title adds the reason. Click copies the displayed value, and the clicked state is keyed by repository and displayed value (`WorkspaceRepositories.VersionClickKey`). REST and other read models keep `GitVersion`.
+
+An unresolved, missing or stale decision gets row 4's result. Rows 5 and 6 are "no work" (`WorkspacePushPlan.NoWork`, `GetPushNoWorkReasonsAsync`), not policy skips. A consumer that references an inherited version passes the package wait on its first lookup. A push of one repository (`PushSingleAsync`) always pushes, subject to policy. Because a skipped branch has no commits, no pull request can exist for it.
+
+### What the overlay shows while the plan is built
+
+The Push button builds its plan inside the page job (`WorkspaceRepositories.OnPushClickAsync` -> `PreparePushAsync`, scopes of its own through `ScopedExecutor`), so the loading overlay is up from the click and Abort stops the plan ("Push cancelled."). `IWorkspacePushOperations.GetPlanAsync` takes an optional `IProgress<OperationProgress>` and reports "Checking versions..." (`WorkspacePushOperations.CheckingVersionsMessage`), then "Checked {x} of {y} repositories..." (`EffectiveVersionResolver.CheckedMessage`) as each branch point GitVersion run on the Worker finishes; Update shows the same count. Nothing is prepared while it runs: the plan only checks archived state, effective versions and the selection. No repository names and no other steps are shown. A repository whose stored decision is inherited for its current HEAD keeps that parent version even at an operation start (`bypassCache`): the parent version at a fixed commit does not change, so the Worker is not asked and it is not counted; only the registry is asked again. A Push with nothing new therefore makes registry calls and no GitVersion runs. With progress the resolver also writes one line per repository to the job's overlay terminal (label `versions`, `EffectiveVersionResolver.TerminalLine`): "{repository}: uses the published parent version {version} (...)", "uses the parent version" for `InheritedUnverified`, "own version {version} (...)" with the reason, and an unverifiable package as a red (stderr) line. The background refresh passes no progress and writes nothing. Without the synchronized-push dialog the same job goes on into the push. When the dialog is needed the job ends and the dialog opens with the plan; Proceed starts the push job without building the plan again. A stop message is a toast when the job ends, and so is "No repositories to push.", which counts the "no work" branches in one sentence instead of listing them (`WorkspaceRepositories.NothingToPushMessage`; each one's sentence is in the log). Prepare Workspace's push stage, the notification panel's push and Update and Push report the same plan steps; Update's own start check reports the counted step too.
+
+### When Push asks for attention
+
+`RepositoryOperationPolicyExpressions.HasCommitsToPush(outgoingCommits)` is the one rule: a repository asks for a push only when it has outgoing commits. The header's yellow Push button (`IsPushRecommended`, the four header queries of `WorkspaceRepositoryLinkListQueryService`, expanded by `ExpandRepositoryPolicy`), the yellow commits badge (`CommitsBadge.DetermineColors`) and the notification panel (`WorkspacePendingActionsService`) all use it, after the Push policy. A branch without an upstream and without commits does not count; its commits badge is the neutral gray cloud (`--badge-neutral-bg`, the gray of the PR "none" and dependencies "none" badges). Push stays available as the plain button and still pushes such a branch when the selection table above says so (rows 4 and 7). Clicking the gray cloud badge first asks to confirm (`WorkspaceRepositories.UpstreamOnlyPushMessage`: no commits were made, push the branch anyway to set its upstream?); Set upstream goes on with the usual single-repository push.
 
 ### Synchronized push
 
@@ -1299,11 +1344,13 @@ run/re-run one dependency level or the Workspace repository
 open logs
 ```
 
+Each repository row shows the runs of one branch, its CI branch (`UnpublishedBranchRules.CiBranch`, resolved per row from the snapshot of the viewed context by `WorkspaceActions.ResolveCiBranch`). It is the checked-out branch, except while that branch has no upstream and no commits (the gray cloud badge): GitHub has never run anything on it, so the row shows, refreshes, re-runs and starts the workflows of the recorded parent branch (the Feature row or the branch baseline, without `origin/`), and the Branch column shows that parent with an arrow icon and a tooltip naming both branches. A branch with no recorded parent stays on its own branch. Once the branch has a commit or an upstream the row switches to it on the next sync.
+
 In a .NET Dependency Workspace the grid is grouped like the Repositories grid: the Workspace repository first (when it has a connector), then `Level N` from the highest level down, then `No dependencies`. A Feature uses its own levels. Inside a group the order is unchanged (errors, failed, aborted, running, success, then name), so a running workflow moves to the top of its own level and never leaves it; each header appears once. A group whose rows are all hidden by the status chips or the search is not rendered, header included. A Basic Workspace keeps the flat list with no headers.
 
 Each group header shows, right after its title, how many workflows of the group failed or are running (there is no dependency-graph link here), and ends with "N repositories" (all repositories of the group, hidden or not). Hovering it opens a menu:
 
-- **Run** starts every workflow of the group that supports `workflow_dispatch` and is not already running, on the repository's current branch. It is disabled when there is none.
+- **Run** starts every workflow of the group that supports `workflow_dispatch` and is not already running, on the CI branch of each repository (above). It is disabled when there is none.
 - **Re-run** is listed only when the group has failed workflows, and re-runs each of them.
 - **Abort** cancels every running workflow of the group on GitHub. It is disabled when nothing in the group is running. Read only and tag-pinned repositories are included, as with Abort on a single row; the overlay then waits until the runs stop showing as running.
 
@@ -1424,8 +1471,8 @@ Those are future architecture projects and must not be described as current prod
 ### Known gaps
 
 ```text
-"Versions from default" (section 32) runs GitVersion with /c at the origin/<default> tip, which GitVersion
-  ignores for a local repository, so it returns the Feature branch version (GitVersionParityTests, skipped)
+"Versions from default" (section 32) needs the local default branch to contain the origin/<default> tip:
+  GitVersion versions the local branch, so a default branch that is behind fails with "Pull <default>"
 bulk New Branch / Switch Branch (BranchModal) has no worktree-occupancy awareness; a bulk switch can hit
   "already checked out" for a branch held by a Feature
 the context selector has no type-to-filter
@@ -1494,7 +1541,7 @@ optional: start the CodeGraph index build when New Feature's "Create CodeGraph i
   overlay offers Background instead of Abort)
 ```
 
-Uncommitted Workspace changes are not copied. If any repository fails, or the create is aborted after the intent is committed, the Feature is kept in **NeedsRepair** with the error.
+Uncommitted Workspace changes are not copied. If any repository fails, or the create is aborted after the intent is committed, the Feature is kept in **NeedsRepair** with the error. An Abort before that creates nothing: the New feature dialog stays open and a "New feature was cancelled." toast is shown, not an error.
 
 ### Feature Status (repair)
 
@@ -1535,7 +1582,7 @@ GrayMoon never looks for or ends the programs using a Feature (other than CodeGr
 
 ### Versions from default
 
-Inside a Feature, merge the deepest PRs first, then Sync: for repositories whose Feature PR is merged, `WorkspaceGitService.ApplyDefaultTipVersionsForMergedFeatureReposAsync` runs Worker `GetGitVersionAtDefaultTip` (GitVersion at the `origin/<default>` tip, no checkout) and replaces the context GitVersion, so Update Dependencies writes default-branch versions into higher levels. Only when the profile uses repository versioning. This is why per-level Return to Default is not needed in a Feature (see the known gap in section 31).
+Inside a Feature, merge the deepest PRs first, then Sync: for repositories whose Feature PR is merged, `WorkspaceGitService.ApplyDefaultTipVersionsForMergedFeatureReposAsync` runs Worker `GetGitVersionAtDefaultTip` (GitVersion at the `origin/<default>` tip, no checkout) with `/b <default> /c <sha> /nocache`; the answer counts only when GitVersion versioned the default branch at that commit, so a local default branch that is behind `origin/<default>` gives a failure with "Pull <default> and try again" instead of another version) and replaces the context GitVersion, so Update Dependencies writes default-branch versions into higher levels. Only when the profile uses repository versioning. This is why per-level Return to Default is not needed in a Feature (see the known gap in section 31).
 
 ### Branch ownership
 

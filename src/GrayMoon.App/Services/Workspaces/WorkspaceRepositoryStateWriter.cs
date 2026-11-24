@@ -793,5 +793,114 @@ public sealed class WorkspaceRepositoryStateWriter(
         return previousBranch;
     }
 
+    /// <summary>
+    /// Writes the effective version columns of <paramref name="contextId"/> for each item: kind, version, the HEAD it was
+    /// resolved for and the reason. Only existing context state rows are written; a repository without one keeps no
+    /// stored decision (its readers then use the calculated GitVersion). The link is never touched. Returns how many
+    /// rows were written.
+    /// </summary>
+    public async Task<int> WriteEffectiveVersionAsync(
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyList<EffectiveVersionWrite> items,
+        CancellationToken cancellationToken = default)
+    {
+        if (items.Count == 0)
+            return 0;
+
+        var linkIds = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+        var states = await dbContext.WorkspaceRepositoryContextStates
+            .Where(s => s.WorkspaceFeatureContextId == contextId.Value && linkIds.Contains(s.WorkspaceRepositoryId))
+            .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
+
+        var written = 0;
+        foreach (var item in items)
+        {
+            if (!states.TryGetValue(item.WorkspaceRepositoryId, out var state))
+                continue;
+
+            var version = Blank(item.EffectiveVersion) ? null : item.EffectiveVersion!.Trim();
+            var commit = Blank(item.ResolvedForCommitSha) ? null : item.ResolvedForCommitSha!.Trim();
+            // An unchanged decision is not written again: recomputes run after every state write.
+            if (state.EffectiveVersionKind == (int)item.Kind
+                && state.EffectiveVersion == version
+                && state.EffectiveVersionCommitSha == commit
+                && state.EffectiveVersionReasonCode == item.ReasonCode)
+                continue;
+
+            state.EffectiveVersionKind = (int)item.Kind;
+            state.EffectiveVersion = version;
+            state.EffectiveVersionCommitSha = commit;
+            state.EffectiveVersionReasonCode = item.ReasonCode;
+            written++;
+        }
+
+        if (written > 0)
+            await dbContext.SaveChangesAsync(cancellationToken);
+        return written;
+    }
+
+    /// <summary>
+    /// Records where a branch of <paramref name="contextId"/> started, after GrayMoon created it. Replaces an earlier row for
+    /// the same (context, repository, branch): the branch was created again. Not used for Features, whose
+    /// <see cref="WorkspaceFeatureRepository"/> row is the baseline.
+    /// </summary>
+    public async Task RecordBranchBaselineAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        string branchName,
+        string parentBranchName,
+        string baseCommitSha,
+        string? resolvedStartRef,
+        DateTime createdAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var parent = parentBranchName.Trim();
+        if (parent.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
+            parent = parent["origin/".Length..];
+
+        var row = await dbContext.WorkspaceRepositoryBranchBaselines
+            .FirstOrDefaultAsync(
+                b => b.WorkspaceFeatureContextId == contextId.Value
+                    && b.WorkspaceRepositoryId == workspaceRepositoryId
+                    && b.BranchName == branchName,
+                cancellationToken);
+        if (row is null)
+        {
+            row = new WorkspaceRepositoryBranchBaseline
+            {
+                WorkspaceFeatureContextId = contextId.Value,
+                WorkspaceRepositoryId = workspaceRepositoryId,
+                BranchName = branchName,
+            };
+            dbContext.WorkspaceRepositoryBranchBaselines.Add(row);
+        }
+
+        row.ParentBranchName = parent;
+        row.BaseCommitSha = baseCommitSha.Trim();
+        row.ResolvedStartRef = Blank(resolvedStartRef) ? null : resolvedStartRef!.Trim();
+        row.CreatedAtUtc = createdAtUtc;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Deletes the recorded baseline of a local branch GrayMoon deleted. Returns the number of rows removed.</summary>
+    public Task<int> DeleteBranchBaselineAsync(
+        WorkspaceFeatureContextId contextId,
+        int workspaceRepositoryId,
+        string branchName,
+        CancellationToken cancellationToken = default)
+        => dbContext.WorkspaceRepositoryBranchBaselines
+            .Where(b => b.WorkspaceFeatureContextId == contextId.Value
+                && b.WorkspaceRepositoryId == workspaceRepositoryId
+                && b.BranchName == branchName)
+            .ExecuteDeleteAsync(cancellationToken);
+
     private static bool Blank(string? value) => string.IsNullOrWhiteSpace(value);
 }
+
+/// <summary>One effective version decision for <see cref="WorkspaceRepositoryStateWriter.WriteEffectiveVersionAsync"/>.</summary>
+public sealed record EffectiveVersionWrite(
+    int WorkspaceRepositoryId,
+    EffectiveVersionKind Kind,
+    string? EffectiveVersion,
+    string? ResolvedForCommitSha,
+    string ReasonCode);

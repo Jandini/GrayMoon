@@ -59,6 +59,13 @@ public sealed class PrepareWorkspaceOrchestrator(
                 newBranchName, alreadyExisted.Count, workspaceId, string.Join(", ", alreadyExisted));
         }
 
+        // A branch whose branch point could not be recorded stays; it is then pushed like a branch GrayMoon did not create.
+        foreach (var baselineWarning in outcome.BaselineWarnings)
+        {
+            logger.LogWarning("PrepareWorkspaceOrchestrator: {Warning}", baselineWarning);
+            progress.Report(baselineWarning);
+        }
+
         // Branch gate: every later phase mutates repositories, so all of them must be on the new branch first.
         var branchErrors = GetBranchFailures(repositoryIds, outcome, newBranchName);
         if (branchErrors.Count > 0 || outcome.TargetedRepositoryIds.Count == 0)

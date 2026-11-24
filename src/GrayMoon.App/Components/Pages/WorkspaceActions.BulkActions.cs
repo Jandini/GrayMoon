@@ -262,7 +262,7 @@ public sealed partial class WorkspaceActions
             : row.WorkflowLines.FirstOrDefault(l => l.Action?.RunId == started.RunId);
         var action = line?.Action;
         if (action == null || (action.RunId ?? 0) <= 0
-            || !string.Equals(action.BranchName, row.Link.BranchName, StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(action.BranchName, row.CiBranchName, StringComparison.OrdinalIgnoreCase))
             return false;
 
         return IsLineRunningForBranch(row, line!) || action.RunId != started.RunId || action.UpdatedAt != started.UpdatedAt;

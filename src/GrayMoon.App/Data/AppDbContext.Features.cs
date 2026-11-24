@@ -91,6 +91,9 @@ public partial class AppDbContext
             entity.Property(s => s.CheckedOutTag).HasMaxLength(200);
             entity.Property(s => s.HeadCommit).HasMaxLength(64);
             entity.Property(s => s.GitVersion).HasMaxLength(100);
+            entity.Property(s => s.EffectiveVersion).HasMaxLength(100);
+            entity.Property(s => s.EffectiveVersionCommitSha).HasMaxLength(64);
+            entity.Property(s => s.EffectiveVersionReasonCode).HasMaxLength(50);
             entity.Property(s => s.SyncStatus)
                 .HasDefaultValue(RepoSyncStatus.NeedsSync)
                 .HasSentinel(RepoSyncStatus.InSync);
@@ -101,6 +104,30 @@ public partial class AppDbContext
             entity.HasOne(s => s.WorkspaceRepository)
                 .WithMany()
                 .HasForeignKey(s => s.WorkspaceRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkspaceRepositoryBranchBaseline>(entity =>
+        {
+            entity.ToTable("WorkspaceRepositoryBranchBaselines");
+            entity.HasKey(b => b.WorkspaceRepositoryBranchBaselineId);
+            entity.Property(b => b.WorkspaceRepositoryBranchBaselineId).ValueGeneratedOnAdd();
+            entity.HasIndex(b => new { b.WorkspaceFeatureContextId, b.WorkspaceRepositoryId, b.BranchName })
+                .IsUnique()
+                .HasDatabaseName("IX_WorkspaceRepositoryBranchBaselines_Context_Repo_Branch");
+            entity.HasIndex(b => b.WorkspaceRepositoryId)
+                .HasDatabaseName("IX_WorkspaceRepositoryBranchBaselines_WorkspaceRepositoryId");
+            entity.Property(b => b.BranchName).IsRequired().HasMaxLength(200);
+            entity.Property(b => b.ParentBranchName).IsRequired().HasMaxLength(200);
+            entity.Property(b => b.BaseCommitSha).IsRequired().HasMaxLength(64);
+            entity.Property(b => b.ResolvedStartRef).HasMaxLength(250);
+            entity.HasOne(b => b.WorkspaceFeatureContext)
+                .WithMany()
+                .HasForeignKey(b => b.WorkspaceFeatureContextId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(b => b.WorkspaceRepository)
+                .WithMany()
+                .HasForeignKey(b => b.WorkspaceRepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

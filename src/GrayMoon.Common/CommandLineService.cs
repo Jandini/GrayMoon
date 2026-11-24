@@ -368,7 +368,12 @@ public sealed class CommandLineService(ILogger<CommandLineService> logger, IOpti
         }
     }
 
-    private static void MirrorCombinedOutputAsStderr(string? stdout, string? stderr)
+    /// <summary>
+    /// Sends a failed process's output to the overlay terminal as stderr lines. A caller that turns off
+    /// <c>mirrorFailureOutputAsStderr</c> to decide for itself whether a non-zero exit is a real failure calls this
+    /// when it is one.
+    /// </summary>
+    public static void MirrorCombinedOutputAsStderr(string? stdout, string? stderr)
     {
         EmitLines(stdout);
         EmitLines(stderr);

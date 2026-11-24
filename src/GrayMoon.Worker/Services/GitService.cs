@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using GrayMoon.Common;
 using GrayMoon.Common.Git;
 using GrayMoon.Worker.Abstractions;
 using GrayMoon.Worker.Models;
@@ -18,10 +19,12 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? _emptyHooksPath;
 
-    // The clone's own checkout must already allow paths over 260 characters on Windows, before any repository config
-    // exists to say so. Command-scoped (-c): nothing is written to global or system config; the persistent local
-    // setting is written afterwards by IRepositoryConfigurationInitializer.
-    private static string CloneLongPathsPrefix => OperatingSystem.IsWindows() ? "-c core.longpaths=true " : "";
+    // On Windows a clone must allow paths over 260 characters for its own checkout and keep allowing them afterwards.
+    // "git clone -c core.longpaths=true" writes the setting into the new repository's own config before anything is
+    // checked out, so a fresh clone never depends on IRepositoryConfigurationInitializer having run: libgit2 (used by
+    // GitVersion) refuses long paths without it. "git -c ... clone" would apply it to the clone process only.
+    // Nothing is written to global or system config.
+    internal static string CloneLongPathsOption => OperatingSystem.IsWindows() ? "-c core.longpaths=true " : "";
 
 
     public async Task<GitCloneResult> CloneAsync(string workingDir, string cloneUrl, string? bearerToken, CancellationToken ct)
@@ -36,7 +39,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         // --progress forces git to report progress on stderr even though it is not a terminal; that stream is the
         // liveness signal the runner's idle timeout watches (see GitProcessOptions.CloneIdleTimeoutSeconds).
-        var args = $"{CloneLongPathsPrefix}clone --progress \"{cloneUrl}\"";
+        var args = $"clone {CloneLongPathsOption}--progress \"{cloneUrl}\"";
 
         var cloneFolderName = CloneFolderName(cloneUrl);
         var cloneTarget = cloneFolderName == null ? null : Path.Combine(workingDir, cloneFolderName);
@@ -178,12 +181,21 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, CancellationToken ct)
         => await GetVersionAsync(repoPath, nonNormalize, commitSha: null, ct);
 
-    public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct)
+    public Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, CancellationToken ct)
+        => GetVersionAsync(repoPath, nonNormalize, commitSha, branchName: null, ct);
+
+    public async Task<(GitVersionResult? Result, string? Error)> GetVersionAsync(string repoPath, bool nonNormalize, string? commitSha, string? branchName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return (null, null);
 
-        var (fileName, arguments) = GetGitVersionInvocation(repoPath, nonNormalize, commitSha);
+        // Both go into GitVersion's argument string, so only a plain SHA and a plain branch name are accepted.
+        if (!string.IsNullOrWhiteSpace(commitSha) && !GitVersionArguments.IsCommitSha(commitSha))
+            return (null, $"Not a commit SHA: {commitSha}");
+        if (!string.IsNullOrWhiteSpace(branchName) && !GitVersionArguments.IsBranchName(branchName))
+            return (null, $"Not a branch name: {branchName}");
+
+        var (fileName, arguments) = GetGitVersionInvocation(repoPath, nonNormalize, commitSha, branchName);
         var toolName = fileName == "dotnet" ? "dotnet gitversion" : "dotnet-gitversion";
 
         var sw = Stopwatch.StartNew();
@@ -247,7 +259,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         }
     }
 
-    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath, bool nonNormalize, string? commitSha)
+    private static (string FileName, string Arguments) GetGitVersionInvocation(string repoPath, bool nonNormalize, string? commitSha, string? branchName)
     {
         const string manifestFileName = "dotnet-tools.json";
         var inRoot = Path.Combine(repoPath, manifestFileName);
@@ -255,8 +267,14 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         var commonArgs = "/output json /nofetch /verbosity quiet";
         if (nonNormalize)
             commonArgs += " /nonormalize";
+        if (!string.IsNullOrWhiteSpace(branchName))
+            commonArgs += " /b " + branchName.Trim();
         if (!string.IsNullOrWhiteSpace(commitSha))
             commonArgs += " /c " + commitSha.Trim();
+        // GitVersion's disk cache ignores /b and /c: without /nocache a run for another branch answers with the cached
+        // result of the checked-out branch (measured with GitVersion 5.12).
+        if (!string.IsNullOrWhiteSpace(branchName))
+            commonArgs += " /nocache";
         if (File.Exists(inRoot) || File.Exists(inConfig))
             return ("dotnet", "gitversion " + commonArgs);
         return ("dotnet-gitversion", commonArgs);
@@ -647,10 +665,10 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return (true, null);
     }
 
-    public async Task<(bool Success, string? ErrorMessage, bool AlreadyExisted)> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false)
+    public async Task<CreateBranchResult> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(newBranchName) || string.IsNullOrWhiteSpace(baseBranchName))
-            return (false, "Invalid repository path or branch name", false);
+            return new CreateBranchResult(false, "Invalid repository path or branch name", false);
 
         var hooksArgs = GetHooksConfigArgs(skipHooks);
 
@@ -664,12 +682,14 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             if (coExit != 0)
             {
                 logger.LogError("Git checkout of existing branch failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, newBranchName, coExit);
-                return (false, CombineOutput(coOut, coErr), true);
+                return new CreateBranchResult(false, CombineOutput(coOut, coErr), true);
             }
-            return (true, null, true);
+            return new CreateBranchResult(true, null, true);
         }
 
         var trimmedBase = baseBranchName.Trim();
+        if (trimmedBase.StartsWith('-'))
+            return new CreateBranchResult(false, $"'{trimmedBase}' is not a branch name", false);
         var startPoint = trimmedBase;
         var remoteCandidate = trimmedBase.StartsWith("origin/", StringComparison.OrdinalIgnoreCase)
             ? trimmedBase
@@ -687,22 +707,32 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             if (unbornExit != 0)
             {
                 logger.LogError("Git create branch failed for {RepoPath}, which has no commits. NewBranch={NewBranch}, ExitCode={ExitCode}", repoPath, newBranchName, unbornExit);
-                return (false, CombineOutput(unbornOut, unbornErr), false);
+                return new CreateBranchResult(false, CombineOutput(unbornOut, unbornErr), false);
             }
 
             logger.LogInformation("Git branch {NewBranch} set as the current branch of {RepoPath}, which has no commits; base {BaseBranch} is not used.", newBranchName, repoPath, baseBranchName);
-            return (true, null, false);
+            return new CreateBranchResult(true, null, false);
         }
 
-        var (exitCode, stdout, stderr) = await runner.RunAsync("git", [.. hooksArgs, "checkout", "-b", newBranchName, "--no-track", startPoint, "--"], repoPath, null, ct);
+        // The start point is resolved to one commit first and the branch is created at exactly that commit, so the
+        // recorded baseline is the commit the branch really starts on.
+        var (revExit, revOut, revErr) = await runner.RunAsync("git", ["rev-parse", "--verify", "--quiet", startPoint + "^{commit}"], repoPath, null, ct, GitLockIntent.Read);
+        var baseCommitSha = (revOut ?? "").Trim();
+        if (revExit != 0 || string.IsNullOrEmpty(baseCommitSha))
+        {
+            logger.LogError("Git create branch failed for {RepoPath}: start point {StartPoint} is not a commit. ExitCode={ExitCode}", repoPath, startPoint, revExit);
+            return new CreateBranchResult(false, CombineOutput(revOut, revErr) ?? $"'{baseBranchName}' is not a commit", false);
+        }
+
+        var (exitCode, stdout, stderr) = await runner.RunAsync("git", [.. hooksArgs, "checkout", "-b", newBranchName, "--no-track", baseCommitSha, "--"], repoPath, null, ct);
         if (exitCode != 0)
         {
             logger.LogError("Git create branch failed for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}, ExitCode={ExitCode}", repoPath, newBranchName, baseBranchName, exitCode);
-            return (false, CombineOutput(stdout, stderr), false);
+            return new CreateBranchResult(false, CombineOutput(stdout, stderr), false);
         }
 
-        logger.LogInformation("Git branch created for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}", repoPath, newBranchName, baseBranchName);
-        return (true, null, false);
+        logger.LogInformation("Git branch created for {RepoPath}. NewBranch={NewBranch}, BaseBranch={BaseBranch}, StartRef={StartRef}, BaseCommit={BaseCommit}", repoPath, newBranchName, baseBranchName, startPoint, baseCommitSha);
+        return new CreateBranchResult(true, null, false, startPoint, baseCommitSha);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
@@ -760,7 +790,9 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
                 var leaseSpec = $"refs/heads/{name}:{expectedSha.Trim()}";
                 var leaseArgs = $"{hooksPrefix}push --force-with-lease={leaseSpec} origin :{name}";
-                var (leaseExit, leaseStdout, leaseStderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, leaseArgs, repoPath, bearerToken, ct);
+                // The failure output is not mirrored as red stderr up front: a branch the host already deleted
+                // (delete-on-merge) is a success, so only a real failure is shown red, below.
+                var (leaseExit, leaseStdout, leaseStderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, leaseArgs, repoPath, bearerToken, ct, mirrorFailureOutputAsStderr: false);
                 if (leaseExit != 0)
                 {
                     var combined = GitRemoteAuth.WithAuthHint(CombineOutput(leaseStdout, leaseStderr)) ?? "";
@@ -769,6 +801,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                         logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
                         return (true, null);
                     }
+
+                    CommandLineService.MirrorCombinedOutputAsStderr(leaseStdout, leaseStderr);
 
                     if (IsForceWithLeaseRejected(combined))
                     {
@@ -789,7 +823,9 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             }
 
             var args = $"{hooksPrefix}push origin --delete {name}";
-            var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, args, repoPath, bearerToken, ct);
+            // Not mirrored as red stderr up front: a branch the host already deleted (e.g. the PR merge deleted it)
+            // is a success here, so only a real failure is shown red, below.
+            var (exitCode, stdout, stderr) = await runner.RunRemoteAsync(GitRemoteOperation.Push, args, repoPath, bearerToken, ct, mirrorFailureOutputAsStderr: false);
             if (exitCode != 0)
             {
                 var combined = GitRemoteAuth.WithAuthHint(CombineOutput(stdout, stderr)) ?? "";
@@ -798,6 +834,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                     logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
                     return (true, null);
                 }
+                CommandLineService.MirrorCombinedOutputAsStderr(stdout, stderr);
                 logger.LogWarning("Git push --delete failed for {RepoPath}. Branch={Branch}, ExitCode={ExitCode}", repoPath, name, exitCode);
                 return (false, combined);
             }
@@ -1160,7 +1197,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (!Directory.Exists(targetDir))
             Directory.CreateDirectory(targetDir);
 
-        var args = $"{CloneLongPathsPrefix}clone --progress \"{cloneUrl}\" .";
+        var args = $"clone {CloneLongPathsOption}--progress \"{cloneUrl}\" .";
 
         if (Directory.EnumerateFileSystemEntries(targetDir).Any())
         {

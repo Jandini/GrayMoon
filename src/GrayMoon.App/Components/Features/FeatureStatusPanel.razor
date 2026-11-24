@@ -19,7 +19,7 @@
                     </h5>
                     <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync" disabled="@_busy"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body feature-status-body">
                     @if (!string.IsNullOrWhiteSpace(_featureError))
                     {
                         <p class="text-muted small mb-3">@_featureError</p>
@@ -37,10 +37,12 @@
                         }
                         else
                         {
-                            <ul class="list-unstyled small mb-3">
+                            @* One line per repository; the full message is in the tooltip. *@
+                            <ul class="list-unstyled small mb-2">
                                 @foreach (var r in actionResults)
                                 {
-                                    <li>
+                                    var line = string.IsNullOrWhiteSpace(r.Message) ? $"{r.RepositoryName}: {r.Outcome}" : $"{r.RepositoryName}: {r.Outcome} - {r.Message}";
+                                    <li class="text-truncate" title="@line">
                                         <strong>@r.RepositoryName</strong>: @r.Outcome
                                         @if (!string.IsNullOrWhiteSpace(r.Message))
                                         {
@@ -62,21 +64,18 @@
                     else
                     {
                         var commonRowError = CommonRowError(_rows);
-                        <ul class="list-group list-group-flush">
+                        @* Compact rows: one line per repository, an error on one more line with the full text in the tooltip. *@
+                        <ul class="list-group list-group-flush small">
                             @foreach (var row in _rows)
                             {
-                                <li class="list-group-item px-0">
+                                <li class="list-group-item px-0 py-1">
                                     <div class="d-flex justify-content-between gap-2">
-                                        <strong>@row.RepositoryName</strong>
-                                        <span class="text-muted small">@FriendlyRepoState(row.State, _isRemoveIncomplete)</span>
+                                        <strong class="text-truncate" title="@row.RepositoryName">@row.RepositoryName</strong>
+                                        <span class="text-muted text-nowrap">@FriendlyRepoState(row.State, _isRemoveIncomplete)</span>
                                     </div>
                                     @if (commonRowError is null && !string.IsNullOrWhiteSpace(row.LastError))
                                     {
-                                        <div class="small text-danger mt-1">@row.LastError</div>
-                                    }
-                                    else if (string.Equals(row.State, "Removed", StringComparison.Ordinal) && _isRemoveIncomplete)
-                                    {
-                                        <div class="small text-muted mt-1">Already removed</div>
+                                        <div class="text-danger text-truncate" title="@row.LastError">@row.LastError</div>
                                     }
                                 </li>
                             }

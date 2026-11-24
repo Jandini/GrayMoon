@@ -51,6 +51,40 @@ public sealed class RepositoryConfigurationInitializerTests : IDisposable
     }
 
     [Fact]
+    public void A_repository_deleted_and_created_again_at_the_same_path_is_configured_again()
+    {
+        // The user's workaround for a broken repository: delete it and let Sync clone it again, all while the Worker
+        // keeps running. The remembered success belonged to the old config file and must not cover the new one.
+        var repo = CreateRepo(_root, "recloned");
+        var initializer = Create();
+        Assert.Equal(RepositoryConfigurationResult.Configured, initializer.EnsureWindowsLongPaths(repo, CancellationToken.None));
+
+        foreach (var file in Directory.EnumerateFiles(repo, "*", SearchOption.AllDirectories))
+            File.SetAttributes(file, FileAttributes.Normal);
+        Directory.Delete(repo, true);
+        repo = CreateRepo(_root, "recloned");
+        Assert.Null(Local(repo));
+
+        Assert.Equal(RepositoryConfigurationResult.Configured, initializer.EnsureWindowsLongPaths(repo, CancellationToken.None));
+        Assert.Equal("true", Local(repo));
+        Assert.Equal(RepositoryConfigurationResult.AlreadyConfigured, initializer.EnsureWindowsLongPaths(repo, CancellationToken.None));
+    }
+
+    [Fact]
+    public void A_setting_removed_from_the_config_later_is_restored_on_the_next_call()
+    {
+        var repo = CreateRepo(_root, "unset-later");
+        var initializer = Create();
+        Assert.Equal(RepositoryConfigurationResult.Configured, initializer.EnsureWindowsLongPaths(repo, CancellationToken.None));
+        Thread.Sleep(30);
+
+        Git(repo, "config --local --unset core.longpaths");
+
+        Assert.Equal(RepositoryConfigurationResult.Configured, initializer.EnsureWindowsLongPaths(repo, CancellationToken.None));
+        Assert.Equal("true", Local(repo));
+    }
+
+    [Fact]
     public void Existing_true_is_not_rewritten()
     {
         var repo = CreateRepo(_root, "already");

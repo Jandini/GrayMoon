@@ -19,6 +19,9 @@ public static class RepositoryOperationPolicyExpressions
     private static readonly MethodInfo IsOnTagMethod =
         typeof(RepositoryOperationPolicyExpressions).GetMethod(nameof(IsOnTag))!;
 
+    private static readonly MethodInfo HasCommitsToPushMethod =
+        typeof(RepositoryOperationPolicyExpressions).GetMethod(nameof(HasCommitsToPush))!;
+
     /// <summary>
     /// True when <paramref name="operation"/> may run, as one of many in a bulk action, on a repository with this
     /// stored tag, role and reference state. In a query this becomes column comparisons; a stored tag is never blank
@@ -51,7 +54,15 @@ public static class RepositoryOperationPolicyExpressions
     /// <summary>True when the stored tag says the repository is on a tag (null and the empty string are not a tag).</summary>
     public static bool IsOnTag(string? checkedOutTag) => !string.IsNullOrEmpty(checkedOutTag);
 
-    /// <summary>Replaces every <see cref="Allows"/> and <see cref="IsOnTag"/> call in the query with column comparisons.</summary>
+    /// <summary>
+    /// The one rule for when Push asks for attention (the yellow Push button, the yellow commits badge, the notification
+    /// panel): the repository has commits the remote does not have. A branch without an upstream and without commits of
+    /// its own does not count: a bulk push usually leaves it out (it reuses its parent's packages), and its badge is the
+    /// neutral gray cloud.
+    /// </summary>
+    public static bool HasCommitsToPush(int? outgoingCommits) => (outgoingCommits ?? 0) > 0;
+
+    /// <summary>Replaces every <see cref="Allows"/>, <see cref="IsOnTag"/> and <see cref="HasCommitsToPush"/> call in the query with column comparisons.</summary>
     public static IQueryable<T> ExpandRepositoryPolicy<T>(this IQueryable<T> query) =>
         query.Provider.CreateQuery<T>(new Expander().Visit(query.Expression));
 
@@ -95,6 +106,11 @@ public static class RepositoryOperationPolicyExpressions
 
             if (node.Method == IsOnTagMethod)
                 return OnTag(Visit(node.Arguments[0]));
+
+            if (node.Method == HasCommitsToPushMethod)
+                return Expression.GreaterThan(
+                    Expression.Coalesce(Visit(node.Arguments[0]), Expression.Constant(0)),
+                    Expression.Constant(0));
 
             return base.VisitMethodCall(node);
         }

@@ -96,7 +96,13 @@ public sealed class GitWorktreeService(
                 ? existingAtPath.IsDetached
                   && string.Equals(existingAtPath.HeadSha, baseCommitSha, StringComparison.OrdinalIgnoreCase)
                 : GitWorktreeOccupancy.MatchesExpected(existingAtPath, branchName);
-            if (matches)
+            if (!matches)
+            {
+                return (false, existingAtPath, false, "WorktreePathConflict",
+                    $"Path already hosts a worktree on branch '{existingAtPath.BranchName ?? "(detached)"}'.");
+            }
+
+            if (!await IsUnfinishedWorktreeAsync(canonicalWorktreePath, ct))
             {
                 logger.LogInformation(
                     "Worktree already exists at {WorktreePath} on {Branch}; treating create as idempotent success.",
@@ -104,8 +110,21 @@ public sealed class GitWorktreeService(
                 return (true, existingAtPath, true, null, null);
             }
 
-            return (false, existingAtPath, false, "WorktreePathConflict",
-                $"Path already hosts a worktree on branch '{existingAtPath.BranchName ?? "(detached)"}'.");
+            // Registered but never finished: the files of an earlier create were not all written (its process was
+            // killed, or the Worker stopped). Without an index it holds no staged work and no commit, so it is removed
+            // and created again below instead of being reported as an existing, finished worktree.
+            logger.LogWarning(
+                "Worktree at {WorktreePath} was never finished (no index); removing it to create it again.", canonicalWorktreePath);
+            var unfinishedError = await RemoveUnfinishedExistingWorktreeAsync(mainRepositoryPath, canonicalWorktreePath, branchName, baseCommitSha, ct);
+            if (unfinishedError != null)
+            {
+                return (false, null, false, "WorktreeUnfinished",
+                    $"The worktree at '{canonicalWorktreePath}' was never finished, and removing it to create it again failed: {unfinishedError}");
+            }
+
+            (listOk, worktrees, listCode, listError) = await ListWorktreesAsync(mainRepositoryPath, ct);
+            if (!listOk)
+                return (false, null, false, listCode, listError);
         }
 
         var branchOccupied = detach ? null : GitWorktreeOccupancy.FindByBranch(worktrees, branchName);
@@ -153,9 +172,12 @@ public sealed class GitWorktreeService(
         var longPathsMs = (long)Stopwatch.GetElapsedTime(longPathsStartedAt).TotalMilliseconds;
 
         // Offline-safe: start from local commit SHA; never --force for normal creation.
+        // --no-checkout: registering the worktree is quick, but writing its files takes as long as the checkout of the
+        // original clone did, and git worktree add prints nothing while it does that when its output is not a terminal.
+        // The files are written by the checkout below instead, which can be told to report progress.
         string[] addArgs = detach
-            ? ["worktree", "add", "--detach", canonicalWorktreePath, baseCommitSha]
-            : ["worktree", "add", "-b", branchName!, canonicalWorktreePath, baseCommitSha];
+            ? ["worktree", "add", "--no-checkout", "--detach", "--", canonicalWorktreePath, baseCommitSha]
+            : ["worktree", "add", "--no-checkout", "-b", branchName!, "--", canonicalWorktreePath, baseCommitSha];
         var addStartedAt = Stopwatch.GetTimestamp();
         // A removal that outwaits its grace period cancels the lease; the add then stops instead of racing the delete.
         using var addCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct, addLease.Yield);
@@ -176,6 +198,42 @@ public sealed class GitWorktreeService(
             return (false, null, false, "GitFailed", error);
         }
 
+        // --progress makes git report "Updating files: n% (x/y)" although its output is not a terminal. Those lines
+        // are the heartbeat: GitProcessRunner gives this command the clone tier (no total bound by default, killed only
+        // after CloneIdleTimeoutSeconds without output), and every line streamed to the App also restarts the App's
+        // own inactivity window for this Worker command. --force populates the empty index and working tree from HEAD.
+        var checkoutStartedAt = Stopwatch.GetTimestamp();
+        string? checkoutError;
+        try
+        {
+            var (checkoutExit, checkoutStdout, checkoutStderr) = await runner.RunAsync(
+                "git",
+                ["checkout", "--progress", "--force"],
+                canonicalWorktreePath,
+                null,
+                addCancellation.Token);
+            checkoutError = checkoutExit == 0
+                ? null
+                : CombineOutput(checkoutStdout, checkoutStderr) ?? "git checkout failed";
+        }
+        catch (OperationCanceledException)
+        {
+            await RemoveUnfilledWorktreeAsync(mainRepositoryPath, canonicalWorktreePath, branchName, baseCommitSha);
+            throw;
+        }
+
+        var checkoutMs = (long)Stopwatch.GetElapsedTime(checkoutStartedAt).TotalMilliseconds;
+        if (checkoutError != null)
+        {
+            logger.LogError(
+                "Git checkout of new worktree failed for {RepoPath}. Branch={Branch}, Path={WorktreePath}. {Error}",
+                mainRepositoryPath, branchName, canonicalWorktreePath, checkoutError);
+            var cleanupError = await RemoveUnfilledWorktreeAsync(mainRepositoryPath, canonicalWorktreePath, branchName, baseCommitSha);
+            return (false, null, false, "CheckoutFailed", cleanupError == null
+                ? $"Writing the worktree files failed; the worktree was removed again. {checkoutError}"
+                : $"Writing the worktree files failed, and removing the unfinished worktree failed too ({cleanupError}). {checkoutError}");
+        }
+
         var verifyStartedAt = Stopwatch.GetTimestamp();
         var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
         if (!verifyOk)
@@ -191,9 +249,107 @@ public sealed class GitWorktreeService(
         }
 
         logger.LogInformation(
-            "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}. PreListMs={PreListMs} LongPathsMs={LongPathsMs} AddMs={AddMs} VerifyListMs={VerifyListMs}",
-            mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha, preListMs, longPathsMs, addMs, verifyMs);
+            "Git worktree created for {RepoPath}. Branch={Branch}, Path={WorktreePath}, Head={Head}. PreListMs={PreListMs} LongPathsMs={LongPathsMs} AddMs={AddMs} CheckoutMs={CheckoutMs} VerifyListMs={VerifyListMs}",
+            mainRepositoryPath, created.BranchName, created.WorktreePath, created.HeadSha, preListMs, longPathsMs, addMs, checkoutMs, verifyMs);
         return (true, created, false, null, null);
+    }
+
+    /// <summary>
+    /// True when the worktree is registered but its checkout never completed: git writes a worktree's index only at the
+    /// end of the checkout, so a finished worktree always has one, and one whose files were never all written does not.
+    /// That is what a killed <c>git worktree add</c> leaves behind (with a stale <c>index.lock</c> and git's own
+    /// "initializing" lock), and what an interrupted <c>checkout --progress</c> leaves. False when it cannot be told.
+    /// </summary>
+    private async Task<bool> IsUnfinishedWorktreeAsync(string worktreePath, CancellationToken ct)
+    {
+        if (!Directory.Exists(worktreePath))
+            return false;
+
+        var (exitCode, stdout, _) = await runner.RunAsync(
+            "git", ["--no-optional-locks", "rev-parse", "--git-path", "index"], worktreePath, null, ct, GitLockIntent.Read);
+        var indexPath = stdout?.Trim();
+        if (exitCode != 0 || string.IsNullOrEmpty(indexPath))
+            return false;
+
+        return !File.Exists(Path.IsPathRooted(indexPath) ? indexPath : Path.Combine(worktreePath, indexPath));
+    }
+
+    /// <summary>
+    /// Removes a registered worktree found unfinished by <see cref="IsUnfinishedWorktreeAsync"/>, through
+    /// <see cref="RemoveWorktreeAsync"/> (releases the Worker's own handles on it, clears git's "initializing" lock, and
+    /// removes the folder), then the Feature branch when it still points at the base commit, so the create can start
+    /// over. Returns null on success, else what failed.
+    /// </summary>
+    private async Task<string?> RemoveUnfinishedExistingWorktreeAsync(
+        string mainRepositoryPath, string worktreePath, string? branchName, string baseCommitSha, CancellationToken ct)
+    {
+        var (removed, _, removeCode, removeError, _) = await RemoveWorktreeAsync(
+            mainRepositoryPath, worktreePath, force: true, ct, unlock: true);
+        if (!removed)
+            return removeError ?? removeCode ?? "git worktree remove failed";
+
+        return string.IsNullOrWhiteSpace(branchName)
+            ? null
+            : await DeleteBranchAtBaseAsync(mainRepositoryPath, branchName, baseCommitSha, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Deletes a Feature branch that a create made and nothing has used: only while it still points at
+    /// <paramref name="baseCommitSha"/>, so a branch that has moved (has commits of its own) is never deleted. A branch
+    /// that does not exist counts as deleted. Returns null on success, else what failed.
+    /// </summary>
+    private async Task<string?> DeleteBranchAtBaseAsync(string mainRepositoryPath, string branchName, string baseCommitSha, CancellationToken ct)
+    {
+        var (tipExit, tipStdout, _) = await runner.RunAsync(
+            "git", ["rev-parse", "--verify", "--quiet", "--end-of-options", $"refs/heads/{branchName}^{{commit}}"],
+            mainRepositoryPath, null, ct, GitLockIntent.Read);
+        if (tipExit != 0)
+            return null;
+
+        var tip = tipStdout?.Trim();
+        if (!string.Equals(tip, baseCommitSha, StringComparison.OrdinalIgnoreCase))
+            return $"Branch '{branchName}' was left in place because it has moved from the base commit {baseCommitSha} to {tip}.";
+
+        var (branchExit, branchStdout, branchStderr) = await runner.RunAsync(
+            "git", ["branch", "-D", "--", branchName], mainRepositoryPath, null, ct);
+        return branchExit == 0 ? null : CombineOutput(branchStdout, branchStderr) ?? "git branch -D failed";
+    }
+
+    /// <summary>
+    /// Undoes a <c>git worktree add --no-checkout</c> whose checkout did not finish, so a half-written worktree is never
+    /// left registered (a later Create or Repair would otherwise accept it as already there). Removes the worktree and,
+    /// when the add created a branch, that branch: it was made a moment ago at the base commit and holds no work.
+    /// Runs uncancellable, since it also runs after a cancellation. Returns null on success, else what failed.
+    /// </summary>
+    private async Task<string?> RemoveUnfilledWorktreeAsync(string mainRepositoryPath, string worktreePath, string? createdBranch, string baseCommitSha)
+    {
+        var failures = new List<string>();
+        try
+        {
+            var (removeExit, removeStdout, removeStderr) = await runner.RunAsync(
+                "git", ["worktree", "remove", "--force", "--", worktreePath], mainRepositoryPath, null, CancellationToken.None);
+            if (removeExit != 0)
+                failures.Add(CombineOutput(removeStdout, removeStderr) ?? "git worktree remove failed");
+            else if (!string.IsNullOrWhiteSpace(createdBranch)
+                     && await DeleteBranchAtBaseAsync(mainRepositoryPath, createdBranch, baseCommitSha, CancellationToken.None) is { } branchError)
+            {
+                failures.Add(branchError);
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add(ex.Message);
+        }
+
+        if (failures.Count == 0)
+        {
+            logger.LogInformation("Removed unfinished worktree {WorktreePath} (branch {Branch})", worktreePath, createdBranch ?? "(detached)");
+            return null;
+        }
+
+        var error = string.Join(" ", failures);
+        logger.LogError("Could not remove unfinished worktree {WorktreePath} (branch {Branch}): {Error}", worktreePath, createdBranch ?? "(detached)", error);
+        return error;
     }
 
     public async Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(

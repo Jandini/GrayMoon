@@ -122,6 +122,19 @@ public sealed class DependencyUpdateOrchestrator(
             return DependencyUpdateRunResult.Failed();
         }
 
+        // Start check (effective versions, D3): with fresh registry answers, decide which repositories reuse their parent's
+        // published packages. A repository whose packages cannot be verified stops the run here, before any change.
+        setProgress("Verifying published packages...");
+        var startCheck = await ResolveEffectiveVersionsAsync(workspaceId, contextId, repositoryIds: null, startCheck: true, cancellationToken, progress);
+        if (startCheck.StopMessage is { } stopMessage)
+        {
+            OnLevelError(0, stopMessage);
+            return DependencyUpdateRunResult.Failed();
+        }
+
+        foreach (var notice in startCheck.Decisions.Where(d => d.ReasonCode == EffectiveVersionReasonCodes.PackageNotPublished && d.Message != null))
+            setProgress(notice.Message!);
+
         // Step 2+: Walk every dependency level (up to maxLevel). Do not limit the level walk to the
         // initial reposNeedingWork set - a lower-level csproj commit refreshes GitVersion and can mark
         // higher-level version files out of date; those repos must still be visited for file updates.
@@ -525,8 +538,32 @@ public sealed class DependencyUpdateOrchestrator(
             }
         }
 
+        // These repositories committed, so they left their branch point: their effective version is their own from now on
+        // (no Worker or registry call is made for them).
+        await ResolveEffectiveVersionsAsync(workspaceId, contextId, repositoryIds.ToHashSet(), startCheck: false, cancellationToken);
+
         onAppSideComplete?.Invoke();
         return true;
+    }
+
+    /// <summary>Resolves effective versions in a scope of its own, so the resolver's reads and writes never share this run's context.</summary>
+    private async Task<GrayMoon.App.Services.Versions.EffectiveVersionResolution> ResolveEffectiveVersionsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        IReadOnlySet<int>? repositoryIds,
+        bool startCheck,
+        CancellationToken cancellationToken,
+        IProgress<OperationProgress>? progress = null)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        if (startCheck)
+        {
+            return await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>()
+                .RunAsync(workspaceId, contextId, repositoryIds, "Update", cancellationToken, progress);
+        }
+
+        return await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Versions.EffectiveVersionResolver>()
+            .ResolveAsync(workspaceId, contextId, repositoryIds, bypassCache: false, cancellationToken);
     }
 
     /// <summary>

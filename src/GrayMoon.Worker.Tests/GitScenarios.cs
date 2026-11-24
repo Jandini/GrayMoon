@@ -136,6 +136,37 @@ internal static class GitScenarios
         return Path.Combine(root, "ws", "repo");
     }
 
+    /// <summary>
+    /// A GitVersion repository at a branch point: <c>origin.git</c> and a clone at <c>ws/repo</c> with a
+    /// <c>GitVersion.yml</c> (ContinuousDeployment), tag <c>v2.3.0</c> and one more commit on <c>main</c>, and
+    /// <c>release/2.4</c> pushed at that commit. The clone has <c>release/2.4</c> locally and is checked out on
+    /// <c>feature/abc</c>, created at the same commit and never pushed. Returns the clone's path.
+    /// </summary>
+    public static string BranchPointRepository(string root)
+    {
+        var spec = new CommitSpec(File: "GitVersion.yml", Content: "mode: ContinuousDeployment\n");
+        GitTemplateCache.CopyTo("branch-point-repository", root, template =>
+        {
+            var origin = Path.Combine(template, "origin.git");
+            var workspace = Path.Combine(template, "ws");
+            Directory.CreateDirectory(origin);
+            Directory.CreateDirectory(workspace);
+            Git(origin, "init --bare --initial-branch=main");
+            Git(workspace, $"clone \"{origin}\" repo");
+            var repo = Path.Combine(workspace, "repo");
+            Identify(repo, spec);
+            Commit(repo, spec);
+            Git(repo, "tag v2.3.0");
+            Commit(repo, spec with { File = "b.txt", Content = "b\n", Message = "second" });
+            Git(repo, "push -q -u origin main --tags");
+            Git(repo, "branch release/2.4");
+            Git(repo, "push -q origin release/2.4");
+            Git(repo, "checkout -q -b feature/abc");
+        });
+
+        return Path.Combine(root, "ws", "repo");
+    }
+
     private static void Identify(string repo, CommitSpec spec)
     {
         Git(repo, $"config user.email {spec.UserEmail}");

@@ -129,6 +129,67 @@ public sealed class GitServiceCreateBranchTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task A_created_branch_reports_the_remote_start_ref_and_the_commit_it_starts_on()
+    {
+        // A local main that is ahead of origin/main: the branch starts from origin/main, and the baseline says so.
+        CommitFile("local.md", "local\n");
+        Assert.NotEqual(_mainSha, Head());
+
+        var result = await _git.CreateBranchAsync(_repo, "feature/x", "main", CancellationToken.None);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("origin/main", result.ResolvedStartRef);
+        Assert.Equal(_mainSha, result.BaseCommitSha);
+        Assert.Equal(_mainSha, Head());
+    }
+
+    [Fact]
+    public async Task A_local_only_base_is_the_start_ref_when_origin_has_no_such_branch()
+    {
+        Git("branch release/local");
+        var localSha = Head();
+
+        var result = await _git.CreateBranchAsync(_repo, "feature/x", "release/local", CancellationToken.None);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("release/local", result.ResolvedStartRef);
+        Assert.Equal(localSha, result.BaseCommitSha);
+    }
+
+    [Fact]
+    public async Task An_existing_branch_and_a_repository_without_commits_report_no_baseline()
+    {
+        Git("branch feature/x");
+        var existing = await _git.CreateBranchAsync(_repo, "feature/x", "main", CancellationToken.None);
+        Assert.True(existing.AlreadyExisted);
+        Assert.Null(existing.ResolvedStartRef);
+        Assert.Null(existing.BaseCommitSha);
+
+        var root = Directory.CreateTempSubdirectory("graymoon-create-branch-unborn-").FullName;
+        try
+        {
+            var empty = GitScenarios.ClonedRepository(root, commit: false);
+            var unborn = await _git.CreateBranchAsync(empty, "feature/y", "main", CancellationToken.None);
+            Assert.True(unborn.Success, unborn.ErrorMessage);
+            Assert.Null(unborn.ResolvedStartRef);
+            Assert.Null(unborn.BaseCommitSha);
+        }
+        finally
+        {
+            TestDirectory.Delete(root);
+        }
+    }
+
+    [Fact]
+    public async Task A_base_that_looks_like_an_option_is_refused()
+    {
+        var result = await _git.CreateBranchAsync(_repo, "feature/x", "--orphan", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("main", CurrentBranch());
+    }
+
     private void CommitFile(string name, string content)
     {
         File.WriteAllText(Path.Combine(_repo, name), content);

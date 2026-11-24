@@ -173,7 +173,7 @@ internal sealed record GitVersionInputFingerprint(
             .Where(e => e.Key is string k && k.StartsWith("GITVERSION", StringComparison.OrdinalIgnoreCase))
             .Select(e => e.Key + "=" + e.Value)
             .OrderBy(s => s, StringComparer.Ordinal);
-        return Sha($"nonormalize={options.NonNormalize}\nsha={options.CommitSha?.Trim()}\n{string.Join('\n', env)}");
+        return Sha($"nonormalize={options.NonNormalize}\nsha={options.CommitSha?.Trim()}\nbranch={options.BranchName?.Trim()}\n{string.Join('\n', env)}");
     }
 
     private static string HashFile(string path)

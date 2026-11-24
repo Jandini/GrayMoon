@@ -12,4 +12,7 @@ public sealed class GitVersionResult
 
     [JsonPropertyName("EscapedBranchName")]
     public string? EscapedBranchName { get; set; }
+
+    [JsonPropertyName("Sha")]
+    public string? Sha { get; set; }
 }

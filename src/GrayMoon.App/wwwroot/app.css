@@ -40,7 +40,10 @@
     --text-primary: #cccccc;
     --text-secondary: #858585;
     --text-muted: #6a6a6a;
-    
+
+    /* The one gray of a grid badge that asks for nothing: PR "none", dependencies "none", the no-upstream cloud. */
+    --badge-neutral-bg: #495057;
+
     --border-color: #3e3e42;
     --border-hover: #4e4e52;
     --border-light: #5a5a5a;
@@ -753,11 +756,11 @@ select:disabled,
     font-weight: 400; /* normal weight (not bold) for all badges */
 }
 
-/* Not-upstreamed commits badge: icon must stay black (overrides .table tbody td * below) */
-.table tbody td .badge.commits-badge-not-upstreamed .commits-badge-icon-up--black .bi,
-.table tbody td .badge.commits-badge-not-upstreamed .commits-badge-icon-up--black .bi::before {
-    color: #000 !important;
-    -webkit-text-fill-color: #000 !important;
+/* Not-upstreamed commits badge: icon must stay white (overrides .table tbody td * below) */
+.table tbody td .badge.commits-badge-not-upstreamed .commits-badge-icon-up--white .bi,
+.table tbody td .badge.commits-badge-not-upstreamed .commits-badge-icon-up--white .bi::before {
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
 }
 
 .bg-success {
@@ -1412,7 +1415,7 @@ table.resizable-columns th:hover .resize-handle::after {
     font-weight: 400;
 }
 .repositories-table td.col-pr .pr-badge-none {
-    background-color: #495057;
+    background-color: var(--badge-neutral-bg);
     color: #fff !important;
 }
 .repositories-table td.col-pr .pr-badge-create {
@@ -1722,4 +1725,10 @@ a.repo-fork-badge--link:focus-visible {
 .table tbody td a.repo-fork-badge {
     color: #fff !important;
     text-decoration: none;
+}
+
+/* Up arrow after a parent or Source branch name (Repositories read only snapshot, Actions parent branch): shorter than the text so it does not read as a letter. */
+.branch-parent-arrow {
+    font-size: 0.75em;
+    vertical-align: 0.05em;
 }

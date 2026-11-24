@@ -142,7 +142,7 @@ public sealed class ArchivedRepositoryPolicyTests
         var skip = Assert.Single(push.Skipped);
         Assert.Equal(graph.ProducerId, skip.RepositoryId);
         Assert.Equal(RepositoryOperationReason.Archived, skip.Reason);
-        Assert.Equal($"1 archived repository skipped: {ProducerName}.", RepositorySkipSummary.Describe(push.Skipped));
+        Assert.Equal("Skipped 1 archived repo.",RepositorySkipSummary.Describe(push.Skipped));
         Assert.Empty(pull.Skipped);
         Assert.Equal(RepositoryOperationOutcome.Refused, single.Outcome);
         Assert.Equal(RepositoryOperationPolicy.ArchivedMessage, single.Message);

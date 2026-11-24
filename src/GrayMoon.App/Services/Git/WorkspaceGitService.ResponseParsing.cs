@@ -114,6 +114,7 @@ public sealed partial class WorkspaceGitService
             {
                 BranchName = branch,
                 CheckedOutTag = resolvedTag,
+                HeadCommit = commit,
                 GitVersion = version == "-" ? null : version,
                 DefaultBranchName = defaultBranch,
                 OutgoingCommits = outgoingCommits,
@@ -167,6 +168,8 @@ public sealed partial class WorkspaceGitService
             {
                 BranchName = branch,
                 CheckedOutTag = tag,
+                // HEAD moves with every commit the update makes; the effective version is decided per HEAD.
+                HeadCommit = commit,
                 GitVersion = version == "-" ? null : version,
                 OutgoingCommits = outgoingCommits,
                 IncomingCommits = incomingCommits,

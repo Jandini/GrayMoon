@@ -55,4 +55,19 @@ public sealed class WorkspaceRepositoryContextState
     public bool? HasSelfFileVersionToken { get; set; }
     public int? TotalFileLines { get; set; }
     public ProjectType? RepositoryType { get; set; }
+
+    /// <summary>The version dependents and {@Repo} tokens use when <see cref="EffectiveVersionKind"/> is InheritedVerified; for Own, the calculated GitVersion it was resolved with. Written only by <c>WorkspaceRepositoryStateWriter.WriteEffectiveVersionAsync</c>.</summary>
+    [MaxLength(100)]
+    public string? EffectiveVersion { get; set; }
+
+    /// <summary><see cref="Models.EffectiveVersionKind"/> as an int; null = never resolved.</summary>
+    public int? EffectiveVersionKind { get; set; }
+
+    /// <summary>The <see cref="HeadCommit"/> the effective version was resolved for. An inheritance counts only while HEAD is still this commit (I10).</summary>
+    [MaxLength(64)]
+    public string? EffectiveVersionCommitSha { get; set; }
+
+    /// <summary>Why the kind was chosen (<see cref="EffectiveVersionReasonCodes"/>).</summary>
+    [MaxLength(50)]
+    public string? EffectiveVersionReasonCode { get; set; }
 }

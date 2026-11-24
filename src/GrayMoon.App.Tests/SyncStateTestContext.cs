@@ -129,6 +129,15 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<GrayMoon.Application.Workspaces.IWorkspaceReferenceOperations, GrayMoon.App.Services.Application.WorkspaceReferenceOperations>();
         services.AddScoped<WorkspaceStateRecomputeScope>();
         services.AddScoped<WorkspaceDependencyService>();
+        // Effective versions (resolver, start check, registry verifier). A test that reaches a registry replaces the
+        // HttpClient; without a recorded branch point nothing here calls the Worker or a registry.
+        services.AddScoped<GrayMoon.App.Services.Connectors.NuGetService>();
+        services.AddScoped<GrayMoon.App.Services.Connectors.PackageRegistrySyncService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<GrayMoon.App.Services.Versions.PackageAvailabilityCache>();
+        services.AddScoped<GrayMoon.App.Services.Versions.PackageAvailabilityVerifier>();
+        services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionResolver>();
+        services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>();
         // Per-host singleton: parallel tests seed workspace id 1 in separate DBs and must not share the process
         // coalescer key, or one fixture can swallow the other's CheckFileVersions call.
         services.AddSingleton<FileVersionCheckCoalescer>();

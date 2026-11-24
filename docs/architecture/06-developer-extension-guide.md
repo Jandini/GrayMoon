@@ -454,6 +454,8 @@ Rules:
 - **Processes.** Launch processes only through `ICommandLineService` or `IBoundedProcessRunner` (both wrapped by the repository-access broker, section 15A); never `Process.Start` ad hoc. Use `IBoundedProcessRunner` (argument list, output caps, no argument logging) for anything that can produce unbounded output or carries user content.
 - **Remote auth.** Remote Git operations get credentials from the existing remote-auth path (`GitRemoteAuth`); see section 16.
 - **File writes into a repository** use `WriteRepositoryFile` semantics: temp file + move, reject absolute, `..` and `.git` paths, optional `onlyIfChanged`.
+- **GitVersion.** Ask for a version only through `IRepositoryVersionProvider` (`RepositoryVersionOptions`: `NonNormalize`, `CommitSha`, `BranchName`). GitVersion takes one argument string, so a SHA or branch name that goes into it passes `GitVersionArguments` first. A version for another branch than the checked-out one needs `BranchName` (which adds `/b` and `/nocache`) and must be checked with `GitVersionBranchPoint.DescribeMismatch`, because GitVersion answers for another branch or commit without failing (`04-runtime-communication-and-concurrency.md`, section 16C). `GetGitVersionAtBranchPoint` (effective versions) and `GetGitVersionAtDefaultTip` are the examples.
+- **Effective versions.** Code that compares a producer's version with what its consumers reference reads `WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync` (the effective version), never `GitVersion` directly; code that needs the calculated version reads `GitVersion`. A new bulk operation that changes repositories and depends on package versions runs `EffectiveVersionStartCheck` before its first change, and a new bulk push path selects through `GetRepositoryIdsNeedingPushAsync` (`05-user-capability-reference.md`, Push).
 
 ---
 
@@ -469,7 +471,7 @@ Rules for new Worker code:
 - App side, `ErrorCode = "PathUnderRemoval"` from `GetGitChangeStatus` is an expected outcome, not an error. `IWorkspaceGitChangesMonitoringPause` is only an optimization; the Worker is authoritative.
 - A `RepositoryAccessException` means the Worker could not release its own handles. Treat it as a defect, not an outcome to handle.
 
-Git configuration rules: `core.longpaths=true` only on Windows, only in the repository's common local config (`RepositoryConfigurationInitializer`); `git config --global --add safe.directory` only after `CheckRepoSafeAsync` reports dubious ownership; no other global or system config writes.
+Git configuration rules: `core.longpaths=true` only on Windows, only in the repository's common local config (`RepositoryConfigurationInitializer`, and `git clone -c` for a new clone); `git config --global --add safe.directory` only after `CheckRepoSafeAsync` reports dubious ownership; no other global or system config writes.
 
 ---
 
@@ -605,11 +607,11 @@ Reference test: `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_so
 ## 20B. Worktree safety rules
 
 - HEAD is per worktree; `refs/heads/*`, remote refs and hooks are shared through the common git dir. Never copy `.git`, edit `.git/worktrees/*`, move a worktree with a filesystem move, or bypass `git worktree`.
-- Never `git worktree add --force`. `git worktree remove --force` only when the user authorized discarding changes; unlock only when authorized. No global `git worktree prune`.
+- Never `git worktree add --force`. `git worktree remove --force` only when the user authorized discarding changes; unlock only when authorized. No global `git worktree prune`. One exception, inside `GitWorktreeService.CreateWorktreeAsync` only: a worktree that create itself left unfinished (no index, so no staged work and no commit) is force-removed and unlocked without asking, together with its Feature branch while that still points at the base commit, so Create and Repair never report a half-written worktree as existing.
 - Never auto-adopt external worktrees, and never default an ambiguous hook path to the Workspace (`WorkspaceHookContextAttributor` skips unknown paths).
 - Persist intent before the Git mutation (Create: Feature `Creating` + context + `Pending` rows in one transaction); on failure persist the lifecycle and per-repository error and allow retry (Repair). Never "catch, delete rows, hope". Git is authoritative for worktree existence, SQLite for ownership and intent.
 - Do not call `IWorkspaceContextPathResolver` (or anything that opens a second `AppDbContext`) inside the intent transaction: SQLite deadlock.
-- Worktree create is idempotent per repository (an existing matching worktree is success); keep that when changing retry or ordering. The Workspace-role (root) worktree is created first and removed last.
+- Worktree create is idempotent per repository (an existing matching, finished worktree is success; an unfinished one is created again, see above); keep that when changing retry or ordering. The Workspace-role (root) worktree is created first and removed last.
 - Deletes below the Feature storage root go through the Worker's guarded cleaners (`FeatureFolderCleaner`, residue removal): never a folder holding a `.git` directory, a registered worktree, an existing Feature, or a path outside a managed `...\features` root. Reparse points are deleted, never followed.
 - Repair, reconcile and rollback never delete worktrees the user still needs; the reconciler only changes lifecycle state.
 
@@ -759,11 +761,9 @@ Security (open review findings):
 
 Behavior:
 
-- **GitVersion at default tip.** `GetGitVersionAtDefaultTip` relies on GitVersion `/c <sha>`, which GitVersion ignores for a local repository, so merged Feature repositories get the Feature branch version and `ApplyDefaultTipVersionsForMergedFeatureReposAsync` has no useful effect (`GitVersionParityTests`, skipped).
 - **REST and Features.** REST acts only on the special Workspace; there are no Feature endpoints and no endpoint uses `IWorkspaceFeatureOperations`.
 - **Hooks are never removed** when a repository leaves a Workspace or the Workspace is deleted; renamed foreign hooks (`<hook>.replaced-by-graymoon`) stop running.
 - **Large tag lists.** The branch inventory's unique index `(WorkspaceRepositoryId, BranchName, IsRemote)` has no `IsTag`, so a tag and a local branch with the same name collide; `SwitchBranchModal` renders every tag without virtualization.
-- **DependencyStats Feature fallback.** `RecomputeAndPersistRepositoryDependencyStatsAsync` falls back to the shared link `GitVersion` for a Feature repository with no context-state row (`GetValueOrDefault(..., x.GitVersion)`), contrary to rule 20A.2.
 - **Bulk branch dialog.** `BranchModal` shows no branch occupancy; `WorkspaceBranchHandler.CheckoutBranchForWorkspaceAsync` skips held repositories but fails open (`OccupancyCheckDegraded`) when occupancy cannot be read.
 - **Git lock scope.** `GitProcessRunner` serializes git per working-tree path, so a Workspace checkout and its Feature worktrees do not share a lock; ref updates in the shared common git dir rely on git's own `*.lock` files.
 - **Copy absolute path** in Git Changes (`WorkspaceGitChanges.CopyPath.cs`) always joins with `\`, wrong for a Linux Worker.

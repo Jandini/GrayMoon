@@ -84,23 +84,25 @@ public sealed class PackageRegistrySyncService(
     /// Projects that already have <see cref="WorkspaceProject.MatchedConnectorId"/> are left alone: a miss is
     /// stored as null and would clear a match that is already known.
     /// </summary>
-    public async Task SyncRegistriesForPackageIdsAsync(
+    /// <returns>False when a registry lookup failed, so an unmatched package may still exist; true otherwise.</returns>
+    public async Task<bool> SyncRegistriesForPackageIdsAsync(
         int workspaceId,
         IReadOnlySet<string> packageIds,
         CancellationToken cancellationToken = default)
     {
-        if (packageIds == null || packageIds.Count == 0) return;
+        if (packageIds == null || packageIds.Count == 0) return true;
         var packages = await workspaceProjectRepository.GetPackagesByWorkspaceIdAndPackageIdsAsync(workspaceId, packageIds, cancellationToken);
         logger.LogTrace("Sync registries for {PackageCount} selected packages in workspace {WorkspaceId}.", packages.Count, workspaceId);
-        if (packages.Count == 0) return;
+        if (packages.Count == 0) return true;
 
         var connectors = (await connectorRepository.GetActiveAsync())
             .Where(c => ConnectorHelpers.IsPackageRegistry(c.ConnectorType))
             .ToList();
-        if (connectors.Count == 0) return;
+        if (connectors.Count == 0) return true;
 
         var projectIdToConnectorId = new ConcurrentDictionary<int, int?>();
         var total = packages.Count;
+        var anyLookupFailed = 0;
         var completed = 0;
         var maxParallel = Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
         var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = cancellationToken };
@@ -125,10 +127,13 @@ public sealed class PackageRegistrySyncService(
             // network error never clears a known mapping and the next sync retries.
             if (matchedConnectorId != null || !lookupFailed)
                 projectIdToConnectorId[p.ProjectId] = matchedConnectorId;
+            if (lookupFailed && matchedConnectorId == null)
+                Interlocked.Exchange(ref anyLookupFailed, 1);
             Interlocked.Increment(ref completed);
         });
 
         await workspaceProjectRepository.SetPackagesMatchedConnectorsAsync(workspaceId, new Dictionary<int, int?>(projectIdToConnectorId), cancellationToken);
+        return Volatile.Read(ref anyLookupFailed) == 0;
     }
 
     /// <summary>

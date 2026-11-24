@@ -77,7 +77,23 @@ public sealed record WorkspaceRepositoryLinkListItemDto(
     DateTimeOffset? ParentPullRequestMergedAt = null,
     bool? ParentPullRequestMergeable = null,
     string? ParentPullRequestMergeableState = null,
-    int? ParentPullRequestChangedFiles = null);
+    int? ParentPullRequestChangedFiles = null,
+    /// <summary>Effective version of the viewed context (its own state row; the special Workspace reads its own row too).</summary>
+    string? EffectiveVersion = null,
+    /// <summary><see cref="Models.EffectiveVersionKind"/> as an int; null = never resolved.</summary>
+    int? EffectiveVersionKind = null,
+    string? EffectiveVersionCommitSha = null,
+    string? EffectiveVersionReasonCode = null,
+    /// <summary>HEAD of the viewed context from its state row, for the effective version check (I10).</summary>
+    string? VersionHeadCommit = null,
+    /// <summary>Parent branch and commit of the recorded branch point (Feature row, or the baseline table for the special Workspace).</summary>
+    string? BaselineParentBranchName = null,
+    string? BaselineCommitSha = null)
+{
+    /// <summary>True when the context reuses its parent's verified, published version and HEAD is still the commit it was verified for.</summary>
+    public bool IsVersionInherited
+        => EffectiveVersionRules.IsInherited(EffectiveVersionKind, EffectiveVersion, EffectiveVersionCommitSha, VersionHeadCommit);
+}
 
 public sealed record WorkspaceRepositoryLinkListPageResult(
     IReadOnlyList<WorkspaceRepositoryLinkListItemDto> Items,

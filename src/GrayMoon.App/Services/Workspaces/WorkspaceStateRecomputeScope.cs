@@ -33,7 +33,8 @@ public sealed class WorkspaceStateRecomputeScope(
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IHubContext<WorkspaceSyncHub> hubContext,
     ILogger<WorkspaceStateRecomputeScope> logger,
-    WorkspaceFileVersionService? fileVersionService = null)
+    WorkspaceFileVersionService? fileVersionService = null,
+    GrayMoon.App.Services.Versions.EffectiveVersionResolver? effectiveVersionResolver = null)
 {
     /// <summary>Recomputes file-version and dependency stats for the given Feature context, then broadcasts sync once.</summary>
     public async Task CompleteAsync(
@@ -52,6 +53,9 @@ public sealed class WorkspaceStateRecomputeScope(
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
+        // Effective versions first (design D5): the file-version check and the dependency stats below compare against them.
+        await ResolveEffectiveVersionsAsync(workspaceId, contextId, cancellationToken);
+
         if (fileVersionService != null)
         {
             try
@@ -67,6 +71,30 @@ public sealed class WorkspaceStateRecomputeScope(
         }
 
         await RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the effective versions of every repository of the context after its state was written (cached registry
+    /// answers; a repository that left its branch point costs no Worker or registry call). A failure is logged and the
+    /// stored decisions stay as they were: a stale inheritance is ignored at read once HEAD moves (I10), and every
+    /// operation start resolves again with fresh answers.
+    /// </summary>
+    public async Task ResolveEffectiveVersionsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+    {
+        if (effectiveVersionResolver == null)
+            return;
+
+        try
+        {
+            await effectiveVersionResolver.ResolveAsync(workspaceId, contextId, repositoryIds: null, bypassCache: false, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Effective version resolution failed for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
+        }
     }
 
     /// <summary>

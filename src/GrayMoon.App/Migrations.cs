@@ -52,6 +52,7 @@ public static partial class Migrations
         (18, "Connector removed-at column", dbContext => MigrateConnectorRemovedAtColumnAsync(dbContext)),
         (19, "Reference repository columns", dbContext => MigrateReferenceRepositoriesAsync(dbContext)),
         (20, "Agent environment variables", dbContext => MigrateAgentEnvironmentVariablesAsync(dbContext)),
+        (21, "Effective versions and branch baselines", dbContext => MigrateEffectiveVersionsAsync(dbContext)),
     };
 
     public static Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null) =>
@@ -84,7 +85,11 @@ public static partial class Migrations
         // Older strict steps load Workspaces, links and Feature repositories through EF, and the EF model already has
         // the reference columns. Add them first; strict step 19 repeats this idempotently and records the version.
         if (strictPending.Count > 0)
+        {
             await MigrateReferenceRepositoriesAsync(dbContext, logger);
+            // Strict step 16 inserts context state rows through EF; strict step 21 repeats this idempotently.
+            await AddEffectiveVersionColumnsAsync(conn);
+        }
 
         foreach (var step in strictPending)
             await RunStrictStepAsync(dbContext, step.Version, step.Name, step.Action, backupPath, logger);

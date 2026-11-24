@@ -8,6 +8,7 @@ public sealed class WorkspaceActionsGatingTests
     private static WorkspaceActions.WorkspaceActionRow CreateRow(string? branchName) => new()
     {
         Link = new WorkspaceRepositoryLink { BranchName = branchName },
+        CiBranchName = branchName,
         Repo = new GitHubRepositoryEntry { RepositoryName = "widgets", OrgName = "acme", ConnectorName = "GitHub" }
     };
 

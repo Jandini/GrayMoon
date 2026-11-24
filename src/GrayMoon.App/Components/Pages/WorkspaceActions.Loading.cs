@@ -36,10 +36,10 @@ public sealed partial class WorkspaceActions
             // For a Feature context, the checked-out branch and the dependency level live on
             // WorkspaceRepositoryContextState, not on the special Workspace's link - overlay them per repository so
             // Actions polls/displays the Feature's own branch and level instead of silently showing the Workspace's (§18/§2.2).
-            var contextStateByRepositoryId = _isFeatureContext
-                ? (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
-                    .ToDictionary(dto => dto.RepositoryId)
-                : [];
+            // The snapshot of the viewed context also carries the upstream, outgoing commits and recorded parent branch
+            // that pick the CI branch (UnpublishedBranchRules.CiBranch), for the special Workspace as well.
+            var contextStateByRepositoryId = (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: !_isFeatureContext))
+                .ToDictionary(dto => dto.RepositoryId);
 
             rows = workspace.Repositories
                 .Where(link => link.Repository != null && link.Repository.Connector != null)
@@ -51,9 +51,11 @@ public sealed partial class WorkspaceActions
                         ? link.WithBranchOverride(contextState?.BranchName)
                         : link;
 
+                    var ciBranch = ResolveCiBranch(effectiveLink, contextState);
+
                     var hasPersisted = persistedActions.TryGetValue(effectiveLink.RepositoryId, out var persisted);
                     var branchMatches = hasPersisted &&
-                        string.Equals(persisted?.BranchName, effectiveLink.BranchName, StringComparison.OrdinalIgnoreCase);
+                        string.Equals(persisted?.BranchName, ciBranch, StringComparison.OrdinalIgnoreCase);
 
                     List<WorkflowActionLine> workflowLines;
                     if (branchMatches && persisted != null && persisted.Workflows.Count > 0)
@@ -68,6 +70,7 @@ public sealed partial class WorkspaceActions
                     return new WorkspaceActionRow
                     {
                         Link = effectiveLink,
+                        CiBranchName = ciBranch,
                         Repo = new GitHubRepositoryEntry
                         {
                             RepositoryId = link.Repository!.RepositoryId,
@@ -110,7 +113,7 @@ public sealed partial class WorkspaceActions
             var rowsToRefresh = await ApplyFreshWorkspaceLinksAsync();
             await InvokeAsync(StateHasChanged);
 
-            foreach (var row in rowsToRefresh.Where(r => !string.IsNullOrWhiteSpace(r.Link.BranchName)))
+            foreach (var row in rowsToRefresh.Where(r => !string.IsNullOrWhiteSpace(r.CiBranchName)))
                 _ = RefreshRowAsync(row, _cts.Token);
         }
         catch (Exception ex)
@@ -142,7 +145,7 @@ public sealed partial class WorkspaceActions
             foreach (var repositoryId in repositoryIds)
             {
                 var row = rows.FirstOrDefault(r => r.Repo.RepositoryId == repositoryId);
-                if (row == null || string.IsNullOrWhiteSpace(row.Link.BranchName))
+                if (row == null || string.IsNullOrWhiteSpace(row.CiBranchName))
                     continue;
 
                 _ = RefreshRowAfterHookSyncAsync(row, _cts.Token);
@@ -167,13 +170,9 @@ public sealed partial class WorkspaceActions
 
         workspace = freshWorkspace;
 
-        Dictionary<int, GrayMoon.App.Services.Queries.WorkspaceRepositoryLinkListItemDto> contextStateByRepositoryId = [];
-        if (_isFeatureContext)
-        {
-            var linkListQuery = scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Queries.IWorkspaceRepositoryLinkListQueryService>();
-            contextStateByRepositoryId = (await linkListQuery.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: false))
-                .ToDictionary(dto => dto.RepositoryId);
-        }
+        var linkListQuery = scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Queries.IWorkspaceRepositoryLinkListQueryService>();
+        var contextStateByRepositoryId = (await linkListQuery.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: !_isFeatureContext))
+            .ToDictionary(dto => dto.RepositoryId);
 
         var freshLinks = freshWorkspace.Repositories
             .Where(l => l.Repository != null && l.Repository.Connector != null)
@@ -187,8 +186,10 @@ public sealed partial class WorkspaceActions
             var contextState = contextStateByRepositoryId.GetValueOrDefault(row.Repo.RepositoryId);
             var freshLink = _isFeatureContext ? sharedLink.WithBranchOverride(contextState?.BranchName) : sharedLink;
 
-            var branchChanged = !string.Equals(row.Link.BranchName, freshLink.BranchName, StringComparison.OrdinalIgnoreCase);
+            var freshCiBranch = ResolveCiBranch(freshLink, contextState);
+            var branchChanged = !string.Equals(row.CiBranchName, freshCiBranch, StringComparison.OrdinalIgnoreCase);
             row.Link = freshLink;
+            row.CiBranchName = freshCiBranch;
             row.DependencyLevel = ResolveDependencyLevel(sharedLink, _isFeatureContext, contextState?.DependencyLevel);
             row.IsWorkspaceRepository = sharedLink.Role == WorkspaceRepositoryRole.Workspace;
 
@@ -204,6 +205,13 @@ public sealed partial class WorkspaceActions
         SyncSuccessFilterWithRunning();
         return rowsToRefresh;
     }
+
+    /// <summary>The CI branch of one row from the snapshot of the viewed context; without a snapshot it is the checked-out branch.</summary>
+    internal static string? ResolveCiBranch(WorkspaceRepositoryLink link, GrayMoon.App.Services.Queries.WorkspaceRepositoryLinkListItemDto? contextState) =>
+        contextState == null
+            ? link.BranchName
+            : GrayMoon.App.Services.Policy.UnpublishedBranchRules.CiBranch(
+                link.BranchName, contextState.BranchHasUpstream, contextState.OutgoingCommits, contextState.BaselineParentBranchName);
 
     private async Task RefreshRowAfterHookSyncAsync(WorkspaceActionRow row, CancellationToken cancellationToken)
     {

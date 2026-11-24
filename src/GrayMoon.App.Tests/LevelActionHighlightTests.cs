@@ -31,6 +31,17 @@ public sealed class LevelActionHighlightTests
         Assert.False(CommitsBadge.HasIncomingOrOutgoingCommits(true, true, outgoing: 2, incoming: 2));
     }
 
+    [Theory]
+    [InlineData(0, 0, true, "var(--badge-neutral-bg)", "#fff")]  // no upstream, no commits: the neutral gray of PR "none"
+    [InlineData(2, 0, true, "#ffc107", "#000")]  // no upstream with commits: yellow, a push sends it
+    [InlineData(2, 0, false, "#ffc107", "#000")] // outgoing: yellow
+    [InlineData(0, 1, false, "#dc3545", "#fff")] // incoming: red
+    [InlineData(0, 0, false, "#198754", "#fff")] // in sync: green
+    public void Commits_badge_is_gray_for_a_branch_without_upstream_and_commits(int outgoing, int incoming, bool notUpstreamed, string background, string text)
+    {
+        Assert.Equal((background, text), CommitsBadge.DetermineColors(outgoing, incoming, notUpstreamed));
+    }
+
     [Fact]
     public void CreatePrs_TrueWhenVerifiedAheadAndNoPr()
     {

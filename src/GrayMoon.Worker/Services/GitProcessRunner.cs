@@ -128,7 +128,8 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         string workingDirectory,
         string? bearerToken,
         CancellationToken ct,
-        Action? beforeAttempt = null)
+        Action? beforeAttempt = null,
+        bool? mirrorFailureOutputAsStderr = null)
     {
         var pipeline = operation switch
         {
@@ -148,16 +149,16 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
         (int ExitCode, string? Stdout, string? Stderr) raw;
         if (string.IsNullOrWhiteSpace(bearerToken))
-            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, intent: intent); }, ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, mirrorFailureOutputAsStderr: mirrorFailureOutputAsStderr, intent: intent); }, ct);
         else if (await SupportsEnvConfigAsync())
         {
             using var _ = new GitProcessEnvironmentScope(GitRemoteAuth.BuildEnvironment(bearerToken, GitRemoteAuth.ReadExistingConfigCount()));
-            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, intent: intent); }, ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", arguments, workingDirectory, c, mirrorFailureOutputAsStderr: mirrorFailureOutputAsStderr, intent: intent); }, ct);
         }
         else
         {
             var authedArguments = $"{GitRemoteAuth.BuildArgumentPrefix(bearerToken)} {arguments}";
-            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", authedArguments, workingDirectory, c, intent: intent); }, ct);
+            raw = await pipeline.ExecuteAsync(async c => { beforeAttempt?.Invoke(); return await RunAsync("git", authedArguments, workingDirectory, c, mirrorFailureOutputAsStderr: mirrorFailureOutputAsStderr, intent: intent); }, ct);
         }
 
         // Stdout and stderr are redacted before any caller can log them. The authorization URL, when valid, is
@@ -375,18 +376,19 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
     /// <summary>
     /// Picks the timeout tier for one invocation: GitVersion (scans full history, can be slower than a
-    /// plain git call), clone (its own unbounded-by-default tier - see <see cref="_cloneTimeout"/>),
+    /// plain git call), clone and <c>checkout --progress</c> (their own unbounded-by-default tier - see
+    /// <see cref="_cloneTimeout"/> and <see cref="IsProgressBoundedSubcommand(string)"/>),
     /// network (fetch/pull/push/ls-remote - can legitimately take longer on large repos/slow networks),
     /// or the default (everything else - status, diff/show, rev-parse, cat-file, add, restore, reset,
     /// commit, branch/tag queries, config, etc.).
     /// </summary>
     internal TimeSpan? ResolveIdleTimeout(string fileName, string arguments)
-        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) && StartsWithSubcommand(arguments, "clone")
+        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) && IsProgressBoundedSubcommand(arguments)
             ? _cloneIdleTimeout
             : null;
 
     internal TimeSpan? ResolveIdleTimeout(string fileName, IReadOnlyList<string> arguments)
-        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) && StartsWithSubcommand(arguments, "clone")
+        => string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase) && IsProgressBoundedSubcommand(arguments)
             ? _cloneIdleTimeout
             : null;
 
@@ -397,7 +399,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
         if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
         {
-            if (StartsWithSubcommand(arguments, "clone"))
+            if (IsProgressBoundedSubcommand(arguments))
                 return _cloneTimeout;
 
             if (StartsWithNetworkSubcommand(arguments))
@@ -411,7 +413,7 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
     {
         if (string.Equals(fileName, "git", StringComparison.OrdinalIgnoreCase))
         {
-            if (StartsWithSubcommand(arguments, "clone"))
+            if (IsProgressBoundedSubcommand(arguments))
                 return _cloneTimeout;
 
             if (StartsWithNetworkSubcommand(arguments))
@@ -419,6 +421,50 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         }
 
         return _defaultTimeout;
+    }
+
+    /// <summary>
+    /// Commands that may run for as long as the repository is big and print progress the whole time: <c>clone</c>,
+    /// and <c>checkout --progress</c> (how a new Feature worktree is filled, see
+    /// <see cref="GitWorktreeService.CreateWorktreeAsync"/>). They get the clone tier: no total bound by default, only
+    /// the idle bound, which their progress output keeps pushing out. A plain <c>checkout</c> stays on the default tier.
+    /// </summary>
+    private static bool IsProgressBoundedSubcommand(string arguments)
+    {
+        var sub = FindSubcommand(arguments);
+        return sub == "clone" || (sub == "checkout" && HasOptionBeforeSeparator(arguments, "--progress"));
+    }
+
+    private static bool IsProgressBoundedSubcommand(IReadOnlyList<string> arguments)
+    {
+        var sub = FindSubcommand(arguments);
+        if (sub == "clone")
+            return true;
+        if (sub != "checkout")
+            return false;
+        foreach (var arg in arguments)
+        {
+            if (arg == "--")
+                return false;
+            if (arg == "--progress")
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasOptionBeforeSeparator(string arguments, string option)
+    {
+        var i = 0;
+        while (TryReadToken(arguments, ref i, out var token))
+        {
+            if (token == "--")
+                return false;
+            if (token == option)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IsGitVersionInvocation(string fileName, string arguments)
@@ -466,9 +512,6 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
 
         return null;
     }
-
-    private static bool StartsWithSubcommand(string arguments, string subcommand)
-        => string.Equals(FindSubcommand(arguments), subcommand, StringComparison.Ordinal);
 
     /// <summary>
     /// The git subcommand of a joined argument string, skipping leading global options (<c>-c key=value</c>,
@@ -535,9 +578,6 @@ public sealed class GitProcessRunner(ICommandLineService commandLine, IOptions<G
         token = sb.ToString();
         return true;
     }
-
-    private static bool StartsWithSubcommand(IReadOnlyList<string> arguments, string subcommand)
-        => string.Equals(FindSubcommand(arguments), subcommand, StringComparison.Ordinal);
 }
 
 /// <summary>

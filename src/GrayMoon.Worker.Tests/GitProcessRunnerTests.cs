@@ -96,6 +96,23 @@ public sealed class GitProcessRunnerTests
         Assert.Equal(Timeout.InfiniteTimeSpan, runner.ResolveTimeout("git", ["-c", "core.longpaths=true", "clone", "url"]));
         Assert.Equal(TimeSpan.FromSeconds(180), runner.ResolveIdleTimeout("git", ["-c", "core.longpaths=true", "clone", "url"]));
     }
+    [Fact]
+    public void Progress_checkout_gets_the_clone_tier_and_a_plain_checkout_does_not()
+    {
+        var runner = CreateRunner(defaultSeconds: 60, cloneSeconds: 0);
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, runner.ResolveTimeout("git", ["checkout", "--progress", "--force"]));
+        Assert.Equal(TimeSpan.FromSeconds(180), runner.ResolveIdleTimeout("git", ["checkout", "--progress", "--force"]));
+        Assert.Equal(Timeout.InfiniteTimeSpan, runner.ResolveTimeout("git", "checkout --progress --force"));
+        Assert.Equal(TimeSpan.FromSeconds(180), runner.ResolveIdleTimeout("git", "checkout --progress --force"));
+
+        Assert.Equal(TimeSpan.FromSeconds(60), runner.ResolveTimeout("git", ["checkout", "main"]));
+        Assert.Null(runner.ResolveIdleTimeout("git", ["checkout", "main"]));
+        // A path named --progress after the separator is not the option.
+        Assert.Equal(TimeSpan.FromSeconds(60), runner.ResolveTimeout("git", ["checkout", "--", "--progress"]));
+        Assert.Equal(TimeSpan.FromSeconds(60), runner.ResolveTimeout("git", "checkout -- --progress"));
+    }
+
     [Theory]
     [InlineData("status --porcelain=v2 -z --branch")]
     [InlineData("rev-parse --verify HEAD")]

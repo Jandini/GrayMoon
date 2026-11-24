@@ -256,6 +256,7 @@ public sealed class WorkspaceActionsLevelActionsTests
         params WorkspaceActions.WorkflowActionLine[] lines) => new()
     {
         Link = new WorkspaceRepositoryLink { BranchName = "main" },
+        CiBranchName = "main",
         Repo = new GitHubRepositoryEntry { RepositoryName = repositoryName, OrgName = "acme", ConnectorName = "GitHub" },
         DependencyLevel = level,
         IsWorkspaceRepository = isWorkspaceRepository,

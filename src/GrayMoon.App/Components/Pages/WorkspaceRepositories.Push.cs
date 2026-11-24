@@ -9,78 +9,152 @@ public sealed partial class WorkspaceRepositories
 {
     private PushWithDependenciesModalState _pushWithDependenciesModal = new();
 
-    /// <summary>Push button click: get push plan; filter to repos with unpushed commits or no upstream branch; show modal only if at least one dependency repo needs push; otherwise push immediately.</summary>
+    /// <summary>
+    /// Push button click. The plan (archived check, effective version check with one GitVersion run per repository on its
+    /// branch point, registry lookups, selection, dependency info) is built inside the page job, so the loading overlay
+    /// shows each step and the Worker's output from the click on, and Abort stops it. Without a dialog the same job goes
+    /// on into the push; when the synchronized-push dialog is needed the job ends and the dialog opens with the plan, and
+    /// Proceed starts the push job without building the plan again.
+    /// </summary>
     private async Task OnPushClickAsync()
     {
         if (workspace == null || !HasRepositories || IsJobRunning)
             return;
 
+        var jobContextId = RequireSelectedContextId();
+        var dependencyAware = PushClickRouter.ForCapabilities(_capabilities) != PushClickRoute.StartDirect;
+        IReadOnlySet<int> repoIdsThatNeedPush;
         try
         {
-            var contextId = RequireSelectedContextId();
-            var allLinks = await GetAllLinksForOperationAsync();
-            var plan = await PushOperations.GetPlanAsync(
-                WorkspaceId,
-                contextId,
-                cancellationToken: CancellationToken.None);
-            if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
-            {
-                ToastService.Show("No repositories to push.");
-                return;
-            }
-
-            var repoIdsWithUnpushed = plan.RepositoryIds;
-            var repoIdsThatNeedPush = allLinks
+            repoIdsThatNeedPush = (await GetAllLinksForOperationAsync())
                 .Where(wr => Allows(wr, RepositoryOperation.Push) && (wr.OutgoingCommits ?? 0) > 0)
                 .Select(wr => wr.RepositoryId)
                 .ToHashSet();
-            if (PushClickRouter.ForCapabilities(_capabilities) == PushClickRoute.StartDirect)
-            {
-                // No dependency modal state exists on this path (it is only built below), so start the job directly.
-                StartPushJob(repoIdsWithUnpushed, synchronizedPush: false, plan.RequiredPackageIds);
-                return;
-            }
-
-            var depInfo = await WorkspaceDependencyService.GetPushDependencyInfoForRepoSetAsync(
-                WorkspaceId,
-                contextId.Value,
-                repoIdsWithUnpushed,
-                CancellationToken.None);
-            var route = PushClickRouter.ForDependencies(
-                dependencyInfoLoaded: depInfo != null,
-                hasNoDependencies: depInfo != null
-                    && depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0,
-                anyDependencyNeedsPush: WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush));
-            if (route == PushClickRoute.LoadFailed)
-            {
-                ToastService.ShowError("Could not load push plan. Try again.");
-                return;
-            }
-            _pushWithDependenciesModal = _pushWithDependenciesModal with
-            {
-                Info = depInfo,
-                RepoIdsToPush = repoIdsWithUnpushed,
-                RepoId = 0,
-                RepoName = null
-            };
-
-            // Push immediately without dialog when there are no deps, or when no dependency repo needs push.
-            if (route == PushClickRoute.StartDirect)
-            {
-                await OnPushWithDependenciesProceedAsync(synchronizedPush: false);
-                return;
-            }
-
-            _pushWithDependenciesModal = _pushWithDependenciesModal with { IsVisible = true };
-            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
+            Logger.LogError(ex, "Error loading repositories for push in workspace {WorkspaceId}", WorkspaceId);
             SetLevelError(0, ex.Message);
             StateHasChanged();
+            return;
         }
+
+        JobService.StartJob(PageJobKey, GrayMoon.App.Services.Application.WorkspacePushOperations.CheckingVersionsMessage, async (job, ct) =>
+        {
+            PreparedPush? prepared;
+            try
+            {
+                prepared = await PreparePushAsync(jobContextId, dependencyAware, repoIdsThatNeedPush, job, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                SafeInvoke(() => ToastService.Show("Push cancelled."));
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error getting push plan for workspace {WorkspaceId}", WorkspaceId);
+                SafeInvoke(() => SetLevelError(0, ex.Message));
+                throw;
+            }
+
+            if (prepared is null)
+                return;
+
+            if (prepared.ShowDependencyDialog)
+            {
+                SafeInvoke(() =>
+                {
+                    _pushWithDependenciesModal = _pushWithDependenciesModal with
+                    {
+                        IsVisible = true,
+                        Info = prepared.DependencyInfo,
+                        RepoIdsToPush = prepared.RepositoryIds,
+                        RepoId = 0,
+                        RepoName = null
+                    };
+                    StateHasChanged();
+                });
+                return;
+            }
+
+            await RunPushInJobAsync(jobContextId, job, ct, prepared.RepositoryIds, synchronizedPush: false, prepared.RequiredPackageIds);
+        });
     }
+
+    /// <summary>What <see cref="PreparePushAsync"/> decided: push these repositories now, or open the dependency dialog for them.</summary>
+    private sealed record PreparedPush(
+        IReadOnlySet<int> RepositoryIds,
+        IReadOnlySet<string> RequiredPackageIds,
+        bool ShowDependencyDialog,
+        PushDependencyInfoForRepo? DependencyInfo);
+
+    /// <summary>
+    /// Builds the push plan inside a job, in scopes of its own, reporting each step to the overlay. Returns null when there
+    /// is nothing to push or the plan stopped; the reason has then been shown as a toast.
+    /// </summary>
+    private async Task<PreparedPush?> PreparePushAsync(
+        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId,
+        bool dependencyAware,
+        IReadOnlySet<int> repoIdsThatNeedPush,
+        BackgroundJobHandle job,
+        CancellationToken ct)
+    {
+        var plan = await ScopedExecutor.ExecuteAsync<IWorkspacePushOperations, WorkspacePushPlan>(svc =>
+            svc.GetPlanAsync(WorkspaceId, jobContextId, maxLevel: null, ct, job.ToOperationProgress()));
+        if (plan.StopMessage is { } stopMessage)
+        {
+            SafeInvoke(() => ToastService.ShowError(stopMessage));
+            return null;
+        }
+
+        if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
+        {
+            SafeInvoke(() => ToastService.Show(NothingToPushMessage(plan.NoWork.Count)));
+            return null;
+        }
+
+        if (!dependencyAware)
+            return new PreparedPush(plan.RepositoryIds, plan.RequiredPackageIds, ShowDependencyDialog: false, DependencyInfo: null);
+
+        var depInfo = await ScopedExecutor.ExecuteAsync<WorkspaceDependencyService, PushDependencyInfoForRepo?>(svc =>
+            svc.GetPushDependencyInfoForRepoSetAsync(WorkspaceId, jobContextId.Value, plan.RepositoryIds, ct));
+        var route = PushClickRouter.ForDependencies(
+            dependencyInfoLoaded: depInfo != null,
+            hasNoDependencies: depInfo != null
+                && depInfo.PayloadForRepo.RequiredPackages.Count == 0 && depInfo.DependencyRepoIds.Count == 0,
+            anyDependencyNeedsPush: WorkspaceDependencyService.ShouldShowSynchronizedPushModal(depInfo, repoIdsThatNeedPush));
+        if (route == PushClickRoute.LoadFailed)
+        {
+            SafeInvoke(() => ToastService.ShowError("Could not load push plan. Try again."));
+            return null;
+        }
+
+        // Without the dialog the push uses the dependency info's required packages, as Proceed from the dialog does.
+        return new PreparedPush(
+            plan.RepositoryIds,
+            RequiredPackageIdsOf(depInfo!),
+            ShowDependencyDialog: route == PushClickRoute.ShowDependencyModal,
+            depInfo);
+    }
+
+    /// <summary>
+    /// The brief toast when nothing is pushed. Repositories without an upstream that need no push ("no work": no commits,
+    /// and their packages are reused or nobody needs them) are counted, not listed; each one's sentence is in the log.
+    /// </summary>
+    internal static string NothingToPushMessage(int noWorkCount) => noWorkCount switch
+    {
+        0 => "No repositories to push.",
+        1 => "No repositories to push. 1 branch without an upstream has no commits and needs no push.",
+        _ => $"No repositories to push. {noWorkCount} branches without an upstream have no commits and need no push.",
+    };
+
+    private static IReadOnlySet<string> RequiredPackageIdsOf(PushDependencyInfoForRepo info) =>
+        info.PayloadForRepo.RequiredPackages
+            .Select(r => r.PackageId?.Trim())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>When user clicks the not-upstreamed badge: check dependencies. Show modal only if at least one dependency repo needs push; otherwise push directly.</summary>
     private async Task OnPushBadgeClickAsync(int repositoryId, string? branchName)
@@ -95,6 +169,27 @@ public sealed partial class WorkspaceRepositories
             return;
         }
 
+        var repo = TryGetLink(repositoryId);
+        if (repo != null && GrayMoon.App.Services.Policy.UnpublishedBranchRules.HasNoUpstreamAndNoCommits(repo.BranchHasUpstream, repo.OutgoingCommits))
+        {
+            ShowConfirm(
+                UpstreamOnlyPushMessage(repo.Repository?.RepositoryName ?? $"repo {repositoryId}", branchName),
+                () => PushBadgeClickConfirmedAsync(repositoryId, branchName),
+                "Set upstream");
+            return;
+        }
+
+        await PushBadgeClickConfirmedAsync(repositoryId, branchName);
+    }
+
+    /// <summary>Confirmation for the gray cloud badge: the branch has no commits, so the push only sets its upstream.</summary>
+    internal static string UpstreamOnlyPushMessage(string repositoryName, string? branchName) =>
+        string.IsNullOrWhiteSpace(branchName)
+            ? $"No commits were made in {repositoryName}. Push the branch anyway to set its upstream?"
+            : $"No commits were made on {branchName} in {repositoryName}. Push the branch anyway to set its upstream?";
+
+    private async Task PushBadgeClickConfirmedAsync(int repositoryId, string? branchName)
+    {
         var repo = TryGetLink(repositoryId);
         if (repo != null
             && !string.IsNullOrWhiteSpace(repo.DefaultBranchName)
@@ -173,11 +268,7 @@ public sealed partial class WorkspaceRepositories
         var repoIds = _pushWithDependenciesModal.RepoIdsToPush != null
             ? _pushWithDependenciesModal.RepoIdsToPush
             : _pushWithDependenciesModal.Info.DependencyRepoIds.Concat(new[] { _pushWithDependenciesModal.RepoId }).ToHashSet();
-        var requiredPackageIds = _pushWithDependenciesModal.Info.PayloadForRepo.RequiredPackages
-            .Select(r => r.PackageId?.Trim())
-            .Where(id => !string.IsNullOrEmpty(id))
-            .Cast<string>()
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var requiredPackageIds = RequiredPackageIdsOf(_pushWithDependenciesModal.Info);
         ClosePushWithDependenciesModal();
 
         StartPushJob(repoIds, synchronizedPush, requiredPackageIds);
@@ -188,34 +279,50 @@ public sealed partial class WorkspaceRepositories
     private void StartPushJob(IReadOnlySet<int> repoIds, bool synchronizedPush, IReadOnlySet<string> requiredPackageIds)
     {
         var jobContextId = RequireSelectedContextId();
-        JobService.StartJob(PageJobKey, "Preparing push...", async (job, ct) =>
+        JobService.StartJob(PageJobKey, "Preparing push...", (job, ct) =>
+            RunPushInJobAsync(jobContextId, job, ct, repoIds, synchronizedPush, requiredPackageIds));
+    }
+
+    /// <summary>The push itself, inside a running page job. A synchronized push that is not possible asks whether to continue with a normal push.</summary>
+    private async Task RunPushInJobAsync(
+        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId,
+        BackgroundJobHandle job,
+        CancellationToken ct,
+        IReadOnlySet<int> repoIds,
+        bool synchronizedPush,
+        IReadOnlySet<string> requiredPackageIds)
+    {
+        try
         {
-            try
-            {
-                await ExecutePushCoreAsync(jobContextId, job, ct, repoIds, synchronizedPush, requiredPackageIds);
-            }
-            catch (SynchronizedPushNotPossibleException ex)
-            {
-                // Job completes normally; user confirms to start a new push job without synchronized mode.
-                SafeInvoke(() => ShowConfirm(
-                    $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
-                    () =>
-                    {
-                        JobService.StartJob(PageJobKey, "Preparing push...", (j, c) =>
-                            ExecutePushCoreAsync(jobContextId, j, c, repoIds, synchronizedPush: false, requiredPackageIds));
-                        return Task.CompletedTask;
-                    },
-                    confirmButtonText: "Continue"));
-            }
-        });
+            await ExecutePushCoreAsync(jobContextId, job, ct, repoIds, synchronizedPush, requiredPackageIds);
+        }
+        catch (SynchronizedPushNotPossibleException ex)
+        {
+            // Job completes normally; user confirms to start a new push job without synchronized mode.
+            SafeInvoke(() => ShowConfirm(
+                $"Synchronized push could not be completed because {ex.MissingPackagesCount} required package mappings are missing. Check NuGet connector configuration and token, then retry. Continue with normal push?",
+                () =>
+                {
+                    JobService.StartJob(PageJobKey, "Preparing push...", (j, c) =>
+                        ExecutePushCoreAsync(jobContextId, j, c, repoIds, synchronizedPush: false, requiredPackageIds));
+                    return Task.CompletedTask;
+                },
+                confirmButtonText: "Continue"));
+        }
     }
 
     private async Task<(IReadOnlySet<int> PushRepoIds, IReadOnlySet<string> RequiredPackageIds)?> BuildPushPlanAsync(
-        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, string emptyMessage, CancellationToken ct, int? maxLevel = null)
+        GrayMoon.Application.Features.WorkspaceFeatureContextId jobContextId, string emptyMessage, CancellationToken ct, int? maxLevel = null, IProgress<OperationProgress>? progress = null)
     {
         await using var planScope = ServiceScopeFactory.CreateAsyncScope();
         var planOps = planScope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>();
-        var plan = await planOps.GetPlanAsync(WorkspaceId, jobContextId, maxLevel, ct);
+        var plan = await planOps.GetPlanAsync(WorkspaceId, jobContextId, maxLevel, ct, progress);
+        if (plan.StopMessage is { } stopMessage)
+        {
+            SafeInvoke(() => ToastService.ShowError(stopMessage));
+            return null;
+        }
+
         if (!plan.HasUnpushed || plan.RepositoryIds.Count == 0)
         {
             SafeInvoke(() => ToastService.Show(emptyMessage));

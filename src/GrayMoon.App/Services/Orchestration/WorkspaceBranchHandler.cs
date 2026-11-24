@@ -115,7 +115,8 @@ public sealed class WorkspaceBranchHandler(
                 return (true, upstreamResult.Error ?? $"{created} but failed to set upstream.", alreadyExisted);
         }
 
-        return (true, null, alreadyExisted);
+        // The branch was created but its branch point could not be recorded: a warning the page shows on the row.
+        return (true, result.Warning, alreadyExisted);
     }
 
     public async Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(

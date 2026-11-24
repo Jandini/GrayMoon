@@ -148,7 +148,11 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
-    private async Task CopyVersionToClipboard(string version)
+    /// <summary>The clicked-state key of a Version cell: the repository and the value the cell shows (the effective version when inherited).</summary>
+    internal static string VersionClickKey(int repositoryId, string? displayedVersion) => $"{repositoryId}:{displayedVersion}";
+
+    /// <summary>Copies the value the Version cell shows: the effective version when inherited, otherwise GitVersion.</summary>
+    private async Task CopyVersionToClipboard(int repositoryId, string? version)
     {
         if (string.IsNullOrEmpty(version))
             return;
@@ -157,7 +161,7 @@ public sealed partial class WorkspaceRepositories
         {
             await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", version);
             ToastService.Show($"{version} copied to the clipboard");
-            clickedVersions.Add(version);
+            clickedVersions.Add(VersionClickKey(repositoryId, version));
             StateHasChanged();
         }
         catch (Exception ex)
@@ -183,9 +187,9 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
-    private void OnVersionMouseLeave(string version)
+    private void OnVersionMouseLeave(int repositoryId, string? version)
     {
-        if (clickedVersions.Remove(version))
+        if (clickedVersions.Remove(VersionClickKey(repositoryId, version)))
         {
             StateHasChanged();
         }

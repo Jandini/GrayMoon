@@ -101,6 +101,7 @@ public sealed class WorkspaceActionsLevelGroupingTests
     private static WorkspaceActions.WorkspaceActionRow CreateRow(string repositoryName, int? level, bool isWorkspaceRepository = false) => new()
     {
         Link = new WorkspaceRepositoryLink { BranchName = "main" },
+        CiBranchName = "main",
         Repo = new GitHubRepositoryEntry { RepositoryName = repositoryName, OrgName = "acme", ConnectorName = "GitHub" },
         DependencyLevel = level,
         IsWorkspaceRepository = isWorkspaceRepository

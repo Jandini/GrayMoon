@@ -44,4 +44,12 @@ public sealed class CreateBranchResponse
     /// <summary>True when a local branch of that name was already there: it was checked out as it is and the requested base was not used.</summary>
     [JsonPropertyName("alreadyExisted")]
     public bool AlreadyExisted { get; set; }
+
+    /// <summary>The ref the branch was created from (<c>origin/release/2.4</c> or <c>release/2.4</c>); null when the branch already existed or the repository has no commits.</summary>
+    [JsonPropertyName("resolvedStartRef")]
+    public string? ResolvedStartRef { get; set; }
+
+    /// <summary>The commit the new branch points at; null when the branch already existed or the repository has no commits.</summary>
+    [JsonPropertyName("baseCommitSha")]
+    public string? BaseCommitSha { get; set; }
 }

@@ -19,22 +19,32 @@ public sealed class WorkspacePushOperations(
     WorkspaceOperationOutcomeStore outcomes,
     IWorkspaceRepositoryOperationPolicy operationPolicy,
     GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier archivedVerifier,
-    ILogger<WorkspacePushOperations> logger) : IWorkspacePushOperations
+    ILogger<WorkspacePushOperations> logger,
+    GrayMoon.App.Services.Versions.EffectiveVersionStartCheck effectiveVersionStartCheck) : IWorkspacePushOperations
 {
+    /// <summary>
+    /// The overlay text while the plan is built. Nothing is prepared: the plan checks which repositories to push (archived
+    /// state, effective versions, selection). The version check then counts its GitVersion runs ("Checked x of y
+    /// repositories...", <see cref="Versions.EffectiveVersionResolver.CheckedMessage"/>).
+    /// </summary>
+    internal const string CheckingVersionsMessage = "Checking versions...";
+
     public async Task<WorkspacePushPlan> GetPlanAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         int? maxLevel = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<OperationProgress>? progress = null)
     {
         // A repository marked archived is left out of the plan, so ask the provider first whether it still is.
+        progress.Report(CheckingVersionsMessage);
         await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
 
         var workspace = await workspaceRepository.GetByIdAsync(workspaceId);
         if (workspace == null)
             return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
 
-        return await GetPlanForLinksAsync(workspaceId, contextId, workspace.Repositories.ToList(), maxLevel, cancellationToken);
+        return await GetPlanForLinksAsync(workspaceId, contextId, workspace.Repositories.ToList(), maxLevel, cancellationToken, progress);
     }
 
     public async Task<IReadOnlySet<int>> GetRepositoryIdsNeedingPushAsync(
@@ -54,15 +64,32 @@ public sealed class WorkspacePushOperations(
         WorkspaceFeatureContextId contextId,
         IReadOnlyList<WorkspaceRepositoryLink> links,
         int? maxLevel = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<OperationProgress>? progress = null)
     {
+        // Start check (effective versions, D3): the selection below reads the effective version kinds, so they are resolved
+        // with fresh registry answers first. An unverifiable package stops the push before anything is pushed.
+        var resolution = await effectiveVersionStartCheck.RunAsync(
+            workspaceId, contextId, repositoryIds: null, "Push", cancellationToken, progress);
+        if (resolution.StopMessage is { } stopMessage)
+        {
+            return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false)
+            {
+                StopMessage = stopMessage,
+            };
+        }
+
+        var noWork =await workspaceRepository.GetPushNoWorkReasonsAsync(workspaceId, contextId.Value, links.Select(l => l.RepositoryId).ToHashSet(), cancellationToken);
+        foreach (var line in noWork)
+            logger.LogInformation("Push plan for workspace {WorkspaceId} context {ContextId}: {NoWork}", workspaceId, contextId.Value, line);
+
         var (_, strategy) = await SelectStrategyAsync(workspaceId, cancellationToken);
         var (_, pushRepoIds, hasUnpushed) = await pushHandler.GetPushPlanAsync(strategy, workspaceId, contextId, links, cancellationToken, maxLevel);
         if (!hasUnpushed || pushRepoIds.Count == 0)
-            return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
+            return new WorkspacePushPlan(new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), false) { NoWork = noWork };
 
         var required = await strategy.GetRequiredPackageIdsAsync(workspaceId, contextId, pushRepoIds, cancellationToken);
-        return new WorkspacePushPlan(pushRepoIds, required, true);
+        return new WorkspacePushPlan(pushRepoIds, required, true) { NoWork = noWork };
     }
 
     public async Task<OperationResult> PushAsync(
@@ -114,7 +141,9 @@ public sealed class WorkspacePushOperations(
         CancellationToken cancellationToken = default,
         bool restorePackages = true)
     {
-        var plan = await GetPlanAsync(workspaceId, contextId, maxLevel: null, cancellationToken);
+        var plan = await GetPlanAsync(workspaceId, contextId, maxLevel: null, cancellationToken, progress);
+        if (plan.StopMessage is { } stopMessage)
+            return OperationResult.Fail(stopMessage);
         if (!plan.HasUnpushed)
             return OperationResult.Ok();
 

@@ -29,6 +29,12 @@ public sealed class RepositoryVersionOptions
     /// <summary>Resolve the version at a specific commit rather than at HEAD.</summary>
     public string? CommitSha { get; init; }
 
+    /// <summary>
+    /// Version <see cref="CommitSha"/> as this branch would see it (<c>/b</c>, with <c>/nocache</c>). Used for the parent
+    /// version at a branch point and for the default-branch tip of a checkout that is on another branch.
+    /// </summary>
+    public string? BranchName { get; init; }
+
     /// <summary>What every call looked like before workspace profiles existed.</summary>
     public static RepositoryVersionOptions Default { get; } = new();
 }

@@ -51,6 +51,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid GetWorkspaceRepositories args"),
             "GetRepositoryVersion" => JsonSerializer.Deserialize<GetRepositoryVersionRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetRepositoryVersion args"),
+            WorkerHubMethods.GetGitVersionAtBranchPoint => JsonSerializer.Deserialize<GetGitVersionAtBranchPointRequest>(json, options)
+                ?? throw new ArgumentException("Invalid GetGitVersionAtBranchPoint args"),
             "GetGitVersionAtDefaultTip" => JsonSerializer.Deserialize<GetGitVersionAtDefaultTipRequest>(json, options)
                 ?? throw new ArgumentException("Invalid GetGitVersionAtDefaultTip args"),
             "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)

@@ -99,6 +99,8 @@ public sealed class UndoPushCommand(
             .Create(request.Capabilities)
             .GetVersionAsync(repoPath, new RepositoryVersionOptions { NonNormalize = true }, cancellationToken);
         var versionBranch = versionResult.Result?.BranchName ?? versionResult.Result?.EscapedBranchName ?? branch;
+        // The reset moved HEAD; the App decides the effective version per HEAD commit.
+        var headCommit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
 
         return new RepositorySyncNotification
         {
@@ -119,6 +121,7 @@ public sealed class UndoPushCommand(
             State = new RepositoryStateSnapshot
             {
                 BranchName = versionBranch,
+                HeadCommit = headCommit,
                 GitVersion = versionResult.InformationalVersion,
                 OutgoingCommits = outgoing,
                 IncomingCommits = incoming,

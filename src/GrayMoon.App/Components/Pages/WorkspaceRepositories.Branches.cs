@@ -314,6 +314,8 @@ public sealed partial class WorkspaceRepositories
                 // Where the branch was already there nothing was created; the existing branch was checked out.
                 if (BranchAlreadyExistedWarning.Describe(newBranchName, [.. outcome.AlreadyExistedByRepositoryId.Values]) is { } existedWarning)
                     ToastService.ShowWarning(existedWarning);
+                foreach (var baselineWarning in outcome.BaselineWarnings)
+                    ToastService.ShowWarning(baselineWarning);
             });
         }, new PageJobOptions
         {

@@ -201,6 +201,50 @@ public class WorkspaceRepositoryLink
         FeaturePinnedTag = FeaturePinnedTag,
         IsReferenceSnapshot = IsReferenceSnapshot,
         FeatureSourceBranchName = FeatureSourceBranchName,
+        EffectiveVersion = EffectiveVersion,
+        EffectiveVersionKind = EffectiveVersionKind,
+        EffectiveVersionCommitSha = EffectiveVersionCommitSha,
+        EffectiveVersionReasonCode = EffectiveVersionReasonCode,
+        VersionHeadCommit = VersionHeadCommit,
+        BaselineParentBranchName = BaselineParentBranchName,
+        BaselineCommitSha = BaselineCommitSha,
         GitChangeEntries = GitChangeEntries,
     };
+
+    /// <summary>Effective version of the viewed context (its context state). Not a link column.</summary>
+    [NotMapped]
+    public string? EffectiveVersion { get; set; }
+
+    /// <summary><see cref="Models.EffectiveVersionKind"/> of the viewed context as an int; null = never resolved. Not a link column.</summary>
+    [NotMapped]
+    public int? EffectiveVersionKind { get; set; }
+
+    /// <summary>The HEAD the effective version was resolved for. Not a link column.</summary>
+    [NotMapped]
+    public string? EffectiveVersionCommitSha { get; set; }
+
+    /// <summary>Why the effective version kind was chosen. Not a link column.</summary>
+    [NotMapped]
+    public string? EffectiveVersionReasonCode { get; set; }
+
+    /// <summary>HEAD SHA of the viewed context, for the effective version check (I10). Not a link column.</summary>
+    [NotMapped]
+    public string? VersionHeadCommit { get; set; }
+
+    /// <summary>Parent branch of the recorded branch point (Feature row or baseline table). Not a link column.</summary>
+    [NotMapped]
+    public string? BaselineParentBranchName { get; set; }
+
+    /// <summary>Commit of the recorded branch point. Not a link column.</summary>
+    [NotMapped]
+    public string? BaselineCommitSha { get; set; }
+
+    /// <summary>True when the viewed context reuses its parent's published version and HEAD is still the commit it was verified for.</summary>
+    [NotMapped]
+    public bool IsVersionInherited
+        => EffectiveVersionRules.IsInherited(EffectiveVersionKind, EffectiveVersion, EffectiveVersionCommitSha, VersionHeadCommit);
+
+    /// <summary>The version the Version column shows and copies: the inherited version when <see cref="IsVersionInherited"/>, else GitVersion.</summary>
+    [NotMapped]
+    public string? DisplayVersion => IsVersionInherited ? EffectiveVersion : GitVersion;
 }

@@ -676,7 +676,7 @@ public sealed class WorkspaceUpdateAndPushOperationsTests
         public List<PushCall> PushCalls { get; } = [];
         public List<int?> PlanMaxLevels { get; } = [];
 
-        public Task<WorkspacePushPlan> GetPlanAsync(int workspaceId, WorkspaceFeatureContextId contextId, int? maxLevel = null, CancellationToken cancellationToken = default)
+        public Task<WorkspacePushPlan> GetPlanAsync(int workspaceId, WorkspaceFeatureContextId contextId, int? maxLevel = null, CancellationToken cancellationToken = default, IProgress<OperationProgress>? progress = null)
         {
             calls.Add("Plan");
             PlanMaxLevels.Add(maxLevel);

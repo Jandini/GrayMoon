@@ -1,4 +1,5 @@
 using System.Text;
+using GrayMoon.Abstractions.Worker;
 using GrayMoon.Worker.Services;
 using GrayMoon.Common;
 using GrayMoon.Common.Git;
@@ -184,9 +185,51 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
         Assert.Contains(_recorder.StringArgumentCalls, c => c.Contains("push origin --delete feature/legacy", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task RemoteDelete_OfABranchTheHostAlreadyDeleted_SucceedsWithoutRedTerminalLines()
+    {
+        _repo.CommitInitial();
+        _recorder.PushDeleteResult = new CommandLineResult(1, "",
+            "error: unable to delete 'feature/merged': remote ref does not exist\nerror: failed to push some refs to 'https://github.com/o/r.git'");
+        var lines = new List<CommandLineStreamEvent>();
+
+        bool success;
+        string? error;
+        using (new CommandLineStreamScope(lines.Add))
+        {
+            (success, error) = await _git.DeleteBranchAsync(
+                _repo.RepositoryPath, "feature/merged", isRemote: true, force: false, CancellationToken.None);
+        }
+
+        Assert.True(success);
+        Assert.Null(error);
+        Assert.DoesNotContain(lines, l => l.Kind == WorkerCommandStreamKind.Stderr);
+    }
+
+    [Fact]
+    public async Task RemoteDelete_ThatReallyFails_StillShowsTheOutputAsRedTerminalLines()
+    {
+        _repo.CommitInitial();
+        _recorder.PushDeleteResult = new CommandLineResult(1, "", "remote: Permission to o/r.git denied.");
+        var lines = new List<CommandLineStreamEvent>();
+
+        bool success;
+        using (new CommandLineStreamScope(lines.Add))
+        {
+            (success, _) = await _git.DeleteBranchAsync(
+                _repo.RepositoryPath, "feature/protected", isRemote: true, force: false, CancellationToken.None);
+        }
+
+        Assert.False(success);
+        Assert.Contains(lines, l => l.Kind == WorkerCommandStreamKind.Stderr && l.Text.Contains("Permission to o/r.git denied", StringComparison.Ordinal));
+    }
+
     private sealed class RecordingCommandLineService(ICommandLineService inner) : ICommandLineService
     {
         public List<string> StringArgumentCalls { get; } = [];
+
+        /// <summary>The result of <c>push origin --delete</c>; success when not set.</summary>
+        public CommandLineResult? PushDeleteResult { get; set; }
 
         private readonly Dictionary<string, IReadOnlyDictionary<string, string>?> _ambientEnvironment = new();
 
@@ -206,7 +249,15 @@ public sealed class GitServiceDeleteBranchTests : IDisposable
         {
             StringArgumentCalls.Add(arguments);
             _ambientEnvironment[arguments] = GitProcessEnvironmentAmbient.Current.Value;
-            // Remote delete needs a network push; short-circuit so the test stays offline.
+            // Remote delete needs a network push; short-circuit so the test stays offline. A scripted failure is
+            // mirrored the way CommandLineService does it, so the test sees the same terminal lines.
+            if (PushDeleteResult is { } scripted && arguments.Contains("push origin --delete", StringComparison.Ordinal))
+            {
+                if (mirrorFailureOutputAsStderr && scripted.ExitCode != 0)
+                    CommandLineService.MirrorCombinedOutputAsStderr(scripted.Stdout, scripted.Stderr);
+                return Task.FromResult(scripted);
+            }
+
             if (arguments.Contains("push origin --delete", StringComparison.Ordinal)
                 || arguments.Contains("--force-with-lease=", StringComparison.Ordinal)
                 || arguments.Contains(" fetch ", StringComparison.Ordinal)

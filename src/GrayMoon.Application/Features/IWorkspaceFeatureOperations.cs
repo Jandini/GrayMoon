@@ -66,6 +66,12 @@ public enum WorkspaceFeatureBaseKindApplication
 
 public sealed class CreateFeatureResult
 {
+    /// <summary>
+    /// <see cref="Condition"/> when the user pressed Abort before the Feature was saved: nothing was created, and
+    /// <see cref="Error"/> holds the text to show. An Abort after the Feature was saved is <c>NeedsRepair</c>.
+    /// </summary>
+    public const string CancelledCondition = "Cancelled";
+
     public bool Success { get; init; }
     public string? Error { get; init; }
     public string? Condition { get; init; }
