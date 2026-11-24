@@ -404,6 +404,10 @@ public sealed class WorkspaceFileVersionService(
     internal static string CommitNotRecordedReason(string repositoryName) =>
         $"No commit is recorded for {repositoryName}. Sync the repository.";
 
+    /// <summary>The reason shown for a <c>{@Repo}</c> token of a repository whose version could not be calculated.</summary>
+    internal static string VersionNotKnownReason(string repositoryName) =>
+        $"No version is known for {repositoryName}. Sync the repository.";
+
     /// <summary>
     /// Resolves all token values for the given patterns: GitVersion and branch from this context's stored state, and
     /// commit SHAs from <paramref name="commitSource"/>.
@@ -478,10 +482,19 @@ public sealed class WorkspaceFileVersionService(
                             token.TokenKey, RepositoryVersioningRequiredMessage);
                     else if (!string.IsNullOrEmpty(gitVersion))
                         tokenValues[token.TokenKey] = gitVersion;
-                    else
-                        logger.LogWarning(
-                            "No GitVersion in workspace for repo {RepoName}; token {TokenKey} will be skipped.",
+                    else if (state?.GitVersionPending == true)
+                        // A new Feature whose version the Worker is still calculating: on its way, not missing.
+                        logger.LogDebug(
+                            "The version of repo {RepoName} is still being calculated; token {TokenKey} is skipped for now.",
                             token.RepositoryName, token.TokenKey);
+                    else
+                    {
+                        // A version that could not be calculated: the line is not compared, and that is shown.
+                        notChecked[token.TokenKey] = VersionNotKnownReason(token.RepositoryName);
+                        logger.LogWarning(
+                            "No version is known for repository {RepoName} in context {ContextId} of workspace {WorkspaceId}; token {TokenKey} is not checked.",
+                            token.RepositoryName, contextId.Value, workspace.WorkspaceId, token.TokenKey);
+                    }
                     break;
 
                 case FileVersionTokenKind.Branch:

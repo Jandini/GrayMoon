@@ -107,6 +107,7 @@ To look at while measuring:
 - **A failed Worker call for the parent version is not kept as a decision** (`ParentVersionProbeFailed`, never reused). It used to be stored as "own version" and reused until HEAD moved.
 - **The check sends every configured file to the Worker**, also one whose tokens all have no value, so a deleted file is noticed. A file reported missing has no "not checked" rows.
 - **Actions page:** it now listens to the Context events of its Feature, so a push from a Feature starts its refresh; and it runs one GitHub polling loop per repository at a time (`KeyedRerunGuard`), where every hook sync used to start its own loop next to the others.
+- **A `{@Repo}` token of a repository without a version is "not checked"** (owner decision, 2026-11-24): it counts on the badge with "No version is known for Repo. Sync the repository." A version still being calculated for a new Feature is not reported. A `{@Repo:branch}` token of a repository without a branch stays silent, because a tag pin has none on purpose and its badge could never be cleared.
 
 Tests: `FileVersionStoredCommitTests` (Create Feature decides before it finishes; the missing file), `EffectiveVersionResolverTests` (a failed probe is asked again; unresolved does not rerun GitVersion), `KeyedRerunGuardTests`.
 
@@ -117,7 +118,6 @@ The plan said to measure before starting these. The measurement says they are no
 - **Push from GrayMoon with one sync instead of several.** The App side of the 4 to 5 notifications per repository is now one or two cheap recomputes. What is left is Worker time (GitVersion runs for the pre-push, post-push and deferred syncs). Changing that means rewriting the Worker's push flow, the most sensitive one in the product, for a gain nobody has measured. To decide: time a push of 5 repositories on Edx1 and look at the Worker log between `Git push completed` and the last `SyncCommand persisted`.
 - **Switch branch and Create branch returning their state inline.** Same reasoning: 27 checkout hooks are now one batch.
 - **Create Feature without a hook burst.** The burst now costs 0.25 s in the App. The Worker's GitVersion runs, the only new information, take the same time wherever they are reported.
-- **Not checked for `{@Repo}` and `{@Repo:branch}` tokens without a value.** Needs a decision, because a tag-pinned repository would give its consumers a badge that never clears: `defects/version-file-tokens-skipped-silently.md`.
 
 ## Decisions
 

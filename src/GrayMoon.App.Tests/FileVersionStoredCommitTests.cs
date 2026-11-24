@@ -130,6 +130,75 @@ public sealed class FileVersionStoredCommitTests
     }
 
     [Fact]
+    public async Task A_version_token_of_a_repository_without_a_version_is_not_checked_instead_of_up_to_date()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        var versionToken = "@" + EffectiveVersionScenario.ProducerName;
+        await AddVersionFileAsync(s, $"API={{{versionToken}}}");
+        // GitVersion failed for the producer: no calculated version, no inherited one, and nothing is on its way.
+        await s.MutateStateAsync(s.ProducerLinkId, state =>
+        {
+            state.GitVersion = null;
+            state.GitVersionPending = false;
+            state.EffectiveVersion = null;
+            state.EffectiveVersionKind = null;
+        });
+        await s.WithDbAsync(db =>
+        {
+            foreach (var link in db.WorkspaceRepositories.Where(l => l.RepositoryId == s.ProducerId))
+                link.GitVersion = null;
+            // What an earlier check found. The old code deleted it and left nothing, so the file looked up to date.
+            db.WorkspaceFileLineStatuses.Add(new WorkspaceFileLineStatus
+            {
+                WorkspaceId = s.Ctx.WorkspaceId,
+                WorkspaceFeatureContextId = s.Special.Value,
+                RepositoryId = s.ConsumerId,
+                FilePath = "version.props",
+                FileName = "version.props",
+                TokenName = versionToken,
+                CurrentValue = "1.0.0",
+                ExpectedValue = "1.1.0",
+            });
+            return Task.CompletedTask;
+        });
+
+        await CheckAsync(s, s.Special);
+
+        var row = Assert.Single(await ReadStatusesAsync(s, s.Special));
+        Assert.Equal(versionToken, row.TokenName);
+        Assert.Null(row.ExpectedValue);
+        Assert.Equal(WorkspaceFileVersionService.VersionNotKnownReason(EffectiveVersionScenario.ProducerName), row.NotCheckedReason);
+        Assert.Equal(1, (await s.ReadStateAsync(s.ConsumerLinkId)).OutOfDateFileRepos);
+    }
+
+    [Fact]
+    public async Task A_version_that_is_still_being_calculated_and_a_missing_branch_are_not_reported()
+    {
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await AddVersionFileAsync(s, $"API={{@{EffectiveVersionScenario.ProducerName}}}\nAPI_BRANCH={{@{EffectiveVersionScenario.ProducerName}:branch}}");
+        // A new Feature before the Worker reported its version, and a checkout on a tag: neither is a fault.
+        await s.MutateStateAsync(s.ProducerLinkId, state =>
+        {
+            state.GitVersion = null;
+            state.GitVersionPending = true;
+            state.EffectiveVersion = null;
+            state.EffectiveVersionKind = null;
+            state.BranchName = null;
+            state.CheckedOutTag = "v1.2.0";
+        });
+        await s.WithDbAsync(db =>
+        {
+            foreach (var link in db.WorkspaceRepositories.Where(l => l.RepositoryId == s.ProducerId))
+                link.GitVersion = null;
+            return Task.CompletedTask;
+        });
+
+        await CheckAsync(s, s.Special);
+
+        Assert.Empty(await ReadStatusesAsync(s, s.Special));
+    }
+
+    [Fact]
     public async Task The_update_still_reads_the_commit_from_the_checkout_and_writes_that_one()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync();
@@ -408,7 +477,10 @@ public sealed class FileVersionStoredCommitTests
         },
     };
 
-    private static async Task AddCommitVersionFileAsync(EffectiveVersionScenario s)
+    private static Task AddCommitVersionFileAsync(EffectiveVersionScenario s)
+        => AddVersionFileAsync(s, $"API_SHA={{@{EffectiveVersionScenario.ProducerName}:commit}}");
+
+    private static async Task AddVersionFileAsync(EffectiveVersionScenario s, string pattern)
         => await s.WithDbAsync(async db =>
         {
             var file = new WorkspaceFile { WorkspaceId = s.Ctx.WorkspaceId, RepositoryId = s.ConsumerId, FilePath = "version.props", FileName = "version.props" };
@@ -417,7 +489,7 @@ public sealed class FileVersionStoredCommitTests
             db.WorkspaceFileVersionConfigs.Add(new WorkspaceFileVersionConfig
             {
                 FileId = file.FileId,
-                VersionPattern = $"API_SHA={{@{EffectiveVersionScenario.ProducerName}:commit}}",
+                VersionPattern = pattern,
             });
         });
 
