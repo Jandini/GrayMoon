@@ -777,7 +777,8 @@ public sealed class WorkspaceFileVersionService(
                     });
                 }
             }
-            if (knownValues.Count == 0) continue;
+            // A file whose tokens all have no value is still sent, with nothing to compare: the Worker reports whether
+            // the file is there, so its "missing on disk" state is refreshed by every check.
 
             items.Add(new
             {
@@ -887,7 +888,23 @@ public sealed class WorkspaceFileVersionService(
                 }
 
                 if (fileResult.FileMissing)
+                {
+                    // Nothing in a file that is not there is "not checked": drop what was noted for it before the Worker answered.
+                    var missingPath = fileResult.FilePath ?? "";
+                    foreach (var dropped in newStatuses.Where(s => s.RepositoryId == repoId && s.FilePath == missingPath && s.NotCheckedReason != null).ToList())
+                    {
+                        newStatuses.Remove(dropped);
+                        if (!newStatuses.Any(s => s.RepositoryId == repoId && s.TokenName == dropped.TokenName))
+                        {
+                            if (repoOutOfDateTokens.TryGetValue(repoId, out var remaining))
+                                remaining.Remove(dropped.TokenName);
+                            if (seenStaleTokens.TryGetValue(repoId, out var seenTokens))
+                                seenTokens.Remove(dropped.TokenName);
+                        }
+                    }
+
                     continue;
+                }
 
                 if (fileResult.OutOfDateLines is not { Count: > 0 })
                     continue;

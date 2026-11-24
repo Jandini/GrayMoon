@@ -135,6 +135,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<GrayMoon.App.Services.Connectors.PackageRegistrySyncService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<GrayMoon.App.Services.Versions.PackageAvailabilityCache>();
+        services.AddSingleton<GrayMoon.App.Services.Versions.BranchPointVersionCache>();
         services.AddScoped<GrayMoon.App.Services.Versions.PackageAvailabilityVerifier>();
         services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionResolver>();
         services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>();

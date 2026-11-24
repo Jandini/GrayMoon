@@ -357,6 +357,9 @@ RootWorktree      the Workspace-role repository alone and first (D10); its workt
 SourceWorktrees   only when the root succeeded; SemaphoreSlim(MaxParallelOperations); each row Ready/NeedsRepair
                   saved in its own AppDbContext; Sources live inside the root
 SeedProjections   SeedInitialFeatureProjectionsAsync (idempotent), then Feature Ready
+EffectiveVersions the effective versions of the new context (EffectiveVersionResolver, own scope): every repository is on its
+                  branch point, so this is where the Worker and the registry are asked. A failure is logged and Create
+                  still succeeds; the recompute after the next state write resolves again
 CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the definition switch is not required), then the watch (section 5F)
 ```
 
@@ -903,7 +906,7 @@ GitChangesUpdated(workspaceId, repositoryId)      legacy, special Workspace only
 RepositoryError(workspaceId, repositoryId, message)
 ```
 
-The hook path (`SyncCommandHandler.CompleteAsync`) sends `ContextRepositorySynced` once per repository of a batch and then `ContextSynced` once, after the recompute. It sends the legacy `RepositorySynced` / `WorkspaceSynced` only for the special Workspace context. The file-version check does not broadcast when it runs inside a recompute (`deferDependencyRecompute`); the caller broadcasts once the recompute is whole. The Repositories page reloads a Feature grid on `ContextSynced` of its own context (debounced) and the special Workspace grid on `WorkspaceSynced`. The notification panel refreshes on `ContextSynced` and `WorkspaceSynced` only, one refresh per Workspace at a time. Many mutation paths (for example `WorkspaceStateRecomputeScope.CompleteAsync` and branch operations) still send `WorkspaceSynced` regardless of context, so context-aware listeners must filter by the selected context and treat `WorkspaceSynced` as a coarse invalidation.
+The hook path (`SyncCommandHandler.CompleteAsync`) sends `ContextRepositorySynced` once per repository of a batch and then `ContextSynced` once, after the recompute. It sends the legacy `RepositorySynced` / `WorkspaceSynced` only for the special Workspace context. The file-version check does not broadcast when it runs inside a recompute (`deferDependencyRecompute`); the caller broadcasts once the recompute is whole. The Repositories page reloads a Feature grid on `ContextSynced` of its own context (debounced) and the special Workspace grid on `WorkspaceSynced`. The notification panel refreshes on `ContextSynced` and `WorkspaceSynced` only, one refresh per Workspace at a time. The Actions page listens to `ContextSynced` and `ContextRepositorySynced` of its own Feature context (the legacy pair for the special Workspace), and runs one GitHub polling loop per repository at a time: a sync that arrives during a loop asks for one more loop after it (`KeyedRerunGuard`). Many mutation paths (for example `WorkspaceStateRecomputeScope.CompleteAsync` and branch operations) still send `WorkspaceSynced` regardless of context, so context-aware listeners must filter by the selected context and treat `WorkspaceSynced` as a coarse invalidation.
 
 ---
 

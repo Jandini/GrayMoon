@@ -59,7 +59,8 @@ public sealed class FileVersionStoredCommitTests
 
         var sent = await CheckAsync(s, feature);
 
-        Assert.Null(sent);
+        // The file is sent with nothing to compare (the Worker still reports whether it is there).
+        Assert.Contains("\"expectedValues\":{}", sent);
         var row = Assert.Single(await ReadStatusesAsync(s, feature));
         Assert.Equal(CommitToken, row.TokenName);
         Assert.Equal(WorkspaceFileVersionService.CommitNotRecordedReason(EffectiveVersionScenario.ProducerName), row.NotCheckedReason);
@@ -90,7 +91,8 @@ public sealed class FileVersionStoredCommitTests
 
         var sent = await CheckAsync(s, s.Special);
 
-        Assert.Null(sent);
+        // The file is sent with nothing to compare (the Worker still reports whether it is there).
+        Assert.Contains("\"expectedValues\":{}", sent);
         Assert.DoesNotContain(s.Ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.GetHeadCommits);
         var row = Assert.Single(await ReadStatusesAsync(s, s.Special));
         Assert.Equal(s.ConsumerId, row.RepositoryId);
@@ -98,6 +100,33 @@ public sealed class FileVersionStoredCommitTests
         Assert.Null(row.ExpectedValue);
         Assert.Equal(WorkspaceFileVersionService.CommitNotRecordedReason(EffectiveVersionScenario.ProducerName), row.NotCheckedReason);
         Assert.Equal(1, (await s.ReadStateAsync(s.ConsumerLinkId)).OutOfDateFileRepos);
+    }
+
+    [Fact]
+    public async Task A_file_with_no_comparable_token_is_still_asked_for_and_a_missing_one_is_not_reported_as_not_checked()
+    {
+        // Such a file was not sent to the Worker at all, so the check never learned that it had been deleted.
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await AddCommitVersionFileAsync(s);
+        await s.MutateStateAsync(s.ProducerLinkId, state => state.HeadCommit = null);
+        s.Ctx.WorkerBridge.Respond("CheckFileVersions", new
+        {
+            files = new[] { new { repositoryName = EffectiveVersionScenario.ConsumerName, filePath = "version.props", fileName = "version.props", fileMissing = true } },
+        });
+
+        await using (var scope = s.Ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>()
+                .CheckAndPersistFileVersionStatusAsync(s.Ctx.WorkspaceId, s.Special, CancellationToken.None);
+        }
+
+        Assert.Empty(await ReadStatusesAsync(s, s.Special));
+        Assert.Null((await s.ReadStateAsync(s.ConsumerLinkId)).OutOfDateFileRepos);
+        await using var db = await s.Ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        Assert.True(await db.WorkspaceFileContextStates.AsNoTracking()
+            .Where(state => state.WorkspaceFeatureContextId == s.Special.Value)
+            .Select(state => state.IsMissingOnDisk)
+            .SingleAsync());
     }
 
     [Fact]
@@ -298,6 +327,46 @@ public sealed class FileVersionStoredCommitTests
         Assert.Single(sent, m => m == "ContextSynced");
         Assert.Single(sent, m => m == "WorkspaceSynced");
         Assert.Equal("WorkspaceSynced", sent[^1]);
+    }
+
+    [Fact]
+    public async Task Create_Feature_decides_the_effective_versions_before_it_finishes()
+    {
+        // Measured 2026-11-24 on Edx1: the grid kept changing for 7 s after the overlay closed, because the versions
+        // of the new Feature were first decided in the recompute of its first hook sync.
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        await s.WithDbAsync(db =>
+        {
+            foreach (var link in db.WorkspaceRepositories.Where(l => l.WorkspaceId == s.Ctx.WorkspaceId))
+                link.BranchName = "release/2.4";
+            return Task.CompletedTask;
+        });
+        s.Ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
+        {
+            commits = new Dictionary<string, string>
+            {
+                [EffectiveVersionScenario.ProducerName] = EffectiveVersionScenario.BaseSha,
+                [EffectiveVersionScenario.ConsumerName] = EffectiveVersionScenario.ConsumerSha,
+            },
+            branches = new Dictionary<string, string>
+            {
+                [EffectiveVersionScenario.ProducerName] = "release/2.4",
+                [EffectiveVersionScenario.ConsumerName] = "release/2.4",
+            },
+        });
+        s.Ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        s.Ctx.WorkerBridge.Calls.Clear();
+
+        await using var scope = s.Ctx.CreateScope();
+        var created = await scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>()
+            .CreateFeatureAsync(s.Ctx.WorkspaceId, "feat-final", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+
+        Assert.True(created.Success, created.Error);
+        // No hook sync has been applied: the decision is there when Create returns.
+        var producer = await s.ReadStateAsync(s.ProducerLinkId, created.ContextId);
+        Assert.Equal((int)EffectiveVersionKind.InheritedVerified, producer.EffectiveVersionKind);
+        Assert.Equal(EffectiveVersionScenario.ParentVersion, producer.EffectiveVersion);
+        Assert.Equal(1, s.BranchPointCalls);
     }
 
     [Fact]

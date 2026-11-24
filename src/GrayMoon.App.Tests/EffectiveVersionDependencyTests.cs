@@ -111,8 +111,9 @@ public sealed class EffectiveVersionDependencyTests
 
         var expected = await CheckFileVersionsAsync(s, feature);
 
-        // The old code borrowed the Workspace link's version for the Feature; now the token is skipped (I6).
-        Assert.Null(expected);
+        // The old code borrowed the Workspace link's version for the Feature; now the token has no value (I6). The file
+        // is still sent, with nothing to compare, so the Worker can say whether it is there.
+        Assert.Contains("\"expectedValues\":{}", expected);
     }
 
     [Fact]

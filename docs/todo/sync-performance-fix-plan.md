@@ -1,6 +1,6 @@
 # Sync performance fix plan
 
-Status: built on 2026-11-24 (phases 1 to 5), not yet measured on a real Workspace. What is still open is listed under "Open". Evidence and the measurements that started this are in `ideas/feature-create-background-sync-cost.md`. How the built parts work is in `docs/architecture/` (03 "WorkspaceFileLineStatus", 04 "Hook sync batches", 05 "File versioning").
+Status: built on 2026-11-24 (phases 1 to 6). Create Feature is measured on Edx1; Update, Push and the pages are not. What is still open is listed under "Open". Evidence and the measurements that started this are in `ideas/feature-create-background-sync-cost.md`. How the built parts work is in `docs/architecture/` (03 "WorkspaceFileLineStatus", 04 "Hook sync batches", 05 "File versioning").
 
 ## Goal
 
@@ -76,7 +76,18 @@ All tests of `GrayMoon.App.Tests`, `GrayMoon.Worker.Tests` and `GrayMoon.Common.
 
 ### Measure
 
-Not done: it needs the App and the Worker running against a real Workspace. The App and the Worker both changed and ship together. On Edx1, before and after:
+**Create Feature, measured on Edx1 on 2026-11-24 with build `0.2.1-app-backgroun-jobs.46` (27 repositories, no CodeGraph index):**
+
+| | Before (`0.2.1-main.43`) | After |
+|---|---|---|
+| Create Feature itself | 26.6 s | 13.5 s |
+| From "Feature Create finished" to the last notification applied and recomputed | 51.8 s | 10.5 s |
+| Recomputes for the 27 notifications | 27 | 2 (one for the first 2 notifications, one for the other 25) |
+| `GetHeadCommits` calls | 27 | 0 |
+
+The 10.5 s are 2.8 s until the Worker's first notification arrived, 7.2 s for the first effective version resolution of the new Feature (17 repositories checked at their branch point), and 0.25 s for everything else: the second recompute took 104 ms. The effective version resolution is now the whole remaining wait; "Effective versions" under "Later" is the change that removes it from this window.
+
+Still to measure (they need commits and pushes in real repositories, which is the owner's call):
 
 - Create Feature: time from "Feature Create finished" to the last `SyncCommand persisted` of that context.
 - Update and Push: run time, and the count and total of `CheckAndPersist` runs and `GetHeadCommits` calls.
@@ -89,22 +100,24 @@ To look at while measuring:
 - the dependency badge tooltip line "not checked: No commit is recorded for Repo. Sync the repository." (rendered with the existing tooltip styles, not looked at in a browser);
 - a Feature grid reloading by itself after a commit made in a terminal.
 
-### Later, only if the numbers still call for it
+## Phase 6: follow-ups built after the measurement
 
-- **Push from GrayMoon**: run with hooks off and keep one full post-push sync from the command, instead of the pre-push sync, the post-push sync, the deferred sync and the App's own count read. Changes the Worker. Pushes from a terminal keep the hook path.
-- **Switch branch and Create branch from the dialog**: return state inline and recompute once, the way Prepare Workspace does.
-- **Effective versions**: keep the known parent version across an `Unresolved` decision, so a retry does not ask the Worker again; resolve at the end of Create Feature inside the overlay so the grid opens with final versions.
-- **Create Feature without a hook burst** (option C of the analysis).
+- **Create Feature decides the effective versions before it finishes** (stage `EffectiveVersions`, after the seed). This was the 7.2 s of the measured 10.5 s: the grid now opens with final versions, and the first hook recompute reuses the stored decisions. A failure is logged and Create still succeeds; the next recompute resolves again. Not measured again after this change.
+- **A parent version is calculated once per commit** (`BranchPointVersionCache`, in memory). A repository whose packages cannot be verified no longer runs GitVersion on the Worker in every recompute while a registry is failing.
+- **A failed Worker call for the parent version is not kept as a decision** (`ParentVersionProbeFailed`, never reused). It used to be stored as "own version" and reused until HEAD moved.
+- **The check sends every configured file to the Worker**, also one whose tokens all have no value, so a deleted file is noticed. A file reported missing has no "not checked" rows.
+- **Actions page:** it now listens to the Context events of its Feature, so a push from a Feature starts its refresh; and it runs one GitHub polling loop per repository at a time (`KeyedRerunGuard`), where every hook sync used to start its own loop next to the others.
 
-### Found on the way, not part of this plan
+Tests: `FileVersionStoredCommitTests` (Create Feature decides before it finishes; the missing file), `EffectiveVersionResolverTests` (a failed probe is asked again; unresolved does not rerun GitVersion), `KeyedRerunGuardTests`.
 
-Each needs its own note in `defects/` before it is worked on.
+## Not built, with the reason
 
-- The Actions page starts up to 10 GitHub polls per repository for any hook kind, not only after a push, with no guard against overlapping loops.
-- In a Feature the Actions page never receives the per-repository event, so a push from a Feature does not start its refresh.
-- A Worker error during a branch-point version probe is stored as a decision and reused until HEAD moves.
-- A `{@Repo}` token without a version and a `{@Repo:branch}` token on a detached HEAD are still skipped silently, as the commit token was. They could use the same "not checked" row.
-- A file whose tokens all have no value is not sent to the Worker, so its "missing on disk" flag is not refreshed by that check.
+The plan said to measure before starting these. The measurement says they are no longer where the time goes: 25 queued notifications are applied and recomputed in 0.25 s.
+
+- **Push from GrayMoon with one sync instead of several.** The App side of the 4 to 5 notifications per repository is now one or two cheap recomputes. What is left is Worker time (GitVersion runs for the pre-push, post-push and deferred syncs). Changing that means rewriting the Worker's push flow, the most sensitive one in the product, for a gain nobody has measured. To decide: time a push of 5 repositories on Edx1 and look at the Worker log between `Git push completed` and the last `SyncCommand persisted`.
+- **Switch branch and Create branch returning their state inline.** Same reasoning: 27 checkout hooks are now one batch.
+- **Create Feature without a hook burst.** The burst now costs 0.25 s in the App. The Worker's GitVersion runs, the only new information, take the same time wherever they are reported.
+- **Not checked for `{@Repo}` and `{@Repo:branch}` tokens without a value.** Needs a decision, because a tag-pinned repository would give its consumers a badge that never clears: `defects/version-file-tokens-skipped-silently.md`.
 
 ## Decisions
 

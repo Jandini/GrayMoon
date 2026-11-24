@@ -73,7 +73,8 @@ public sealed class EffectiveVersionResolver(
     PackageAvailabilityVerifier verifier,
     PackageRegistrySyncService registrySync,
     IOptions<WorkspaceOptions> workspaceOptions,
-    ILogger<EffectiveVersionResolver> logger)
+    ILogger<EffectiveVersionResolver> logger,
+    BranchPointVersionCache branchPointVersions)
 {
     /// <summary>
     /// Resolves <paramref name="repositoryIds"/> (all repositories of the Workspace when null) in
@@ -265,7 +266,9 @@ public sealed class EffectiveVersionResolver(
                 logger.LogInformation(
                     "Effective version: no parent version for {Repository} ({Parent} at {Commit}): {Error}",
                     candidate.RepositoryName, baseline.ParentBranchName, baseline.BaseCommitSha, parent.Error);
-                results.Add(Own(candidate, EffectiveVersionReasonCodes.ParentVersionUnavailable, null));
+                // A Worker call that failed says nothing about the branch point: stored under a reason that is never
+                // reused, so the next resolution asks again instead of keeping "own version" until HEAD moves.
+                results.Add(Own(candidate, parent.ProbeFailed ? EffectiveVersionReasonCodes.ParentVersionProbeFailed : EffectiveVersionReasonCodes.ParentVersionUnavailable, null));
             }
             else if (required.Count == 0)
             {
@@ -359,7 +362,9 @@ public sealed class EffectiveVersionResolver(
 
         var shortSha = source.BaseCommitSha.Length > 7 ? source.BaseCommitSha[..7] : source.BaseCommitSha;
         var notOnRemote = sourceVersion.OnRemoteParent == false;
-        var reason = notOnRemote ? EffectiveVersionReasonCodes.BaselineNotOnRemoteParent : EffectiveVersionReasonCodes.ParentVersionUnavailable;
+        var reason = notOnRemote ? EffectiveVersionReasonCodes.BaselineNotOnRemoteParent
+            : sourceVersion.ProbeFailed ? EffectiveVersionReasonCodes.ParentVersionProbeFailed
+            : EffectiveVersionReasonCodes.ParentVersionUnavailable;
         logger.LogInformation(
             "Effective version: no version for the read only snapshot {Repository} ({Branch} at {Commit}): {Error}",
             candidate.RepositoryName, source.ParentBranchName, source.BaseCommitSha, notOnRemote ? "the commit is not on the remote branch" : sourceVersion.Error);
@@ -424,6 +429,12 @@ public sealed class EffectiveVersionResolver(
     private async Task<BranchPointResult> GetParentVersionAsync(
         WorkerWorkspaceArgs workerArgs, string repositoryName, BranchBaseline baseline, CancellationToken cancellationToken)
     {
+        // The parent version at a commit does not change: asked once per commit.
+        var cacheKey = BranchPointVersionCache.Key(
+            workerArgs.WorkspaceRoot, workerArgs.WorkspaceFolderName, repositoryName, baseline.ParentBranchName, baseline.BaseCommitSha);
+        if (branchPointVersions.TryGet(cacheKey, out var cachedVersion))
+            return new BranchPointResult(cachedVersion, OnRemoteParent: true, null);
+
         WorkerCommandResponse response;
         try
         {
@@ -444,12 +455,14 @@ public sealed class EffectiveVersionResolver(
         {
             // No parent version: the repository uses its own (D9), with the reason in the log.
             logger.LogWarning(ex, "Effective version: the Worker could not calculate the parent version of {Repository}", repositoryName);
-            return new BranchPointResult(null, null, ex.Message);
+            return new BranchPointResult(null, null, ex.Message, ProbeFailed: true);
         }
 
         var payload = response.Data == null ? null : WorkerResponseJson.DeserializeWorkerResponse<BranchPointWorkerResponse>(response.Data);
         if (!response.Success || payload == null)
-            return new BranchPointResult(null, null, response.Error ?? "The Worker gave no answer.");
+            return new BranchPointResult(null, null, response.Error ?? "The Worker gave no answer.", ProbeFailed: true);
+        if (payload.Success && payload.BaselineOnRemoteParent != false && !string.IsNullOrWhiteSpace(payload.Version))
+            branchPointVersions.Set(cacheKey, payload.Version);
         return payload.Success
             ? new BranchPointResult(payload.Version, payload.BaselineOnRemoteParent, null)
             : new BranchPointResult(null, payload.BaselineOnRemoteParent, payload.ErrorMessage);
@@ -492,7 +505,7 @@ public sealed class EffectiveVersionResolver(
             $"{decision.RepositoryName}: uses the published parent version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
         EffectiveVersionKind.InheritedUnverified =>
             $"{decision.RepositoryName}: uses the parent version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
-        EffectiveVersionKind.Unresolved when decision.ReasonCode is EffectiveVersionReasonCodes.BaselineNotOnRemoteParent or EffectiveVersionReasonCodes.ParentVersionUnavailable =>
+        EffectiveVersionKind.Unresolved when decision.ReasonCode is EffectiveVersionReasonCodes.BaselineNotOnRemoteParent or EffectiveVersionReasonCodes.ParentVersionUnavailable or EffectiveVersionReasonCodes.ParentVersionProbeFailed =>
             $"{decision.RepositoryName}: cannot calculate its version ({decision.Message ?? EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
         EffectiveVersionKind.Unresolved =>
             $"{decision.RepositoryName}: cannot verify its packages ({decision.Message ?? EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
@@ -580,7 +593,8 @@ public sealed class EffectiveVersionResolver(
 
     private sealed record Candidate(int RepositoryId, int WorkspaceRepositoryId, string RepositoryName, string? HeadCommit, string? GitVersion);
 
-    private sealed record BranchPointResult(string? Version, bool? OnRemoteParent, string? Error);
+    /// <param name="ProbeFailed">The Worker call itself failed, so nothing is known about the branch point. Not the same as GitVersion answering without a version.</param>
+    private sealed record BranchPointResult(string? Version, bool? OnRemoteParent, string? Error, bool ProbeFailed = false);
 
     private sealed class BranchPointWorkerResponse
     {

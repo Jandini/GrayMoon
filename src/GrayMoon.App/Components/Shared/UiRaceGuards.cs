@@ -158,3 +158,47 @@ internal static class NotificationPanelRepoSets
             .Select(l => (l.RepositoryName, l.OutgoingCommits ?? 0))
             .ToList();
 }
+
+/// <summary>
+/// At most one run per key at a time. A request that arrives while a run for its key is going on does not start a
+/// second run next to it: it asks for one more run after the current one, however many requests arrive meanwhile.
+/// For a refresh loop that an event starts (the Actions page polls GitHub after a hook sync of a repository).
+/// </summary>
+internal sealed class KeyedRerunGuard<TKey> where TKey : notnull
+{
+    private readonly Dictionary<TKey, bool> _rerunRequestedByKey = [];
+
+    /// <summary>Runs <paramref name="work"/> unless a run for <paramref name="key"/> is going on; then that run repeats once it ends.</summary>
+    public async Task RunAsync(TKey key, Func<Task> work)
+    {
+        lock (_rerunRequestedByKey)
+        {
+            if (_rerunRequestedByKey.ContainsKey(key))
+            {
+                _rerunRequestedByKey[key] = true;
+                return;
+            }
+
+            _rerunRequestedByKey[key] = false;
+        }
+
+        try
+        {
+            while (true)
+            {
+                await work();
+                lock (_rerunRequestedByKey)
+                {
+                    if (!_rerunRequestedByKey[key])
+                        return;
+                    _rerunRequestedByKey[key] = false;
+                }
+            }
+        }
+        finally
+        {
+            lock (_rerunRequestedByKey)
+                _rerunRequestedByKey.Remove(key);
+        }
+    }
+}

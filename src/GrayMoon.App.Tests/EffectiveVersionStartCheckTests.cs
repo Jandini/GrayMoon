@@ -111,18 +111,23 @@ public sealed class EffectiveVersionStartCheckTests
     }
 
     [Fact]
-    public async Task A_push_after_the_commit_moved_calculates_the_parent_version_again()
+    public async Task A_push_with_a_decision_stored_for_another_commit_decides_again_without_a_second_GitVersion_run()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: PolicyHarness.AddFacades);
         await s.ResolveAsync(bypassCache: true);
         // The stored decision belongs to another commit now: nothing may be reused for this HEAD.
         await s.MutateStateAsync(s.ProducerLinkId, state => state.EffectiveVersionCommitSha = EffectiveVersionScenario.MovedSha);
         var branchPointCalls = s.BranchPointCalls;
+        var lookups = s.Registry.Lookups;
 
         await using var scope = s.Ctx.CreateScope();
         await scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special);
 
-        Assert.Equal(branchPointCalls + 1, s.BranchPointCalls);
+        // The stored decision is not reused: the registry is asked again. The parent version at the branch point
+        // belongs to that commit and was calculated a moment ago, so the Worker is not asked a second time.
+        Assert.Equal(lookups + 1, s.Registry.Lookups);
+        Assert.Equal(branchPointCalls, s.BranchPointCalls);
+        Assert.Equal((int)EffectiveVersionKind.InheritedVerified, (await s.ReadStateAsync(s.ProducerLinkId)).EffectiveVersionKind);
     }
 
     [Theory]
