@@ -148,6 +148,35 @@ public sealed class GitVersionAtBranchPointTests : IDisposable
         Assert.Equal("", Git(worktree, "status --porcelain"));
     }
 
+    [FactIfGitVersion]
+    public async Task A_detached_read_only_snapshot_worktree_gets_the_version_of_its_source_branch()
+    {
+        // A Feature holds a read only repository as a detached worktree. GitVersion there versions "(no branch)", not
+        // the branch the commit was taken from, so the App asks for the source branch at the snapshot's commit.
+        var worktree = Path.Combine(_root, "features", "repo");
+        Git(_repo, $"worktree add -q --detach \"{worktree}\" {_baseline}");
+        var (detached, detachedError) = await _git.GetVersionAsync(worktree, nonNormalize: true, commitSha: null, CancellationToken.None);
+        Assert.Null(detachedError);
+        Assert.DoesNotContain("release", detached!.BranchName ?? "");
+
+        var response = await _command.ExecuteAsync(new GetGitVersionAtBranchPointRequest
+        {
+            WorkspaceRoot = _root,
+            WorkspaceName = "features",
+            RepositoryName = "repo",
+            ParentBranch = "release/2.4",
+            CommitSha = _baseline,
+        });
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.StartsWith("2.4.0-", response.Version);
+        Assert.Contains("Branch.release-2.4.Sha." + _baseline, response.Version);
+        Assert.NotEqual(detached.InformationalVersion, response.Version);
+        Assert.Equal("", Git(worktree, "branch --show-current"));
+        Assert.Equal(_baseline, Git(worktree, "rev-parse HEAD"));
+        Assert.Equal("", Git(worktree, "status --porcelain"));
+    }
+
     [Theory]
     [InlineData("-x", null)]
     [InlineData("release 2.4", null)]

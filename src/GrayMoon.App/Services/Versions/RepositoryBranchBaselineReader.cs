@@ -65,6 +65,40 @@ public static class RepositoryBranchBaselineReader
         return result;
     }
 
+    /// <summary>
+    /// The branch each read only snapshot of a Feature was taken from, keyed by WorkspaceRepositoryId: the
+    /// <see cref="WorkspaceFeatureRepository.SourceBranchName"/> of rows with <see cref="WorkspaceFeatureRepository.IsReferenceSnapshot"/>.
+    /// A snapshot taken from a tag or from a detached Source has no source branch and is not returned. This is not a
+    /// branch baseline: a snapshot has no branch of its own, so <see cref="LoadAsync"/> never returns it.
+    /// </summary>
+    public static async Task<Dictionary<int, string>> LoadReferenceSnapshotSourceBranchesAsync(
+        AppDbContext db,
+        int workspaceFeatureContextId,
+        IReadOnlyCollection<int> linkIds,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<int, string>();
+        if (linkIds.Count == 0)
+            return result;
+
+        var rows = await db.WorkspaceFeatureRepositories
+            .AsNoTracking()
+            .Where(r => r.WorkspaceFeatureContextId == workspaceFeatureContextId
+                        && linkIds.Contains(r.WorkspaceRepositoryId)
+                        && r.IsReferenceSnapshot
+                        && r.PinnedTag == null
+                        && r.SourceBranchName != null)
+            .Select(r => new { r.WorkspaceRepositoryId, r.SourceBranchName })
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            if (!string.IsNullOrWhiteSpace(row.SourceBranchName))
+                result[row.WorkspaceRepositoryId] = StripOrigin(row.SourceBranchName);
+        }
+
+        return result;
+    }
+
     private static string StripOrigin(string branch)
     {
         var trimmed = branch.Trim();

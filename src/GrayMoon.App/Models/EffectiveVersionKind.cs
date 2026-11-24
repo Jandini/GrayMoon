@@ -22,6 +22,9 @@ public enum EffectiveVersionKind
     /// The repository is on its branch point and only version-file <c>{@Repo}</c> tokens use its version (no csproj
     /// consumer requires a package of it), so there is nothing GrayMoon can look up: dependents use the parent branch
     /// version without a registry check. Its code is the parent's, so nothing has to be built or pushed.
+    /// Also a read only snapshot of a Feature (reason <see cref="EffectiveVersionReasonCodes.ReferenceSnapshot"/>): its
+    /// worktree is detached, so dependents use the version of the branch it was taken from at its commit, as the
+    /// Workspace does. Nothing is looked up, because a snapshot never publishes.
     /// </summary>
     InheritedUnverified = 3,
 }
@@ -36,6 +39,7 @@ public static class EffectiveVersionReasonCodes
     public const string PolicyProtected = "PolicyProtected";
     public const string NoRequiredPackages = "NoRequiredPackages";
     public const string TokenConsumersOnly = "TokenConsumersOnly";
+    public const string ReferenceSnapshot = "ReferenceSnapshot";
     public const string ParentVersionUnavailable = "ParentVersionUnavailable";
     public const string PackageNotPublished = "PackageNotPublished";
     public const string RegistryAuthenticationFailed = "RegistryAuthenticationFailed";
@@ -53,6 +57,7 @@ public static class EffectiveVersionReasonCodes
         PolicyProtected => "the repository is protected (tag, read only, archived)",
         NoRequiredPackages => "no repository in this context uses its version",
         TokenConsumersOnly => "only version files use its version, so there is no package to check",
+        ReferenceSnapshot => "a read only snapshot uses the version of the branch it was taken from",
         ParentVersionUnavailable => "the parent version could not be calculated",
         PackageNotPublished => "a required package is not published at the parent version",
         RegistryAuthenticationFailed => "the package registry refused the credentials",

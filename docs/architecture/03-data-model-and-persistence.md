@@ -995,7 +995,7 @@ EffectiveVersion            the version dependents use (InheritedVerified, Inher
 EffectiveVersionKind        int: Own = 0, InheritedVerified = 1, Unresolved = 2, InheritedUnverified = 3; null = never resolved
 EffectiveVersionCommitSha   the HeadCommit it was resolved for
 EffectiveVersionReasonCode  EffectiveVersionReasonCodes: Verified, NotOnBaseline, NoBaseline, BaselineNotOnRemoteParent,
-                            PolicyProtected, NoRequiredPackages, TokenConsumersOnly, ParentVersionUnavailable, PackageNotPublished,
+                            PolicyProtected, NoRequiredPackages, TokenConsumersOnly, ReferenceSnapshot, ParentVersionUnavailable, PackageNotPublished,
                             RegistryAuthenticationFailed, RegistryFailure, RegistryTimeout, RegistryUnexpectedResponse
 ```
 
@@ -1003,7 +1003,7 @@ Only `WorkspaceRepositoryStateWriter.WriteEffectiveVersionAsync` writes them, on
 
 The **branch baseline** is where a branch GrayMoon created started:
 
-- a Feature: its `WorkspaceFeatureRepositories` row (`ParentBranchName`, `BaseCommitSha`), none for `PinnedTag` or `IsReferenceSnapshot`;
+- a Feature: its `WorkspaceFeatureRepositories` row (`ParentBranchName`, `BaseCommitSha`), none for `PinnedTag` or `IsReferenceSnapshot` (a read only snapshot has no branch; its effective version comes from `SourceBranchName` at its `HeadCommit`, reason `ReferenceSnapshot`, see `05-user-capability-reference.md`);
 - the special Workspace: `WorkspaceRepositoryBranchBaselines`, unique on `(WorkspaceFeatureContextId, WorkspaceRepositoryId, BranchName)`, with `ParentBranchName` (the base as requested, without `origin/`), `BaseCommitSha`, `ResolvedStartRef` (diagnostic) and `CreatedAtUtc`; cascades with the context and the link, and `WorkspaceRepositoryLinkCleanup` deletes it explicitly.
 
 The Worker's `CreateBranch` resolves the start ref to one commit (`rev-parse --verify <start>^{commit}`), creates the branch at that commit and returns `resolvedStartRef` and `baseCommitSha`; both are null for a branch that already existed and for a repository without commits. New Branch / REST (`WorkspaceBranchOperations.CreateBranchAsync`) and Create Branches / Prepare Workspace (`WorkspaceGitService.CreateBranchesWithOutcomeAsync`) write the row (`BranchBaselineRecorder`, through `WorkspaceRepositoryStateWriter.RecordBranchBaselineAsync`) before the state snapshot, and set `HeadCommit` to the base commit. The same branch name created again replaces the row; deleting the local branch through GrayMoon deletes it. A failed write leaves the branch, is logged and reported as a warning (`BranchCreationOutcome.BaselineWarnings`, `CreateBranchApiResult.Warning`); that branch then has no baseline. `RepositoryBranchBaselineReader` reads the baseline of the checked-out branch; it never reads `DefaultBranchName` or link state, so a branch GrayMoon did not create has none.

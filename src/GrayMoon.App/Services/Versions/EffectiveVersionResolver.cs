@@ -54,7 +54,10 @@ public sealed record EffectiveVersionResolution(IReadOnlyList<EffectiveVersionDe
 /// <c>origin/&lt;parent&gt;</c>, and every package a consumer in the context requires is available at the parent version on
 /// its mapped connector. A repository that only version-file <c>{@Repo}</c> tokens use has no package to look up and
 /// inherits on the first two conditions alone (<see cref="EffectiveVersionKind.InheritedUnverified"/>). A confirmed
-/// missing package gives the repository its own version; any other registry answer leaves it unresolved. The Worker is
+/// missing package gives the repository its own version; any other registry answer leaves it unresolved. A read only
+/// snapshot of a Feature is detached and has no branch point: its effective version is the version of the branch it was
+/// taken from at its commit (<see cref="EffectiveVersionReasonCodes.ReferenceSnapshot"/>), without a registry lookup;
+/// when that cannot be calculated and something uses its version, it is unresolved. The Worker is
 /// asked only for repositories that are on their branch point and have a version consumer, the registry only for those
 /// with required packages; no database transaction is open meanwhile.
 /// </summary>
@@ -126,6 +129,9 @@ public sealed class EffectiveVersionResolver(
 
         var branchByLinkId = states.ToDictionary(s => s.Key, s => s.Value.BranchName);
         var baselines = await RepositoryBranchBaselineReader.LoadAsync(dbContext, contextId.Value, isSpecialWorkspace.Value, branchByLinkId, cancellationToken);
+        var snapshotSourceBranches = isSpecialWorkspace.Value
+            ? new Dictionary<int, string>()
+            : await RepositoryBranchBaselineReader.LoadReferenceSnapshotSourceBranchesAsync(dbContext, contextId.Value, linkIds, cancellationToken);
         var consumers = await VersionConsumerReader.LoadAsync(dbContext, workspaceId, contextId.Value, isSpecialWorkspace.Value, cancellationToken);
         var allowed = (await operationPolicy.PartitionAsync(
             workspaceId, contextId, RepositoryOperation.Push, candidates.Select(c => c.RepositoryId).ToList(), RepositorySubjectSources.PushPlan, cancellationToken))
@@ -138,6 +144,23 @@ public sealed class EffectiveVersionResolver(
         {
             baselines.TryGetValue(candidate.WorkspaceRepositoryId, out var baseline);
             var consumer = consumers.GetValueOrDefault(candidate.RepositoryId, VersionConsumers.None);
+            if (snapshotSourceBranches.TryGetValue(candidate.WorkspaceRepositoryId, out var sourceBranch))
+            {
+                // A read only snapshot is detached, and GitVersion on a detached HEAD does not give the version its
+                // branch published (a commit after a tag reads as the tag). Its version is the source branch's at its
+                // commit, with or without a consumer, so the grid shows it too.
+                if (!capabilities.UsesGitVersion || string.IsNullOrWhiteSpace(candidate.HeadCommit))
+                    decisions[candidate.RepositoryId] = Own(candidate, EffectiveVersionReasonCodes.PolicyProtected, null);
+                else if (!bypassCache && StoredSnapshotDecision(candidate, states[candidate.WorkspaceRepositoryId], consumer.HasVersionConsumer) is { } storedSnapshot)
+                    decisions[candidate.RepositoryId] = storedSnapshot;
+                else
+                    probes.Add(new Probe(
+                        candidate, new BranchBaseline(sourceBranch, candidate.HeadCommit.Trim()), [],
+                        StoredParentVersion(candidate, states[candidate.WorkspaceRepositoryId]),
+                        IsReferenceSnapshot: true, HasVersionConsumer: consumer.HasVersionConsumer));
+                continue;
+            }
+
             // Without NuGet packages in the profile there is nothing to look up; a token consumer still needs a version.
             IReadOnlyList<RequiredPackage> required = capabilities.UsesNuGetPackages ? consumer.RequiredPackages : [];
             var reason = !allowed.Contains(candidate.RepositoryId) ? EffectiveVersionReasonCodes.PolicyProtected
@@ -229,10 +252,13 @@ public sealed class EffectiveVersionResolver(
             probes.Count - toCalculate.Count, toCalculate.Count);
 
         var lookups = new List<(Candidate Candidate, string ParentVersion, IReadOnlyList<RequiredPackage> Required)>();
-        foreach (var (candidate, baseline, required, _) in probes)
+        foreach (var probe in probes)
         {
+            var (candidate, baseline, required) = (probe.Candidate, probe.Baseline, probe.Required);
             var parent = parentVersions[candidate.RepositoryId];
-            if (parent.OnRemoteParent == false)
+            if (probe.IsReferenceSnapshot)
+                results.Add(DecideSnapshot(candidate, baseline, parent, probe.HasVersionConsumer));
+            else if (parent.OnRemoteParent == false)
                 results.Add(Own(candidate, EffectiveVersionReasonCodes.BaselineNotOnRemoteParent, null));
             else if (string.IsNullOrWhiteSpace(parent.Version))
             {
@@ -314,6 +340,37 @@ public sealed class EffectiveVersionResolver(
             results.Add(Decide(candidate, parentVersion, packages, outcomes));
 
         return results;
+    }
+
+    /// <summary>
+    /// The decision for a read only snapshot of a Feature: the version of the branch it was taken from at its commit.
+    /// When that version cannot be calculated there is no right version to hand to a consumer, so with a version
+    /// consumer the snapshot is unresolved and operations stop; without one nothing reads it and it keeps its own.
+    /// </summary>
+    private EffectiveVersionDecision DecideSnapshot(Candidate candidate, BranchBaseline source, BranchPointResult sourceVersion, bool hasVersionConsumer)
+    {
+        if (sourceVersion.OnRemoteParent != false && !string.IsNullOrWhiteSpace(sourceVersion.Version))
+        {
+            return new EffectiveVersionDecision(
+                candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
+                EffectiveVersionKind.InheritedUnverified, sourceVersion.Version.Trim(), candidate.GitVersion, candidate.HeadCommit,
+                EffectiveVersionReasonCodes.ReferenceSnapshot, null);
+        }
+
+        var shortSha = source.BaseCommitSha.Length > 7 ? source.BaseCommitSha[..7] : source.BaseCommitSha;
+        var notOnRemote = sourceVersion.OnRemoteParent == false;
+        var reason = notOnRemote ? EffectiveVersionReasonCodes.BaselineNotOnRemoteParent : EffectiveVersionReasonCodes.ParentVersionUnavailable;
+        logger.LogInformation(
+            "Effective version: no version for the read only snapshot {Repository} ({Branch} at {Commit}): {Error}",
+            candidate.RepositoryName, source.ParentBranchName, source.BaseCommitSha, notOnRemote ? "the commit is not on the remote branch" : sourceVersion.Error);
+        if (!hasVersionConsumer)
+            return Own(candidate, reason, null);
+
+        var why = notOnRemote
+            ? $"its commit {shortSha} is not on origin/{source.ParentBranchName}, so no published version exists for it"
+            : $"GitVersion gave no version for {source.ParentBranchName} at {shortSha} ({sourceVersion.Error ?? "no answer"})";
+        return Unresolved(candidate, reason,
+            $"Cannot calculate the version of the read only snapshot {candidate.RepositoryName}: {why}. Repositories in this Feature use that version. Fix it and run again. Nothing was changed.");
     }
 
     private EffectiveVersionDecision Decide(
@@ -418,7 +475,15 @@ public sealed class EffectiveVersionResolver(
             : null;
 
     /// <summary>One repository whose effective version needs its parent version; <see cref="KnownParentVersion"/> skips the Worker.</summary>
-    private sealed record Probe(Candidate Candidate, BranchBaseline Baseline, IReadOnlyList<RequiredPackage> Required, string? KnownParentVersion);
+    /// <remarks>For a read only snapshot (<see cref="IsReferenceSnapshot"/>) the baseline is its source branch and its
+    /// current commit, nothing is looked up, and <see cref="HasVersionConsumer"/> decides what a failure means.</remarks>
+    private sealed record Probe(
+        Candidate Candidate,
+        BranchBaseline Baseline,
+        IReadOnlyList<RequiredPackage> Required,
+        string? KnownParentVersion,
+        bool IsReferenceSnapshot = false,
+        bool HasVersionConsumer = false);
 
     /// <summary>One overlay terminal line for a decision: the version dependents use and why.</summary>
     internal static string TerminalLine(EffectiveVersionDecision decision) => decision.Kind switch
@@ -427,6 +492,8 @@ public sealed class EffectiveVersionResolver(
             $"{decision.RepositoryName}: uses the published parent version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
         EffectiveVersionKind.InheritedUnverified =>
             $"{decision.RepositoryName}: uses the parent version {decision.EffectiveVersion} ({EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
+        EffectiveVersionKind.Unresolved when decision.ReasonCode is EffectiveVersionReasonCodes.BaselineNotOnRemoteParent or EffectiveVersionReasonCodes.ParentVersionUnavailable =>
+            $"{decision.RepositoryName}: cannot calculate its version ({decision.Message ?? EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
         EffectiveVersionKind.Unresolved =>
             $"{decision.RepositoryName}: cannot verify its packages ({decision.Message ?? EffectiveVersionReasonCodes.Describe(decision.ReasonCode)})",
         _ => string.IsNullOrWhiteSpace(decision.EffectiveVersion)
@@ -470,6 +537,35 @@ public sealed class EffectiveVersionResolver(
             candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
             kind.Value, kind == EffectiveVersionKind.Own ? candidate.GitVersion : state.EffectiveVersion!.Trim(), candidate.GitVersion,
             candidate.HeadCommit, state.EffectiveVersionReasonCode!, null);
+    }
+
+    /// <summary>
+    /// The stored decision of a read only snapshot for its current HEAD, else null: its source branch version, or (only
+    /// while nothing uses its version) the recorded reason that version could not be calculated. Unresolved is never
+    /// reused, and neither is a decision made before snapshots had their own rule (<c>PolicyProtected</c>).
+    /// </summary>
+    private static EffectiveVersionDecision? StoredSnapshotDecision(Candidate candidate, StoredState state, bool hasVersionConsumer)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.HeadCommit)
+            || !string.Equals(state.EffectiveVersionCommitSha?.Trim(), candidate.HeadCommit.Trim(), StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var kind = EffectiveVersionRules.KindOf(state.EffectiveVersionKind);
+        if (kind == EffectiveVersionKind.InheritedUnverified
+            && state.EffectiveVersionReasonCode == EffectiveVersionReasonCodes.ReferenceSnapshot
+            && !string.IsNullOrWhiteSpace(state.EffectiveVersion))
+        {
+            return new EffectiveVersionDecision(
+                candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
+                EffectiveVersionKind.InheritedUnverified, state.EffectiveVersion.Trim(), candidate.GitVersion, candidate.HeadCommit,
+                EffectiveVersionReasonCodes.ReferenceSnapshot, null);
+        }
+
+        return kind == EffectiveVersionKind.Own
+            && !hasVersionConsumer
+            && state.EffectiveVersionReasonCode is EffectiveVersionReasonCodes.BaselineNotOnRemoteParent or EffectiveVersionReasonCodes.ParentVersionUnavailable
+            ? Own(candidate, state.EffectiveVersionReasonCode, null)
+            : null;
     }
 
     private sealed record StoredState(

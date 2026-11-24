@@ -197,6 +197,33 @@ internal sealed class EffectiveVersionScenario : IAsyncDisposable
         return new WorkspaceFeatureContextId(contextId);
     }
 
+    /// <summary>The version GitVersion reports in the detached worktree of a read only snapshot: the last tag, not the branch's version.</summary>
+    public const string DetachedVersion = "2.3.0";
+
+    /// <summary>
+    /// Adds a Feature (<see cref="AddFeatureAsync"/>) that holds the producer as a read only snapshot taken from
+    /// <paramref name="sourceBranch"/> at <see cref="BaseSha"/>: a detached worktree with no branch, whose calculated
+    /// GitVersion is <see cref="DetachedVersion"/>.
+    /// </summary>
+    public async Task<WorkspaceFeatureContextId> AddFeatureWithProducerSnapshotAsync(string name = "feat-snap", string? sourceBranch = "release/2.4")
+    {
+        var feature = await AddFeatureAsync(name);
+        await WithDbAsync(async db =>
+        {
+            var link = await db.WorkspaceRepositories.SingleAsync(l => l.WorkspaceRepositoryId == ProducerLinkId);
+            link.IsReference = true;
+            var row = await db.WorkspaceFeatureRepositories.SingleAsync(r => r.WorkspaceFeatureContextId == feature.Value && r.WorkspaceRepositoryId == ProducerLinkId);
+            row.IsReferenceSnapshot = true;
+            row.ParentBranchName = null;
+            row.SourceBranchName = sourceBranch;
+            var state = await db.WorkspaceRepositoryContextStates.SingleAsync(s => s.WorkspaceFeatureContextId == feature.Value && s.WorkspaceRepositoryId == ProducerLinkId);
+            state.BranchName = null;
+            state.GitVersion = DetachedVersion;
+            state.BranchHasUpstream = null;
+        });
+        return feature;
+    }
+
     private static WorkspaceProject Copy(WorkspaceProject project, int contextId) => new()
     {
         WorkspaceId = project.WorkspaceId,

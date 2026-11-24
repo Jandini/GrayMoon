@@ -674,10 +674,15 @@
             var sha = link.BaselineCommitSha ?? link.EffectiveVersionCommitSha ?? "";
             var shortSha = sha.Length > 7 ? sha[..7] : sha;
             var parent = link.BaselineParentBranchName ?? "the parent branch";
+            if (link.EffectiveVersionReasonCode == EffectiveVersionReasonCodes.ReferenceSnapshot)
+                return $"Version {link.EffectiveVersion} of {link.FeatureSourceBranchName ?? "the source branch"} at {shortSha}, the commit this read only snapshot stays at. GitVersion of the detached checkout: {link.GitVersion}. Click to copy version.";
             return link.EffectiveVersionKind == (int)EffectiveVersionKind.InheritedUnverified
                 ? $"Inherited version {link.EffectiveVersion} from {parent} at {shortSha} (used by version files only, no package to check). Calculated GitVersion: {link.GitVersion}. Click to copy effective version."
                 : $"Inherited published version {link.EffectiveVersion} from {parent} at {shortSha}. Calculated GitVersion: {link.GitVersion}. Click to copy effective version.";
         }
+
+        if (link.EffectiveVersionKind == (int)EffectiveVersionKind.Unresolved && link.IsReferenceSnapshot)
+            return $"Click to copy version. The version of this read only snapshot could not be calculated: {EffectiveVersionReasonCodes.Describe(link.EffectiveVersionReasonCode)}.";
 
         if (link.EffectiveVersionKind == (int)EffectiveVersionKind.Unresolved)
             return $"Click to copy version. The published packages could not be verified: {EffectiveVersionReasonCodes.Describe(link.EffectiveVersionReasonCode)}.";
