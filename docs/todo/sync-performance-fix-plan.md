@@ -91,7 +91,7 @@ Still to measure (they need commits and pushes in real repositories, which is th
 
 - Create Feature: time from "Feature Create finished" to the last `SyncCommand persisted` of that context.
 - Update and Push: run time, and the count and total of `CheckAndPersist` runs and `GetHeadCommits` calls.
-- The `Slow sync notification` warning: none expected.
+- The `Slow sync notification` warning: none expected. The logs of 2026-11-24 (AVR, 40 repositories) had 61 during Create Feature, because the reader waited for the Feature inside one notification; fixed, see `defects/create-remove-feature-log-findings.md`. The same logs show the `EffectiveVersions` stage at 82.4 s, queued behind the hook burst on the Worker; open in that note.
 
 The build that wrote the analysed logs (`0.2.1-main.43`) predates effective versions, so the first measurement on a current build is also the first one that includes them.
 

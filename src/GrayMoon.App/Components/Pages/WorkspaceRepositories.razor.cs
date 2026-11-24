@@ -63,8 +63,24 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private bool _quickFetchIsPrimary;
     private bool _prPollingStarted;
 
+    /// <summary>
+    /// Tells page instances apart in the log. The grid was seen to load twice after Create Feature and after leaving a
+    /// removed Feature, with a second instance attaching its hub (logs of 2026-11-24); the log could not say which
+    /// instance loaded what, or why. See <see cref="LogGridLoad"/>.
+    /// </summary>
+    private readonly string _instanceId = Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>One debug line per grid load: which page instance, which context, and what asked for it.</summary>
+    private void LogGridLoad(string trigger) =>
+        Logger.LogDebug(
+            "Repositories grid load: instance={Instance}, workspace={WorkspaceId}, context={ContextId}, trigger={Trigger}",
+            _instanceId, WorkspaceId, _selectedContextId?.Value, trigger);
+
     protected override void OnInitialized()
     {
+        Logger.LogDebug(
+            "Repositories page instance {Instance} created: workspace={WorkspaceId}, contextQuery={ContextQuery}",
+            _instanceId, WorkspaceId, ContextQuery);
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
         AppBackgroundWork.OnStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
@@ -175,6 +191,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         await InvokeAsync(async () =>
         {
             if (_disposed) return;
+            LogGridLoad("context selected");
             await LoadWorkspaceAsync();
             ApplySyncStateFromLoadedItems();
             StateHasChanged();
@@ -454,6 +471,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
             errorMessage = null;
             CancelBackgroundWork();
             _backgroundWorkCts = new CancellationTokenSource();
+            LogGridLoad("page opened");
             await ResetAndLoadFromTopAsync();
         }
         catch (Exception ex)
@@ -499,6 +517,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         }
 
         _disposed = true;
+        Logger.LogDebug("Repositories page instance {Instance} disposed: workspace={WorkspaceId}", _instanceId, WorkspaceId);
         StopPrPollingLoop();
         CancelBackgroundWork();
         WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);

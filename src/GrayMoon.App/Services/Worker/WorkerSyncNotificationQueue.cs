@@ -17,6 +17,9 @@ namespace GrayMoon.App.Services.Worker;
 /// A run ends when the channel is empty, when a notification of another context arrives, at
 /// <see cref="MaxBatchSize"/> notifications, or on stop. A notification stays pending for
 /// <see cref="IWorkerSyncNotificationBarrier"/> and the UI count until the completion that covers it has returned.
+/// The reader never waits for a Feature that is still being created or repaired: the notifications of that context
+/// are set aside, stay pending, and are applied in arrival order when the Feature has finished, while the
+/// notifications of every other context go on.
 /// </remarks>
 public sealed class WorkerSyncNotificationQueue(
     IServiceScopeFactory scopeFactory,
@@ -36,18 +39,40 @@ public sealed class WorkerSyncNotificationQueue(
     private readonly Dictionary<int, int> _pendingByWorkspace = new();
     private readonly Dictionary<int, List<TaskCompletionSource>> _waitersByWorkspace = new();
 
-    private readonly Channel<QueuedSync> _channel =
-        Channel.CreateUnbounded<QueuedSync>(new UnboundedChannelOptions
+    private readonly Channel<QueueEntry> _channel =
+        Channel.CreateUnbounded<QueueEntry>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = false
         });
 
+    /// <summary>
+    /// Notifications set aside because the Feature of their context is still being created or repaired, in arrival
+    /// order per context. Read and written by the reader only.
+    /// </summary>
+    private readonly Dictionary<(int WorkspaceId, WorkspaceFeatureContextId ContextId), List<QueuedSync>> _parked = new();
+
+    /// <summary>What the reader takes from the channel: a notification, or the end of a Feature's finalization.</summary>
+    private abstract record QueueEntry;
+
     /// <param name="ReceivedAt">A Stopwatch timestamp (<see cref="RepositoryStateFreshness.Now"/>) read on arrival.</param>
-    private sealed record QueuedSync(RepositorySyncNotification Notification, long ReceivedAt)
+    private sealed record QueuedSync(RepositorySyncNotification Notification, long ReceivedAt) : QueueEntry
     {
         public long StartedAt { get; set; }
+
+        /// <summary>When it was last set aside for its Feature (a Stopwatch timestamp).</summary>
+        public long ParkedAt { get; set; }
+
+        /// <summary>Stopwatch ticks spent set aside for its Feature. That is not time the queue kept it waiting.</summary>
+        public long ParkedTicks { get; set; }
     }
+
+    /// <summary>
+    /// The Feature of this context is no longer being created or repaired, so its parked notifications are applied
+    /// now. Written to the channel, so they keep their place before every notification that arrives later.
+    /// </summary>
+    /// <param name="Finalized">False when the wait for the Feature ran out: the notifications are applied anyway.</param>
+    private sealed record ContextReleased(int WorkspaceId, WorkspaceFeatureContextId ContextId, bool Finalized) : QueueEntry;
 
     /// <summary>Notifications of one context whose state is stored and whose completion has not run yet.</summary>
     private sealed class OpenBatch
@@ -156,9 +181,12 @@ public sealed class WorkerSyncNotificationQueue(
         var batch = new OpenBatch();
         try
         {
-            await foreach (var item in _channel.Reader.ReadAllAsync(stoppingToken))
+            await foreach (var entry in _channel.Reader.ReadAllAsync(stoppingToken))
             {
-                await ApplyAsync(item, batch, stoppingToken);
+                if (entry is ContextReleased released)
+                    await ApplyParkedAsync(released, batch, stoppingToken);
+                else
+                    await ApplyAsync((QueuedSync)entry, batch, applyWhileFinalizing: false, stoppingToken);
 
                 // Nothing else is waiting, or the batch is full: recompute now. A notification that arrives during
                 // the completion starts the next batch.
@@ -171,19 +199,85 @@ public sealed class WorkerSyncNotificationQueue(
             // Stopping with stored but not completed notifications: nothing waits for them any more.
             foreach (var (item, _) in batch.Take())
                 Release(item);
+            // The same for the ones still set aside for a Feature that never finished.
+            foreach (var item in _parked.Values.SelectMany(items => items).ToList())
+                Release(item);
+            _parked.Clear();
             ReleaseAllWaiters();
             logger.LogInformation("WorkerSyncNotificationQueue stopped");
         }
     }
 
     /// <summary>
+    /// Sets <paramref name="item"/> aside until the Feature of its context is ready for it. The first one of a context
+    /// brings the wait for that Feature; when it ends, a <see cref="ContextReleased"/> entry is written to the channel.
+    /// The reader never waits for a Feature itself: Create Feature held one notification for more than two minutes,
+    /// and every notification of every other context waited behind it (logs of 2026-11-24, 61 slow notifications).
+    /// </summary>
+    private void Park(
+        (int WorkspaceId, WorkspaceFeatureContextId ContextId) key, QueuedSync item, Task<bool>? finalization)
+    {
+        item.ParkedAt = Stopwatch.GetTimestamp();
+        if (_parked.TryGetValue(key, out var parked))
+        {
+            parked.Add(item);
+            return;
+        }
+
+        _parked[key] = [item];
+        _ = PostReleaseAsync(key, finalization!);
+    }
+
+    private async Task PostReleaseAsync((int WorkspaceId, WorkspaceFeatureContextId ContextId) key, Task<bool> finalization)
+    {
+        var finalized = false;
+        try
+        {
+            finalized = await finalization;
+        }
+        catch (Exception ex)
+        {
+            // The wait itself failed. The notifications are applied anyway, as after a wait that ran out.
+            logger.LogError(ex,
+                "Waiting for the Feature of workspace {WorkspaceId} context {ContextId} failed; applying its sync notifications anyway",
+                key.WorkspaceId, key.ContextId.Value);
+        }
+
+        // False only after stop, when the parked notifications were released with the reader.
+        _channel.Writer.TryWrite(new ContextReleased(key.WorkspaceId, key.ContextId, finalized));
+    }
+
+    /// <summary>
+    /// Applies the notifications that were set aside for a Feature, in arrival order. A Feature that is being repaired
+    /// again by now takes them back, unless the wait ran out (<see cref="ContextReleased.Finalized"/> false).
+    /// </summary>
+    private async Task ApplyParkedAsync(ContextReleased released, OpenBatch batch, CancellationToken stoppingToken)
+    {
+        if (!_parked.Remove((released.WorkspaceId, released.ContextId), out var items))
+            return;
+
+        logger.LogDebug(
+            "Applying {Count} sync notification(s) held for the Feature of workspace {WorkspaceId} context {ContextId}",
+            items.Count, released.WorkspaceId, released.ContextId.Value);
+        var now = Stopwatch.GetTimestamp();
+        foreach (var item in items)
+        {
+            item.ParkedTicks += now - item.ParkedAt;
+            await ApplyAsync(item, batch, applyWhileFinalizing: !released.Finalized, stoppingToken);
+            if (batch.Items.Count >= MaxBatchSize)
+                await CompleteAsync(batch, stoppingToken);
+        }
+    }
+
+    /// <summary>
     /// Stores one notification's state. It joins <paramref name="batch"/> when its state was stored; a notification
     /// that was skipped, superseded or failed before its state write has nothing to recompute and is released here.
+    /// One whose Feature is still being created or repaired is set aside (<see cref="Park"/>) and stays pending.
     /// </summary>
-    private async Task ApplyAsync(QueuedSync item, OpenBatch batch, CancellationToken stoppingToken)
+    private async Task ApplyAsync(QueuedSync item, OpenBatch batch, bool applyWhileFinalizing, CancellationToken stoppingToken)
     {
         item.StartedAt = Stopwatch.GetTimestamp();
-        var observer = new BatchObserver(this, batch, stoppingToken);
+        var observer = new BatchObserver(this, batch, item, applyWhileFinalizing, stoppingToken);
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -207,6 +301,10 @@ public sealed class WorkerSyncNotificationQueue(
 
     private void Join(QueuedSync item, OpenBatch batch, BatchObserver observer)
     {
+        // Set aside for its Feature: it is applied again later and stays pending until then.
+        if (observer.Parked)
+            return;
+
         if (observer.Applied is { } applied)
             batch.Add(item, applied);
         else
@@ -252,7 +350,7 @@ public sealed class WorkerSyncNotificationQueue(
     {
         MarkApplied(item.Notification.WorkspaceId);
 
-        var waited = Stopwatch.GetElapsedTime(item.ReceivedAt, item.StartedAt);
+        var waited = QueueWait(item.ReceivedAt, item.StartedAt, item.ParkedTicks);
         var applied = Stopwatch.GetElapsedTime(item.StartedAt);
         if (waited + applied > SlowItemThreshold)
         {
@@ -262,18 +360,48 @@ public sealed class WorkerSyncNotificationQueue(
         }
     }
 
+    /// <summary>
+    /// How long the queue itself kept a notification before its last apply began: the time since it arrived, less
+    /// the time it was set aside for a Feature that was still being created or repaired.
+    /// </summary>
+    internal static TimeSpan QueueWait(long receivedAt, long startedAt, long parkedTicks)
+    {
+        var waited = Stopwatch.GetElapsedTime(receivedAt, startedAt) - Stopwatch.GetElapsedTime(0, parkedTicks);
+        return waited < TimeSpan.Zero ? TimeSpan.Zero : waited;
+    }
+
     /// <summary>Connects one apply to the open batch.</summary>
-    private sealed class BatchObserver(WorkerSyncNotificationQueue queue, OpenBatch batch, CancellationToken stoppingToken)
+    private sealed class BatchObserver(
+        WorkerSyncNotificationQueue queue,
+        OpenBatch batch,
+        QueuedSync item,
+        bool applyWhileFinalizing,
+        CancellationToken stoppingToken)
         : ISyncApplyObserver
     {
         public AppliedSync? Applied { get; private set; }
 
-        public async Task ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId)
+        /// <summary>The notification was set aside for its Feature instead of being applied.</summary>
+        public bool Parked { get; private set; }
+
+        public async Task<bool> ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId, Task<bool>? finalization)
         {
-            // A batch covers one context. Completing the other context's batch before this notification can wait
-            // (for a Feature that is still being created) keeps that context from waiting with it.
-            if (batch.Key is { } key && key != (workspaceId, contextId))
+            var key = (workspaceId, contextId);
+
+            // Earlier notifications of this context are set aside: this one goes behind them, also when the Feature
+            // has finished meanwhile (their release is then still in the channel), so arrival order is kept.
+            // Otherwise it is set aside when its Feature is not ready, unless the wait for that Feature ran out.
+            if (queue._parked.ContainsKey(key) || (finalization is not null && !applyWhileFinalizing))
+            {
+                queue.Park(key, item, finalization);
+                Parked = true;
+                return false;
+            }
+
+            // A batch covers one context: the other context's batch is completed before this state write.
+            if (batch.Key is { } open && open != key)
                 await queue.CompleteAsync(batch, stoppingToken);
+            return true;
         }
 
         public void StateWritten(AppliedSync applied) => Applied = applied;

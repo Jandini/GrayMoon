@@ -11,8 +11,8 @@ public interface ISyncNotificationHandler
 {
     /// <summary>
     /// The per-repository part: attributes the notification to a context and stores that repository's state.
-    /// Reports to <paramref name="observer"/> which context it belongs to (before any wait) and that the state was
-    /// stored. A notification that is skipped or superseded never reports a state write.
+    /// Reports to <paramref name="observer"/> which context it belongs to and that the state was stored. A
+    /// notification that is skipped, superseded or taken back by the observer never reports a state write.
     /// </summary>
     /// <param name="n">The notification the Worker sent.</param>
     /// <param name="receivedAt">
@@ -33,8 +33,15 @@ public interface ISyncNotificationHandler
 /// <summary>What <see cref="ISyncNotificationHandler.ApplyAsync"/> reports while it applies one notification.</summary>
 public interface ISyncApplyObserver
 {
-    /// <summary>The notification belongs to this context. Called before the Feature finalization wait and the state write.</summary>
-    Task ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId);
+    /// <summary>
+    /// The notification belongs to this context. Called before the state write. <paramref name="finalization"/> is set
+    /// while the Feature of that context is still being created or repaired: it completes with true when that has
+    /// ended, and with false when the wait for it ran out. Returns true to store the notification's state now, false
+    /// to take the notification back unapplied; the caller then applies it again later. The handler never waits for
+    /// the finalization itself, so the observer decides who waits: a single apply waits here, the sync queue sets the
+    /// notification aside and goes on with the other contexts.
+    /// </summary>
+    Task<bool> ContextResolvedAsync(int workspaceId, WorkspaceFeatureContextId contextId, Task<bool>? finalization);
 
     /// <summary>The repository's state is stored. Called once, straight after the state write.</summary>
     void StateWritten(AppliedSync applied);

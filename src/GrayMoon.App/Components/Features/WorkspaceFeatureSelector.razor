@@ -170,17 +170,17 @@
             {
                 <li class="workspace-feature-selector__feature-row">
                     <button type="button"
-                            class="dropdown-item @(IsSelected(option) ? "active" : "")"
+                            class="dropdown-item workspace-feature-selector__feature-item @(IsSelected(option) ? "active" : "")"
                             role="menuitem"
                             disabled="@(!CanSelect(option))"
                             @onclick="() => SelectAsync(option)">
-                        @DisplayName(option)
+                        <span class="workspace-feature-selector__feature-name">@DisplayName(option)</span>
                         @{
                             var label = FeatureSelectorPresentation.FriendlyLabel(option);
                         }
                         @if (!string.IsNullOrEmpty(label))
                         {
-                            <span class="text-muted small ms-1" title="@(option.LastError ?? string.Empty)">@label</span>
+                            <span class="workspace-feature-selector__feature-state text-muted small ms-1" title="@(option.LastError ?? string.Empty)">@label</span>
                         }
                     </button>
                     @if (OnRequestRemoveFeature.HasDelegate && FeatureSelectorPresentation.ShowRemoveAction(option))
@@ -347,19 +347,19 @@
                                 var featureOption = feature;
                                 <li>
                                     <button type="button"
-                                            class="dropdown-item"
+                                            class="dropdown-item workspace-feature-selector__feature-item"
                                             role="menuitem"
                                             disabled="@(!CanSelect(featureOption))"
                                             title="@FeatureTitle(featureOption)"
                                             @onclick="() => SwitchToWorkspaceFeatureAsync(ws.WorkspaceId, featureOption)"
                                             @onclick:stopPropagation>
-                                        @(featureOption.FeatureName?.Trim() ?? string.Empty)
+                                        <span class="workspace-feature-selector__feature-name">@(featureOption.FeatureName?.Trim() ?? string.Empty)</span>
                                         @{
                                             var crossLabel = FeatureSelectorPresentation.FriendlyLabel(featureOption);
                                         }
                                         @if (!string.IsNullOrEmpty(crossLabel))
                                         {
-                                            <span class="text-muted small ms-1" title="@(featureOption.LastError ?? string.Empty)">@crossLabel</span>
+                                            <span class="workspace-feature-selector__feature-state text-muted small ms-1" title="@(featureOption.LastError ?? string.Empty)">@crossLabel</span>
                                         }
                                     </button>
                                 </li>

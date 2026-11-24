@@ -1042,6 +1042,20 @@ public sealed class GitWorktreeService(
                 unstaged++;
         }
 
+        if (staged + unstaged + untracked + conflicts > 0)
+        {
+            // Remove Feature shows "Has uncommitted changes" from these counts. The log names the first files, because
+            // without them nobody could tell afterwards what had changed a worktree (logs of 2026-11-24).
+            var entries = (stdout ?? "")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.TrimEnd('\r'))
+                .Where(l => l.Length >= 2)
+                .Take(5);
+            logger.LogInformation(
+                "Worktree {RepoPath} has uncommitted changes: staged={Staged}, unstaged={Unstaged}, untracked={Untracked}, conflicts={Conflicts}. First entries: {Entries}",
+                repoPath, staged, unstaged, untracked, conflicts, string.Join(" | ", entries));
+        }
+
         return (true, staged, unstaged, untracked, conflicts, null);
     }
 

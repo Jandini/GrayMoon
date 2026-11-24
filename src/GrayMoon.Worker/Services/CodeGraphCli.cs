@@ -34,6 +34,7 @@ public sealed class CodeGraphCli(
     private static readonly TimeSpan InitTimeout = TimeSpan.FromHours(1);
     private static readonly TimeSpan UninitTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan StopInitTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan GitTimeout = TimeSpan.FromMinutes(1);
 
     /// <summary>Outcomes of a background build, as <see cref="WatchInitAsync"/> reports them.</summary>
     internal const string InitRunning = "Running";
@@ -407,6 +408,34 @@ public sealed class CodeGraphCli(
     /// <summary>Runs <c>codegraph uninit -f</c>, which deletes <c>.codegraph</c> in <paramref name="root"/>.</summary>
     public Task<CommandLineResult> UninitAsync(string executable, string root, CancellationToken cancellationToken) =>
         commandLine.RunAsync(executable, ["uninit", "-f", root], root, [], cancellationToken, timeout: UninitTimeout);
+
+    /// <summary>
+    /// Puts back the files of <c>.codegraph</c> that Git tracks in <paramref name="root"/> after the index was removed.
+    /// <c>codegraph uninit</c> and <see cref="DeleteIndexAsync"/> delete the whole folder, and a Workspace repository can
+    /// have <c>.codegraph/.gitignore</c> committed: without this the checkout is left with a deleted file, and Remove
+    /// Feature then finds a repository that changed after the user's check. Returns null when nothing is tracked there,
+    /// the folder is not a repository root, or the files are back; otherwise what failed.
+    /// </summary>
+    public async Task<string?> RestoreTrackedIndexFilesAsync(string root, CancellationToken cancellationToken)
+    {
+        // A Workspace without a Workspace repository is a plain folder. In a worktree .git is a file, so either counts.
+        var gitEntry = Path.Combine(root, ".git");
+        if (!File.Exists(gitEntry) && !Directory.Exists(gitEntry))
+            return null;
+
+        var tracked = await commandLine.RunAsync(
+            "git", ["ls-files", "--", DataFolderName], root, [], cancellationToken, timeout: GitTimeout);
+        if (tracked.ExitCode != 0)
+            return $"git ls-files failed: {FirstLine(tracked.Stderr) ?? FirstLine(tracked.Stdout) ?? $"exit code {tracked.ExitCode}"}";
+        if (string.IsNullOrWhiteSpace(tracked.Stdout))
+            return null;
+
+        var restored = await commandLine.RunAsync(
+            "git", ["checkout", "--", DataFolderName], root, [], cancellationToken, timeout: GitTimeout);
+        return restored.ExitCode == 0
+            ? null
+            : $"git checkout failed: {FirstLine(restored.Stderr) ?? FirstLine(restored.Stdout) ?? $"exit code {restored.ExitCode}"}";
+    }
 
     internal static string? FirstLine(string? text)
     {

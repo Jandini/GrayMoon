@@ -30,19 +30,35 @@ public sealed class UninitCodeGraphCommand(CodeGraphCli codeGraph)
         {
             var result = await codeGraph.UninitAsync(executable, root, cancellationToken);
             if (result.ExitCode == 0)
-                return new UninitCodeGraphResponse { Outcome = "Removed" };
+                return await RemovedAsync(root, cancellationToken);
 
             uninitError = CodeGraphCli.FirstLine(result.Stderr) ?? CodeGraphCli.FirstLine(result.Stdout)
                 ?? $"codegraph uninit exited with code {result.ExitCode}.";
         }
 
         if (await codeGraph.DeleteIndexAsync(root, cancellationToken))
-            return new UninitCodeGraphResponse { Outcome = "Removed" };
+            return await RemovedAsync(root, cancellationToken);
 
         return new UninitCodeGraphResponse
         {
             Outcome = "Failed",
             Message = uninitError ?? "The CodeGraph index folder is still in use.",
+        };
+    }
+
+    /// <summary>
+    /// The index is gone, and with it every file of <c>.codegraph</c>. The ones Git tracks are put back so the checkout
+    /// is as Git has it; when that fails the index is still removed and the message says what is left changed.
+    /// </summary>
+    private async Task<UninitCodeGraphResponse> RemovedAsync(string root, CancellationToken cancellationToken)
+    {
+        var restoreError = await codeGraph.RestoreTrackedIndexFilesAsync(root, cancellationToken);
+        return new UninitCodeGraphResponse
+        {
+            Outcome = "Removed",
+            Message = restoreError is null
+                ? null
+                : $"The index was removed, but the committed files of {CodeGraphCli.DataFolderName} could not be restored ({restoreError}). The repository in {root} now has uncommitted changes.",
         };
     }
 }
