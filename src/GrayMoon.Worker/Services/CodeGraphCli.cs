@@ -428,10 +428,17 @@ public sealed class CodeGraphCli(
         if (tracked.ExitCode != 0)
             return $"git ls-files failed: {FirstLine(tracked.Stderr) ?? FirstLine(tracked.Stdout) ?? $"exit code {tracked.ExitCode}"}";
         if (string.IsNullOrWhiteSpace(tracked.Stdout))
+        {
+            logger.LogInformation("CodeGraph uninit in {Root}: Git tracks no file of {Folder}, nothing to put back", root, DataFolderName);
             return null;
+        }
+
+        var trackedCount = tracked.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
 
         var restored = await commandLine.RunAsync(
             "git", ["checkout", "--", DataFolderName], root, [], cancellationToken, timeout: GitTimeout);
+        if (restored.ExitCode == 0)
+            logger.LogInformation("CodeGraph uninit in {Root}: put back {Count} tracked file(s) of {Folder}", root, trackedCount, DataFolderName);
         return restored.ExitCode == 0
             ? null
             : $"git checkout failed: {FirstLine(restored.Stderr) ?? FirstLine(restored.Stdout) ?? $"exit code {restored.ExitCode}"}";

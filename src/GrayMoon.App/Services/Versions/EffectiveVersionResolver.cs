@@ -240,6 +240,9 @@ public sealed class EffectiveVersionResolver(
                 CancellationToken = cancellationToken,
             };
             var checkedCount = 0;
+            // Shown before the first answer: one GitVersion run takes 10 s or more, and with only the caller's label
+            // ("Verifying published packages...") the overlay looked stuck until then.
+            progress.Report(CheckedMessage(0, toCalculate.Count), 0, toCalculate.Count);
             await Parallel.ForEachAsync(toCalculate, options, async (probe, ct) =>
             {
                 parentVersions[probe.Candidate.RepositoryId] = await GetParentVersionAsync(workerArgs, probe.Candidate.RepositoryName, probe.Baseline, ct);

@@ -45,6 +45,9 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
         var totalStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         var slowestMs = 0L;
         string? slowestRepo = null;
+        // Summed over all repositories, per step, so the log shows what one git call costs on this machine
+        // (2026-11-25: 36 to 60 s for 40 repositories with nothing else running on the Worker).
+        long headMs = 0, branchMs = 0, tagMs = 0, collisionMs = 0;
         await Task.WhenAll(names.Select(async repoName =>
         {
             await semaphore.WaitAsync(cancellationToken);
@@ -52,7 +55,9 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
             try
             {
                 var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repoName, request.WorkspaceRepositoryName);
+                var stepStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 var sha = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
+                Interlocked.Add(ref headMs, ElapsedMs(ref stepStartedAt));
                 if (!string.IsNullOrWhiteSpace(sha))
                     commits[repoName] = sha;
                 else
@@ -61,10 +66,12 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
                         repoName, workspacePath);
 
                 var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+                Interlocked.Add(ref branchMs, ElapsedMs(ref stepStartedAt));
                 if (!string.IsNullOrWhiteSpace(branch))
                     branches[repoName] = branch;
 
                 var tag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
+                Interlocked.Add(ref tagMs, ElapsedMs(ref stepStartedAt));
                 if (tag != null)
                     tags[repoName] = tag;
 
@@ -73,6 +80,7 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
                     var refs = await reader.FindBranchCollisionsAsync(repoPath, collisionBranch, cancellationToken);
                     if (refs.Count > 0)
                         collisions[repoName] = refs.ToList();
+                    Interlocked.Add(ref collisionMs, ElapsedMs(ref stepStartedAt));
                 }
             }
             finally
@@ -92,8 +100,10 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
         }));
 
         logger.LogInformation(
-            "GetHeadCommits timing. Repositories={Count} MaxConcurrent={MaxConcurrent} TotalMs={TotalMs} SlowestRepository={SlowestRepository} SlowestMs={SlowestMs}",
-            names.Count, DefaultMaxConcurrent, (long)System.Diagnostics.Stopwatch.GetElapsedTime(totalStartedAt).TotalMilliseconds, slowestRepo, slowestMs);
+            "GetHeadCommits timing. Repositories={Count} MaxConcurrent={MaxConcurrent} TotalMs={TotalMs} SlowestRepository={SlowestRepository} SlowestMs={SlowestMs} "
+            + "SumHeadMs={SumHeadMs} SumBranchMs={SumBranchMs} SumTagMs={SumTagMs} SumCollisionMs={SumCollisionMs}",
+            names.Count, DefaultMaxConcurrent, (long)System.Diagnostics.Stopwatch.GetElapsedTime(totalStartedAt).TotalMilliseconds, slowestRepo, slowestMs,
+            headMs, branchMs, tagMs, collisionMs);
 
         return new GetHeadCommitsResponse
         {
@@ -102,5 +112,14 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
             Tags = new Dictionary<string, string>(tags, StringComparer.OrdinalIgnoreCase),
             BranchCollisions = new Dictionary<string, List<string>>(collisions, StringComparer.OrdinalIgnoreCase),
         };
+    }
+
+    /// <summary>Milliseconds since <paramref name="startedAt"/>, which is then moved to now for the next step.</summary>
+    private static long ElapsedMs(ref long startedAt)
+    {
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var elapsed = (long)System.Diagnostics.Stopwatch.GetElapsedTime(startedAt, now).TotalMilliseconds;
+        startedAt = now;
+        return elapsed;
     }
 }

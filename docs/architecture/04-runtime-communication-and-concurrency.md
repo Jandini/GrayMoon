@@ -109,7 +109,7 @@ MaxConcurrentDiffCommands   diff pool   default 4
 MaxConcurrentAiCommands     AI pool     default 4
 ```
 
-The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job.
+The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job. Its queue (`TrackedJobQueue`) holds commands and hook notify jobs apart and its workers always take a command first: the App waits for a command, nobody waits for a hook sync. A hook sync that is already running is not interrupted, so a command waits at most for one worker to finish its current job (`TrackedJobQueueTests`).
 
 Intake and cancellation (`CommandRequestIntake`, in `SignalRConnectionHostedService.cs`):
 
@@ -614,7 +614,7 @@ For example, pre-push is intentionally not a general-purpose fetch operation.
 
 The listener queues a job only for a request that passes its checks (JSON content type, 64 KB body cap, a `repositoryPath` GrayMoon manages; 02 section 11). A rejected request gets 400 or 413 and no job; the hook scripts ignore the status, so the Git command is never affected.
 
-Notify jobs (`NotifySyncJob`) run on the Worker main pool. `Checkout` jobs for worktrees being created are deferred (section 5C).
+Notify jobs (`NotifySyncJob`) run on the Worker main pool, after any command that is queued there. `Checkout` jobs for worktrees being created are deferred (section 5C).
 
 The state writer's partial/probed-group semantics are therefore essential.
 
@@ -988,7 +988,7 @@ Worker rules:
 
 ## 21. Known gaps
 
-- No dedicated Worker lane for worktree create/remove: they share the main pool with hook notify jobs. `GetHeadCommits` concurrency is the constant 8, independent of `MaxParallelOperations`.
+- No dedicated Worker lane for worktree create/remove: they share the main pool with hook notify jobs, which are taken after them. `GetHeadCommits` concurrency is the constant 8, independent of `MaxParallelOperations`.
 - Only `SyncRepositoryCommand` uses the LibGit2Sharp snapshot; hook syncs, commit counts, branch refresh and Git Changes status use the CLI. Linked-worktree config reads always go native.
 - `FetchAsync` is always `fetch origin --prune --tags`; there is no narrower fetch policy for Sync.
 - The watcher does not filter ignored build output; it drops only `.git` and nested repositories.

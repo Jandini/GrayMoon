@@ -38,6 +38,9 @@ public sealed partial class WorkspaceRepositories
                     await InvokeAsync(async () =>
                     {
                         if (_disposed) return;
+                        // This refresh covers the sync events that arrived during the job; without the reset
+                        // OnJobServiceChanged loaded the grid a second time right after it.
+                        _pendingRefreshAfterJob = false;
                         await RefreshFromSync();
                     });
             }

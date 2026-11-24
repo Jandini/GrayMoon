@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 namespace GrayMoon.App.Components.Pages;
+[KeepsInstanceOnQueryChange]
 public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposable
 {
     [Parameter] public int WorkspaceId { get; set; }
@@ -180,6 +181,8 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         ApplySelectedContext(info);
         _boundContextQuery = BoundContextQueryFromSelection();
         Interlocked.Increment(ref _contextGeneration);
+        // A refresh still waiting belongs to the context being left; the load below replaces it.
+        CancelPendingGridRefresh();
         ClearRepositoryErrors();
         ApplyStoredOperationOutcome();
         // Drop Feature/Workspace rows immediately so the selector label and grid cannot disagree
@@ -371,8 +374,10 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         _featureStatusContextId = null;
         ToastService.Show("Removing feature...");
 
-        NavigationManager.NavigateTo(leave.Path, replace: true);
+        // Select first, navigate second (the order of WorkspaceContextBar.SelectContextAsync): the page instance
+        // survives the navigation, and its parameter update must find the context already bound, or it loads again.
         await OnSelectedContextChangedAsync(leave.Workspace!.ContextId);
+        NavigationManager.NavigateTo(leave.Path, replace: true);
     }
 
     /// <summary>Reads the saved tbody scroll offset for the current WorkspaceId from sessionStorage, consumed by the next ResetAndLoadFromTopAsync(restoreScroll: true) call. Best-effort: malformed or missing storage falls back to no restore (top of grid), matching current behavior.</summary>

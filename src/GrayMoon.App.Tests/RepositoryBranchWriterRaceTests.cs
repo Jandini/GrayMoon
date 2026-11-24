@@ -67,6 +67,57 @@ public sealed class RepositoryBranchWriterRaceTests
         Assert.True(storedMain.LastSeenAt > stale);
     }
 
+    // The handled race used to reach the database as an insert that failed, which EF Core logs as two errors
+    // with a stack trace (App log of 2026-11-25, twice during one Create Feature). A row stored after the
+    // writer decided to add it, but before the save, is now dropped without sending the insert.
+    [Fact]
+    public async Task A_branch_stored_before_the_save_is_dropped_without_a_failed_insert()
+    {
+        var failures = new CountFailedCommands();
+        await using var ctx = await SyncStateTestContext.CreateAsync(configureDb: options => options.AddInterceptors(failures));
+
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.RepositoryBranches.Add(NewBranch(ctx.WorkspaceRepositoryId));
+
+        await using (var other = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            other.RepositoryBranches.Add(NewBranch(ctx.WorkspaceRepositoryId));
+            await other.SaveChangesAsync();
+        }
+
+        var dropped = await db.SaveChangesCountingStoredBranchRowsAsync();
+
+        Assert.Equal(1, dropped);
+        Assert.Equal(0, failures.Count);
+        Assert.Equal(1, await CountBranchAsync(ctx, BranchName, isRemote: false));
+    }
+
+    private static RepositoryBranch NewBranch(int workspaceRepositoryId) => new()
+    {
+        WorkspaceRepositoryId = workspaceRepositoryId,
+        BranchName = BranchName,
+        IsRemote = false,
+        LastSeenAt = DateTime.UtcNow,
+        IsDefault = false
+    };
+
+    private sealed class CountFailedCommands : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public override Task CommandFailedAsync(
+            System.Data.Common.DbCommand command,
+            CommandErrorEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _count);
+            return Task.CompletedTask;
+        }
+    }
+
     private static async Task<int> CountBranchAsync(SyncStateTestContext ctx, string branchName, bool isRemote)
     {
         var rows = await ctx.ReadBranchesAsync();
