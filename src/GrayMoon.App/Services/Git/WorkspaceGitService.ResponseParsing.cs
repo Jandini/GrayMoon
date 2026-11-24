@@ -144,7 +144,7 @@ public sealed partial class WorkspaceGitService
     private static RepoGitVersionInfo ParseRefreshRepositoryVersionResponse(WorkerCommandResponse response)
     {
         if (!response.Success || response.Data == null)
-            return new RepoGitVersionInfo { Version = "-", Branch = "-" };
+            return new RepoGitVersionInfo { Version = "-", Branch = "-", Snapshot = new RepositoryStateSnapshot() };
 
         var (version, branch, tag, gitVersionError, gitFetchError, _, commit) = GetVersionBranch(response.Data);
         var (outgoingCommits, incomingCommits, defaultBehind, defaultAhead) = GetCommitCounts(response.Data);

@@ -138,8 +138,9 @@ public sealed class PullDependencyRefreshTests
         Assert.Equal(1, (await ReadLinkAsync(ctx, consumerId)).UnmatchedDeps);
         var edge = Assert.Single(await ctx.ReadDependenciesAsync());
         Assert.Equal("1.5.0", edge.Version);
-        // One recompute for the two repositories: the version-file check announces itself, then the pull does.
-        Assert.Equal(2, ctx.Broadcasts.Count(b => b.Method == "ContextSynced") - contextSyncedBefore);
+        // One recompute for the two repositories, announced once. The version-file check inside it no longer
+        // announces itself: pages then reloaded with new file badges next to old dependency badges.
+        Assert.Equal(1, ctx.Broadcasts.Count(b => b.Method == "ContextSynced") - contextSyncedBefore);
     }
 
     [Fact]

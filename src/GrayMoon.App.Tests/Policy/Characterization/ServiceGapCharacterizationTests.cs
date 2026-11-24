@@ -230,7 +230,7 @@ public sealed class ServiceGapCharacterizationTests
             CurrentBranch = "main",
             DefaultBranch = "main",
             State = new RepositoryStateSnapshot { BranchName = "main", IdentityProbed = true },
-        });
+        }.WithProbedState());
         var special = await ctx.GetSpecialContextIdAsync();
 
         await using var scope = ctx.CreateScope();

@@ -268,6 +268,9 @@ public sealed partial class WorkspaceGitService
             }
         }
 
+        // Read before any CreateBranch is sent: a hook snapshot received before this moment describes the checkouts
+        // these commands leave.
+        var fanOutStartedAt = RepositoryStateFreshness.Now();
         await Task.WhenAll(links.Select(ProcessOne));
 
         // EF Core not thread-safe; apply all state writes sequentially after the parallel worker calls.
@@ -291,7 +294,9 @@ public sealed partial class WorkspaceGitService
                 newBranchName, created.BaseBranchName ?? baseBranch, created.Response, DateTime.UtcNow, _logger, cancellationToken);
             if (baselineWarning != null)
                 baselineWarnings.Add(baselineWarning);
-            var newBranchHead = created.Response is { AlreadyExisted: false } ? created.Response.BaseCommitSha : null;
+            // What the Worker read after the checkout: the base commit of a new branch, the tip of one that was
+            // already there (Prepare Workspace onto an existing branch, hooks off: nothing else reports that HEAD).
+            var newBranchHead = created.Response?.HeadCommitSha;
 
             // Hooks were suppressed when syncState is set - persist all state returned inline so the next
             // step (dependency update) sees a complete, consistent database for this context.
@@ -300,7 +305,6 @@ public sealed partial class WorkspaceGitService
                 IdentityProbed = true,
                 BranchName = branchName,
                 CheckedOutTag = null,
-                // A new branch starts on its base commit; the post-checkout hook reports the same SHA when it runs.
                 HeadCommit = newBranchHead,
                 GitVersionProbed = !string.IsNullOrWhiteSpace(createResponse?.Version),
                 GitVersion = createResponse?.Version,
@@ -316,6 +320,7 @@ public sealed partial class WorkspaceGitService
             await _stateWriter.ApplyAsync(contextId, workspaceId, wr.RepositoryId, snapshot, new RepositoryStateWriteOptions
             {
                 SyncStatus = SyncStatusWrite.Leave,
+                OperationStartedAt = fanOutStartedAt,
             }, cancellationToken);
         }
 

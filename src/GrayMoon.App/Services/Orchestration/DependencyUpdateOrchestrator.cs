@@ -23,6 +23,7 @@ public sealed class DependencyUpdateOrchestrator(
     IServiceScopeFactory scopeFactory,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IWorkerSyncNotificationBarrier syncNotificationBarrier,
+    AppBackgroundWorkStateService appBackgroundWork,
     ILogger<DependencyUpdateOrchestrator> logger) : IDependencyUpdateLane
 {
     private readonly int _maxConcurrent = Math.Max(1, workspaceOptions?.Value?.MaxParallelOperations ?? 8);
@@ -80,8 +81,7 @@ public sealed class DependencyUpdateOrchestrator(
         // Everything below decides from stored repository state (versions, unpushed commits, upstream). Hook syncs the
         // App has already received but not yet applied would otherwise land mid-run: late enough to hide a repository's
         // unpushed commit from the push plan, or to overwrite the state this run has just refreshed.
-        setProgress("Applying pending repository changes...");
-        await syncNotificationBarrier.WaitForPendingAsync(workspaceId, cancellationToken);
+        await PendingSyncNotificationWait.WaitAsync(syncNotificationBarrier, appBackgroundWork, workspaceId, setProgress, cancellationToken);
 
         var hadError = false;
         var allSyncedRepoIds = new HashSet<int>();
@@ -95,6 +95,14 @@ public sealed class DependencyUpdateOrchestrator(
         {
             hadError = true;
             sink.Level(level, msg);
+        }
+
+        // The file-version check reads the stored HEAD commit. A HEAD moved without a hook GrayMoon hears (git reset, a
+        // rebase, a foreign core.hooksPath) would leave it old, so the commits version files use are read once here.
+        if (await RefreshCommitTokenHeadsAsync(workspaceId, contextId, setProgress, cancellationToken) is { } commitError)
+        {
+            OnLevelError(0, commitError);
+            return DependencyUpdateRunResult.Failed();
         }
 
         var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
@@ -344,12 +352,12 @@ public sealed class DependencyUpdateOrchestrator(
                     levelSyncedRepoIds.ToHashSet()));
         }
 
-        // Finalize: broadcast so grid refreshes, then run one file-version check for the whole update.
+        // Finalize: one recompute for the whole update (effective versions, the file-version check, dependency stats),
+        // then the broadcast so the grid refreshes.
         if (!hadError)
         {
             onAppSideComplete?.Invoke();
             await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
-            await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
         }
 
         logger.LogInformation(
@@ -437,9 +445,42 @@ public sealed class DependencyUpdateOrchestrator(
             return false;
 
         onAppSideComplete?.Invoke();
+        // The recompute runs the file-version check itself.
         await workspaceGitService.RecomputeAndBroadcastWorkspaceSyncedAsync(workspaceId, contextId, cancellationToken);
-        await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Reads the HEAD commit of every repository a version file's <c>:commit</c> token names from the Worker and stores
+    /// it, in a scope of its own. When a stored commit changed, the file-version check runs once so this run decides
+    /// from the new commits. Returns the message to stop with when a commit could not be read; nothing was changed then.
+    /// </summary>
+    private async Task<string?> RefreshCommitTokenHeadsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        Action<string> setProgress,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var scopedFileVersions = scope.ServiceProvider.GetRequiredService<WorkspaceFileVersionService>();
+        var (commits, error) = await scopedFileVersions.ReadLiveCommitTokenHeadsAsync(workspaceId, contextId, cancellationToken);
+        if (error is not null)
+            return error;
+        if (commits.Count == 0)
+            return null;
+
+        setProgress("Reading current commits...");
+        var changed = await scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>()
+            .WriteHeadCommitsAsync(contextId, commits, cancellationToken);
+        if (changed > 0)
+        {
+            logger.LogInformation(
+                "Update start: {Count} stored HEAD commit(s) differed from the checkout in workspace {WorkspaceId} context {ContextId}; version files are checked again.",
+                changed, workspaceId, contextId.Value);
+            await scopedFileVersions.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
+        }
+
+        return null;
     }
 
     private async Task<IReadOnlyList<(int Level, IReadOnlySet<int> RepoIds)>> GetRepositoryIdsByDependencyLevelAsync(
@@ -495,6 +536,13 @@ public sealed class DependencyUpdateOrchestrator(
         return [];
     }
 
+    /// <summary>
+    /// The error shown on a repository that Update committed and could not refresh afterwards: the commit exists, and
+    /// the row still shows the commit and version from before it.
+    /// </summary>
+    internal static string StateNotRefreshedMessage(string cause) =>
+        $"{cause.TrimEnd().TrimEnd('.')}. The commit was made, but the repository's commit and version were not refreshed. Sync the repository.";
+
     private async Task<bool> RefreshRepositoryVersionsAsync(
         IReadOnlyList<int> repositoryIds,
         int workspaceId,
@@ -509,6 +557,7 @@ public sealed class DependencyUpdateOrchestrator(
 
         var totalRefresh = repositoryIds.Count;
         var completedRefresh = 0;
+        var refreshed = new System.Collections.Concurrent.ConcurrentDictionary<int, bool>();
         using var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
         var refreshTasks = repositoryIds.Select(async repoId =>
         {
@@ -517,30 +566,60 @@ public sealed class DependencyUpdateOrchestrator(
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var svc = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();
-                var (refreshSuccess, refreshError) = await svc.SyncSingleRepositoryAsync(repoId, workspaceId, contextId, cancellationToken);
+                // No file-version check per repository: these run side by side, and one check follows below.
+                var (refreshSuccess, refreshError) = await svc.SyncSingleRepositoryAsync(
+                    repoId, workspaceId, contextId, cancellationToken, checkFileVersions: false);
+                if (refreshSuccess)
+                    refreshed[repoId] = true;
                 var c = Interlocked.Increment(ref completedRefresh);
                 setProgress($"Updating version {c} of {totalRefresh}...");
                 return (RepoId: repoId, Success: refreshSuccess, Error: refreshError);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Refresh after commit failed for repository {RepositoryId} in workspace {WorkspaceId}", repoId, workspaceId);
+                return (RepoId: repoId, Success: false, Error: (string?)ex.Message);
             }
             finally
             {
                 refreshSemaphore.Release();
             }
-        });
+        }).ToList();
 
-        var refreshResults = await Task.WhenAll(refreshTasks);
+        // These repositories were committed with hooks off, so this refresh is the only thing that stores their new
+        // commit and version. One that is not refreshed keeps the old ones, and that is reported on the repository.
+        (int RepoId, bool Success, string? Error)[] refreshResults;
+        try
+        {
+            refreshResults = await Task.WhenAll(refreshTasks);
+        }
+        catch (OperationCanceledException)
+        {
+            foreach (var repoId in repositoryIds.Where(id => !refreshed.ContainsKey(id)))
+                onRepoError(repoId, StateNotRefreshedMessage("Update was stopped"));
+            throw;
+        }
+
+        var allRefreshed = true;
         foreach (var (repoId, success, err) in refreshResults)
         {
-            if (!success)
-            {
-                onRepoError(repoId, err ?? "Refresh version failed.");
-                return false;
-            }
+            if (success)
+                continue;
+
+            allRefreshed = false;
+            onRepoError(repoId, StateNotRefreshedMessage(err ?? "Refresh version failed."));
         }
+
+        if (!allRefreshed)
+            return false;
 
         // These repositories committed, so they left their branch point: their effective version is their own from now on
         // (no Worker or registry call is made for them).
         await ResolveEffectiveVersionsAsync(workspaceId, contextId, repositoryIds.ToHashSet(), startCheck: false, cancellationToken);
+
+        // One check for the whole batch, after every new version, HEAD commit and effective version is stored: the
+        // version files of higher levels are now out of date, and a run that stops here must leave that visible.
+        await fileVersionService.CheckAndPersistFileVersionStatusAsync(workspaceId, contextId, cancellationToken);
 
         onAppSideComplete?.Invoke();
         return true;

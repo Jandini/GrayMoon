@@ -152,6 +152,18 @@ mixes every context's data into one answer, or persists onto the wrong row.
    from a capped display list (for example the 100-capped `n.Repos`) or from
    special-Workspace link columns when the context is a Feature.
 
+8. **A state write that says it read the checkout reports the commit it read.**
+   A snapshot with `IdentityProbed` carries `HeadCommit` (blank only for a
+   repository with no commits, which clears the stored one). The file-version
+   check and the effective version decide from
+   `WorkspaceRepositoryContextState.HeadCommit`, so a write that moved the
+   branch and kept the old commit makes both wrong without any error. A Worker
+   command that moves HEAD with hooks off returns the state it left behind,
+   also when it fails after the move; the App stores it. Never build a
+   snapshot from the readable fields of a response and mark groups as probed by
+   guessing: App and Worker are version-locked, and a response without `State`
+   read nothing.
+
 ### Before merging a change that touches Feature/worktree data
 
 - Grep the table/column you changed for every other query or write that reads

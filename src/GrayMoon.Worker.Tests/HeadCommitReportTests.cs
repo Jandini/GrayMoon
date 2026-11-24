@@ -54,6 +54,52 @@ public sealed class HeadCommitReportTests : IDisposable
     }
 
     [Fact]
+    public async Task Refresh_version_of_a_folder_that_is_not_there_fails_instead_of_reporting_no_branch()
+    {
+        CloneOnFeatureBranch();
+
+        // It used to answer branch "-", and the App stored "no branch" for a checkout nobody had read.
+        var error = await Assert.ThrowsAsync<DirectoryNotFoundException>(() =>
+            new RefreshRepositoryVersionCommand(_git, _reader, new NoWorkerToken(), CapabilityTestDoubles.RealFactory(_git))
+                .ExecuteAsync(new RefreshRepositoryVersionRequest
+                {
+                    WorkspaceRoot = _root,
+                    WorkspaceName = "ws",
+                    RepositoryName = "gone",
+                    Capabilities = NoVersioning,
+                }));
+
+        Assert.Contains("gone", error.Message);
+    }
+
+    [Fact]
+    public async Task Create_branch_onto_a_branch_that_already_exists_reports_the_HEAD_it_checked_out()
+    {
+        var repoPath = CloneOnFeatureBranch();
+        var featureHead = Commit(repoPath);
+        GitConfigTestSupport.Git(repoPath, "checkout --detach HEAD~1");
+        Assert.NotEqual(featureHead, Head(repoPath));
+
+        // Prepare Workspace onto an existing branch runs with hooks off: this answer is the only report of the new HEAD.
+        var response = await new CreateBranchCommand(_git, _reader, new NoWorkerToken())
+            .ExecuteAsync(new CreateBranchRequest
+            {
+                WorkspaceRoot = _root,
+                WorkspaceName = "ws",
+                RepositoryName = "repo",
+                NewBranchName = "feature/x",
+                BaseBranchName = "main",
+                SkipHooks = true,
+                Capabilities = NoVersioning,
+            });
+
+        Assert.True(response.Success, response.ErrorMessage);
+        Assert.True(response.AlreadyExisted);
+        Assert.Null(response.BaseCommitSha);
+        Assert.Equal(featureHead, response.HeadCommitSha);
+    }
+
+    [Fact]
     public async Task Sync_on_a_branch_reports_HEAD()
     {
         var repoPath = CloneOnFeatureBranch();

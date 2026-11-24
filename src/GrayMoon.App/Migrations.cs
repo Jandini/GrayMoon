@@ -53,6 +53,7 @@ public static partial class Migrations
         (19, "Reference repository columns", dbContext => MigrateReferenceRepositoriesAsync(dbContext)),
         (20, "Agent environment variables", dbContext => MigrateAgentEnvironmentVariablesAsync(dbContext)),
         (21, "Effective versions and branch baselines", dbContext => MigrateEffectiveVersionsAsync(dbContext)),
+        (22, "Version file token not-checked reason", dbContext => MigrateFileVersionNotCheckedReasonAsync(dbContext)),
     };
 
     public static Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null) =>

@@ -127,6 +127,7 @@ Current strict steps:
                                                            EffectiveVersionCommitSha, EffectiveVersionReasonCode; WorkspaceRepositoryBranchBaselines table
                                                            with its unique (context, repository, branch) index, section 22. The runner adds the four columns
                                                            before older steps too: step 16 inserts context state rows through EF)
+22  Version file token not-checked reason                  (WorkspaceFileLineStatuses.NotCheckedReason, section 10)
 ```
 
 A brand-new database also starts at `user_version` 0, so it runs the baseline and every strict step right after `EnsureCreated()`. Every step must therefore be a no-op against the current model's shape (guard with `pragma_table_info(...)`, `sqlite_master`, `CREATE ... IF NOT EXISTS`), and a backfill must run only on the branch that actually created the column (see `AddWorkspaceProfileColumnIfMissingAsync`).
@@ -171,7 +172,7 @@ SQLite allows one writer at a time; `busy_timeout` only waits. GrayMoon keeps co
 
 - Keep Worker, git and HTTP work parallel, but give each parallel task its own factory context, or collect results and persist once. Never share an `AppDbContext` across tasks, and never capture a circuit `AppDbContext` in `Task.Run`, `WorkspaceOperationRunner` or `BackgroundJobService` closures.
 - Batch: mutate, then one `SaveChanges`; never `SaveChanges` in a loop.
-- Serialized write paths: `WorkspaceGitChangesWriteQueue` and `WorkerSyncNotificationQueue` are single-reader channels; `SyncRecomputeCoalescer` runs one recompute per (workspaceId, contextId) burst; `SyncBackgroundService.DefaultMaxConcurrency` = 4 (`Sync:MaxConcurrency` overrides it).
+- Serialized write paths: `WorkspaceGitChangesWriteQueue` and `WorkerSyncNotificationQueue` are single-reader channels; `WorkerSyncNotificationQueue` stores each notification's state and runs one recompute per run of consecutive notifications of one context (04, "Hook sync batches"); `SyncRecomputeCoalescer` keeps that recompute from overlapping a pull's recompute of the same (workspaceId, contextId); `SyncBackgroundService.DefaultMaxConcurrency` = 4 (`Sync:MaxConcurrency` overrides it).
 - Short-lived per-call contexts in background services (`TokenHealthBackgroundService` checks connectors in parallel and persists once in its own scope; `WorkspaceActionRepository` uses a factory context per call; `WorkspaceAiProviderPins` uses the factory).
 
 Runtime concurrency rules are in 04 section 20. `GrayMoon.App.Tests/SqlitePerformanceTests.cs` covers the SQLite setup and contention paths.
@@ -587,11 +588,31 @@ FileName
 TokenName
 CurrentValue
 ExpectedValue
+NotCheckedReason
 ```
 
 Unique: `WorkspaceFeatureContextId + RepositoryId + FilePath + TokenName`.
 
 This table supports diagnostics and dependency badge computation.
+
+A row is either a token that was compared and is out of date (`CurrentValue`, `ExpectedValue`), or a token the check could not compare (`NotCheckedReason` set, the values null). There are two such cases: a `{@Repo:commit}` token of a repository whose HEAD commit the context has not stored, and a `{@Repo}` token of a repository without a version (GitVersion failed) in a Workspace that uses repository versioning. A version that is still being calculated for a new Feature (`GitVersionPending`) is not reported, and neither is a `{@Repo:branch}` token of a repository without a branch: a tag pin or a read only snapshot has none on purpose, and a badge for it could never be cleared. A token that was not checked counts in `OutOfDateFileRepos` like an out-of-date one, so the file never looks up to date; the badge tooltip shows "not checked" and the reason.
+
+The check (`WorkspaceFileVersionService.CheckAndPersistFileVersionStatusAsync`) takes every expected value from the context's stored state: the effective version, `BranchName` and `HeadCommit` of `WorkspaceRepositoryContextStates`. It makes no `GetHeadCommits` call. Every configured file is sent to the Worker, also one whose tokens all have no value (with nothing to compare), so its missing-on-disk state is refreshed by every check; a file the Worker reports missing has no "not checked" rows. A Feature never reads the Workspace's row or the link for a value. Only the update (`UpdateAllVersionsAsync`), whose value is written into a file and committed, reads the commit from the checkout.
+
+`HeadCommit` is written with replace semantics whenever a snapshot probed identity (`WorkspaceRepositoryStateWriter.ApplyIdentity`): a blank commit clears it. Every path that moves HEAD stores the new one:
+
+```text
+hook syncs, Sync, Pull, Push, Undo Push        RepositoryStateProbe / the command's snapshot
+Update (commits with hooks off)                RefreshRepositoryVersion after the commits; a repository that could not be
+                                               refreshed, or was not reached before an abort, gets the repository error
+                                               "... The commit was made, but the repository's commit and version were not
+                                               refreshed. Sync the repository."
+New Branch, Create Branches, Prepare Workspace CreateBranch returns headCommitSha in every case
+Return to Default                              the state in the response, also when it failed at the pull after the checkout
+Update, Update and Push, Prepare Workspace     the commits version files name are read from the checkouts at the start
+```
+
+A notification or response without a state snapshot is not applied: a hook notification without `State` is logged and ignored, a pull that reports none writes only the sync status, and a successful Return to Default without one is reported as a failure. `RefreshRepositoryVersion` fails for a folder that is not there. What still cannot be detected is a HEAD moved with no hook GrayMoon hears (`git reset`, a rebase, a foreign `core.hooksPath`, a notification lost while the Worker was disconnected): the badge compares with the old commit until the next hook, Sync or Update.
 
 `WorkspaceFile` and `WorkspaceFileVersionConfig` are shared by all contexts of a Workspace. Per-context file presence (`IsMissingOnDisk`, `LastCheckedAt`) is stored in `WorkspaceFileContextStates`.
 
@@ -995,9 +1016,11 @@ EffectiveVersion            the version dependents use (InheritedVerified, Inher
 EffectiveVersionKind        int: Own = 0, InheritedVerified = 1, Unresolved = 2, InheritedUnverified = 3; null = never resolved
 EffectiveVersionCommitSha   the HeadCommit it was resolved for
 EffectiveVersionReasonCode  EffectiveVersionReasonCodes: Verified, NotOnBaseline, NoBaseline, BaselineNotOnRemoteParent,
-                            PolicyProtected, NoRequiredPackages, TokenConsumersOnly, ReferenceSnapshot, ParentVersionUnavailable, PackageNotPublished,
+                            PolicyProtected, NoRequiredPackages, TokenConsumersOnly, ReferenceSnapshot, ParentVersionUnavailable, ParentVersionProbeFailed, PackageNotPublished,
                             RegistryAuthenticationFailed, RegistryFailure, RegistryTimeout, RegistryUnexpectedResponse
 ```
+
+`ParentVersionProbeFailed` is a Worker call that failed (no connection, a timeout, no answer): the repository keeps its own version for now and the reason is never reused, so the next resolution asks again. `ParentVersionUnavailable` is GitVersion answering without a version, which is reused for the same HEAD. A parent version the Worker did calculate is kept in memory per checkout, parent branch and commit (`BranchPointVersionCache`, singleton, not persisted): it belongs to the commit, so a repository whose packages cannot be verified (unresolved, which stores no version) does not run GitVersion again in every recompute.
 
 Only `WorkspaceRepositoryStateWriter.WriteEffectiveVersionAsync` writes them, only on an existing state row, and only when the decision changed; hook snapshots never touch them and nothing is mirrored onto the link. Every reader goes through `EffectiveVersionRules`: a stored `InheritedVerified` or `InheritedUnverified` counts only while `HeadCommit` equals `EffectiveVersionCommitSha` (I10), otherwise the calculated `GitVersion` is the expected version. This holds only if `HeadCommit` follows every HEAD move GrayMoon makes or sees, so every report that sets `IdentityProbed` carries the HEAD commit: the Worker's `SyncRepository` and `RefreshRepositoryVersion` responses (`commit`, on a branch as well as on a tag), the post-push and post-undo snapshots, `RepositoryStateProbe` (hooks, Commit Sync, Return to Default), and the App's checkout writes from `CheckoutBranch` / `CheckoutTag`. The writer keeps the stored SHA when a snapshot carries none, so a report without HEAD would leave an inheritance alive after the branch got commits of its own. `RefreshRepositoryVersion` matters most here: Update and Update and Push commit with hooks switched off and refresh the committed repositories with it, so the next level's `{@Repo}` tokens see the commit's own version. `WorkspaceProjectRepository.GetContextVersionAndLevelByRepoAsync` is the one accessor: the update plan, the unmatched-dependency badge (`RecomputeAndPersistRepositoryDependencyStatsAsync`) and `{@Repo}` tokens (`WorkspaceFileVersionService.ResolveTokenValuesAsync`) read it. A Feature repository without its own state row has no version there and no token value; nothing borrows the Workspace's link (rule 20A.2). Push plans keep reading the consumers' actual reference versions.
 
@@ -1006,7 +1029,7 @@ The **branch baseline** is where a branch GrayMoon created started:
 - a Feature: its `WorkspaceFeatureRepositories` row (`ParentBranchName`, `BaseCommitSha`), none for `PinnedTag` or `IsReferenceSnapshot` (a read only snapshot has no branch; its effective version comes from `SourceBranchName` at its `HeadCommit`, reason `ReferenceSnapshot`, see `05-user-capability-reference.md`);
 - the special Workspace: `WorkspaceRepositoryBranchBaselines`, unique on `(WorkspaceFeatureContextId, WorkspaceRepositoryId, BranchName)`, with `ParentBranchName` (the base as requested, without `origin/`), `BaseCommitSha`, `ResolvedStartRef` (diagnostic) and `CreatedAtUtc`; cascades with the context and the link, and `WorkspaceRepositoryLinkCleanup` deletes it explicitly.
 
-The Worker's `CreateBranch` resolves the start ref to one commit (`rev-parse --verify <start>^{commit}`), creates the branch at that commit and returns `resolvedStartRef` and `baseCommitSha`; both are null for a branch that already existed and for a repository without commits. New Branch / REST (`WorkspaceBranchOperations.CreateBranchAsync`) and Create Branches / Prepare Workspace (`WorkspaceGitService.CreateBranchesWithOutcomeAsync`) write the row (`BranchBaselineRecorder`, through `WorkspaceRepositoryStateWriter.RecordBranchBaselineAsync`) before the state snapshot, and set `HeadCommit` to the base commit. The same branch name created again replaces the row; deleting the local branch through GrayMoon deletes it. A failed write leaves the branch, is logged and reported as a warning (`BranchCreationOutcome.BaselineWarnings`, `CreateBranchApiResult.Warning`); that branch then has no baseline. `RepositoryBranchBaselineReader` reads the baseline of the checked-out branch; it never reads `DefaultBranchName` or link state, so a branch GrayMoon did not create has none.
+The Worker's `CreateBranch` resolves the start ref to one commit (`rev-parse --verify <start>^{commit}`), creates the branch at that commit and returns `resolvedStartRef` and `baseCommitSha`; both are null for a branch that already existed and for a repository without commits. New Branch / REST (`WorkspaceBranchOperations.CreateBranchAsync`) and Create Branches / Prepare Workspace (`WorkspaceGitService.CreateBranchesWithOutcomeAsync`) write the row (`BranchBaselineRecorder`, through `WorkspaceRepositoryStateWriter.RecordBranchBaselineAsync`) before the state snapshot, and set `HeadCommit` to `headCommitSha`, the commit the Worker read after the checkout (the base commit of a new branch, the tip of one that already existed, null without commits). The same branch name created again replaces the row; deleting the local branch through GrayMoon deletes it. A failed write leaves the branch, is logged and reported as a warning (`BranchCreationOutcome.BaselineWarnings`, `CreateBranchApiResult.Warning`); that branch then has no baseline. `RepositoryBranchBaselineReader` reads the baseline of the checked-out branch; it never reads `DefaultBranchName` or link state, so a branch GrayMoon did not create has none.
 
 How the kind is decided is in `05-user-capability-reference.md` (Dependency update and Push).
 

@@ -242,6 +242,43 @@ public sealed class EffectiveVersionResolverTests
     }
 
     [Fact]
+    public async Task A_Worker_that_could_not_be_asked_is_asked_again_on_the_next_resolution()
+    {
+        // A failed call says nothing about the branch point. It used to be stored as "own version" and reused until
+        // HEAD moved, so one Worker timeout made the repository publish a version of its own.
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        s.Ctx.WorkerBridge.Respond(GrayMoon.Abstractions.Worker.WorkerHubMethods.GetGitVersionAtBranchPoint, data: null, success: false, error: "The Worker did not answer in time.");
+
+        var failed = await s.ResolveAsync(bypassCache: false);
+
+        var producer = failed.Decisions.Single(d => d.RepositoryId == s.ProducerId);
+        Assert.Equal(EffectiveVersionKind.Own, producer.Kind);
+        Assert.Equal(EffectiveVersionReasonCodes.ParentVersionProbeFailed, producer.ReasonCode);
+
+        s.RespondBranchPoint(success: true, version: EffectiveVersionScenario.ParentVersion, onRemoteParent: true);
+        var recovered = await s.ResolveAsync(bypassCache: false);
+
+        Assert.Equal(EffectiveVersionKind.InheritedVerified, recovered.Decisions.Single(d => d.RepositoryId == s.ProducerId).Kind);
+        Assert.Equal(2, s.BranchPointCalls);
+    }
+
+    [Fact]
+    public async Task An_unresolved_repository_does_not_run_GitVersion_again_for_the_same_commit()
+    {
+        // "Unresolved" stores no version, so every recompute ran GitVersion on the Worker again while a registry was down.
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        s.Registry.TimesOut(EffectiveVersionScenario.PackageId);
+
+        var first = await s.ResolveAsync(bypassCache: false);
+        var second = await s.ResolveAsync(bypassCache: false);
+
+        Assert.Equal(EffectiveVersionKind.Unresolved, first.Decisions.Single(d => d.RepositoryId == s.ProducerId).Kind);
+        Assert.Equal(EffectiveVersionKind.Unresolved, second.Decisions.Single(d => d.RepositoryId == s.ProducerId).Kind);
+        // The registry is asked both times (it may have recovered); the Worker once.
+        Assert.Equal(1, s.BranchPointCalls);
+    }
+
+    [Fact]
     public async Task An_unmapped_package_that_no_registry_has_after_a_sync_is_missing()
     {
         await using var s = await EffectiveVersionScenario.CreateAsync(mapConnector: false);

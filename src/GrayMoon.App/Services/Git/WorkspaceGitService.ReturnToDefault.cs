@@ -137,72 +137,46 @@ public sealed partial class WorkspaceGitService
             capabilities
         };
 
+        // Read before the command is sent: a hook snapshot the App received before this moment was captured on the
+        // branch this return leaves, and must not overwrite what the return writes (it waited in the sync queue).
+        var startedAt = RepositoryStateFreshness.Now();
         var response = await _workerBridge.SendCommandAsync("ReturnToDefaultBranch", args, cancellationToken);
         var syncResponse = WorkerResponseJson.DeserializeWorkerResponse<ReturnToDefaultBranchResponse>(response.Data);
         var commandSuccess = syncResponse?.Success ?? response.Success;
         var errorMessage = syncResponse?.ErrorMessage ?? response.Error ?? "Failed to return to default branch";
 
         if (!commandSuccess)
-            return new ReturnToDefaultOutcome(false, errorMessage);
-
-        if (syncResponse?.LocalBranches == null)
         {
-            // The worker reported no branch lists, so the writer cannot replace them. Remove at least the
-            // branch that was just deleted locally.
-            await _branchWriter.RemoveBranchAsync(wr.WorkspaceRepositoryId, currentBranchName, isRemote: false, cancellationToken);
+            // A return that failed at the pull has already checked out the default branch, with hooks off. The
+            // Worker then reports where the repository is; stored here, or the row keeps the branch and commit it left.
+            if (syncResponse?.State is { } stateAfterFailure)
+            {
+                await _stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, stateAfterFailure, new RepositoryStateWriteOptions
+                {
+                    SyncStatus = SyncStatusWrite.Derive,
+                    ReconcilePullRequest = true,
+                    OperationStartedAt = startedAt,
+                }, cancellationToken);
+            }
+
+            return new ReturnToDefaultOutcome(false, errorMessage);
         }
 
-        // One authoritative write of branch, version, counts, upstream, branch rows, projects and the PR
+        // App and Worker are version-locked: a successful return always carries the state it left behind.
+        if (syncResponse?.State is not { } snapshot)
+            return new ReturnToDefaultOutcome(false, "The Worker reported no repository state after returning to the default branch. Sync the repository.");
+
+        // One authoritative write of branch, commit, version, counts, upstream, branch rows, projects and the PR
         // row, so no field of the previous branch survives the switch to the default branch.
-        var snapshot = BuildReturnToDefaultSnapshot(syncResponse);
         await _stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, snapshot, new RepositoryStateWriteOptions
         {
             SyncStatus = SyncStatusWrite.Derive,
             ReconcilePullRequest = true,
+            OperationStartedAt = startedAt,
         }, cancellationToken);
 
         return new ReturnToDefaultOutcome(true, null, ReturnToDefaultOutcome.DescribeBranchDeleteFailure(
-            repo.RepositoryName, currentBranchName, syncResponse?.RemoteBranchDeleteError, syncResponse?.LocalBranchDeleteError));
-    }
-
-    /// <summary>
-    /// Builds the state snapshot for a return-to-default response. Newer workers send an explicit snapshot
-    /// with probe markers; older ones send the flat fields, which are mapped here with the markers a
-    /// successful return-to-default is known to satisfy.
-    /// </summary>
-    private static RepositoryStateSnapshot BuildReturnToDefaultSnapshot(ReturnToDefaultBranchResponse? syncResponse)
-    {
-        if (syncResponse == null)
-            return new RepositoryStateSnapshot();
-
-        if (syncResponse.State != null)
-            return syncResponse.State;
-
-        var branchesProbed = syncResponse.LocalBranches != null;
-        return new RepositoryStateSnapshot
-        {
-            BranchName = syncResponse.CurrentBranch ?? syncResponse.DefaultBranch,
-            CheckedOutTag = syncResponse.CurrentTag,
-            GitVersion = syncResponse.GitVersion,
-            DefaultBranchName = syncResponse.DefaultBranch,
-            OutgoingCommits = syncResponse.OutgoingCommits,
-            IncomingCommits = syncResponse.IncomingCommits,
-            DefaultBranchBehind = syncResponse.DefaultBranchBehind,
-            DefaultBranchAhead = syncResponse.DefaultBranchAhead,
-            HasUpstream = syncResponse.HasUpstream,
-            LocalBranches = syncResponse.LocalBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList(),
-            RemoteBranches = syncResponse.RemoteBranches?.Where(b => !string.IsNullOrWhiteSpace(b)).ToList() ?? (branchesProbed ? [] : null),
-            Tags = syncResponse.Tags?.Where(t => !string.IsNullOrWhiteSpace(t)).ToList() ?? (branchesProbed ? [] : null),
-            Projects = syncResponse.Projects != null ? ToProjectNotifications(GetProjectsDetail(syncResponse.Projects)) ?? [] : null,
-            IdentityProbed = true,
-            GitVersionProbed = !string.IsNullOrWhiteSpace(syncResponse.GitVersion),
-            // A pre-snapshot worker only reaches this point after a successful checkout and pull, at which
-            // point it always ran both count queries and the upstream check.
-            CommitCountsProbed = true,
-            UpstreamProbed = syncResponse.HasUpstream.HasValue,
-            BranchesProbed = branchesProbed,
-            ProjectsProbed = syncResponse.Projects != null,
-        };
+            repo.RepositoryName, currentBranchName, syncResponse.RemoteBranchDeleteError, syncResponse.LocalBranchDeleteError));
     }
 }
 

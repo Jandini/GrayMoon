@@ -121,6 +121,7 @@ public sealed partial class WorkspaceRepositories
         || JobService.GetJob(PageJobKey) is { State: BackgroundJobState.Running };
     private bool _pendingRefreshAfterJob;
     private int WorkerTasksPendingCount => WorkerQueueStateService.GetPendingCountForWorkspace(WorkspaceId);
+    private int AppTasksPendingCount => AppBackgroundWork.GetPendingCountForWorkspace(WorkspaceId);
 
     /// <summary>
     /// The level header's "Push Updated" button shows on the level the header's "Push Updated > Level N Only" item names,

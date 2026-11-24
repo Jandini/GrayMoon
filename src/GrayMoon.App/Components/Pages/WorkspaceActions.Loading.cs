@@ -213,8 +213,9 @@ public sealed partial class WorkspaceActions
             : GrayMoon.App.Services.Policy.UnpublishedBranchRules.CiBranch(
                 link.BranchName, contextState.BranchHasUpstream, contextState.OutgoingCommits, contextState.BaselineParentBranchName);
 
-    private async Task RefreshRowAfterHookSyncAsync(WorkspaceActionRow row, CancellationToken cancellationToken)
-    {
-        await TryRefreshUntilAnyWorkflowRunningAsync(row, cancellationToken);
-    }
+    /// <summary>One polling loop per repository: every hook sync used to start its own, side by side.</summary>
+    private readonly GrayMoon.App.Components.Shared.KeyedRerunGuard<int> _hookRefreshGuard = new();
+
+    private Task RefreshRowAfterHookSyncAsync(WorkspaceActionRow row, CancellationToken cancellationToken) =>
+        _hookRefreshGuard.RunAsync(row.Repo.RepositoryId, () => TryRefreshUntilAnyWorkflowRunningAsync(row, cancellationToken));
 }

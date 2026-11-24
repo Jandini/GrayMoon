@@ -86,6 +86,7 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<WorkerRestartService>();
         services.AddHostedService<WorkerUpdateDesktopNotifier>();
         services.AddSingleton<WorkerQueueStateService>();
+        services.AddSingleton<AppBackgroundWorkStateService>();
         services.AddSingleton<WorkerCommandCancelSender>();
         services.AddSingleton<OverlayCommandTerminalService>();
         services.AddScoped<IToastService, ToastService>();
@@ -99,6 +100,7 @@ public static class GrayMoonServiceRegistration
         services.AddSingleton<IGitHubApiUsageRecorder, GitHubApiUsageRecorder>();
         services.AddHostedService<GitHubApiUsageLoggerBackgroundService>();
         services.AddScoped<SyncCommandHandler>();
+        services.AddScoped<ISyncNotificationHandler>(sp => sp.GetRequiredService<SyncCommandHandler>());
         services.AddScoped<IWorkerBridge, WorkerBridge>();
         services.AddScoped<WorkspaceService>();
         services.AddScoped<IWorkspaceFeatureContextResolver, WorkspaceFeatureContextResolver>();
@@ -163,6 +165,7 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<IWorkspaceCiProviderResolver, WorkspaceCiProviderResolver>();
         services.AddScoped<PackageRegistrySyncService>();
         services.AddSingleton<GrayMoon.App.Services.Versions.PackageAvailabilityCache>();
+        services.AddSingleton<GrayMoon.App.Services.Versions.BranchPointVersionCache>();
         services.AddScoped<GrayMoon.App.Services.Versions.PackageAvailabilityVerifier>();
         services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionResolver>();
         services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>();

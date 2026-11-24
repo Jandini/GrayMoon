@@ -50,6 +50,7 @@ internal static class PolicyHarness
         services.AddSingleton<WorkspaceOperationOutcomeStore>();
         services.AddSingleton<UpdateAndPushApprovalStore>();
         services.AddScoped<WorkspaceUndoPushHandler>();
+        services.AddSingleton<AppBackgroundWorkStateService>();
         services.AddSingleton<WorkerSyncNotificationQueue>();
         services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
         services.AddScoped<DependencyUpdateOrchestrator>();

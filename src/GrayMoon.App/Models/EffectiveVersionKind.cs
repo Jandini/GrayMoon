@@ -41,6 +41,9 @@ public static class EffectiveVersionReasonCodes
     public const string TokenConsumersOnly = "TokenConsumersOnly";
     public const string ReferenceSnapshot = "ReferenceSnapshot";
     public const string ParentVersionUnavailable = "ParentVersionUnavailable";
+
+    /// <summary>The Worker call for the parent version failed (no connection, a timeout, no answer). Never reused: the next resolution asks again.</summary>
+    public const string ParentVersionProbeFailed = "ParentVersionProbeFailed";
     public const string PackageNotPublished = "PackageNotPublished";
     public const string RegistryAuthenticationFailed = "RegistryAuthenticationFailed";
     public const string RegistryFailure = "RegistryFailure";
@@ -59,6 +62,7 @@ public static class EffectiveVersionReasonCodes
         TokenConsumersOnly => "only version files use its version, so there is no package to check",
         ReferenceSnapshot => "a read only snapshot uses the version of the branch it was taken from",
         ParentVersionUnavailable => "the parent version could not be calculated",
+        ParentVersionProbeFailed => "the Worker could not be asked for the parent version",
         PackageNotPublished => "a required package is not published at the parent version",
         RegistryAuthenticationFailed => "the package registry refused the credentials",
         RegistryFailure => "the package registry failed",

@@ -335,6 +335,7 @@ WorkspaceFeatureReconciler apply phase
 Git Changes audits and line-stats passes (each scan is already bounded)
 single-reader queues                         WorkspaceGitChangesWriteQueue, WorkerSyncNotificationQueue
 sync barrier                                 IWorkerSyncNotificationBarrier (implemented by WorkerSyncNotificationQueue): DependencyUpdateOrchestrator.RunAsync awaits it before reading stored state, so hook syncs already received are applied before a run plans or selects push levels
+pending hook syncs shown in the UI           AppBackgroundWorkStateService (singleton, in memory): WorkerSyncNotificationQueue counts an item from Enqueue until the recompute that covers it returned (also on failure), per Workspace and in total. Display only: WorkerStatusBadge (activity frame, tooltip), the Repositories header line "Applying N repository updates" (the Worker's line wins; no button is disabled by it), and the remaining count in the barrier wait message (PendingSyncNotificationWait). An item that waited plus applied for more than 2 s is logged as a warning
 stale hook snapshot guard                    RepositoryStateFreshness (singleton, in memory): see "Stale hook snapshots" under the hook flow
 FeatureRemovalQueue                          fixed at MaxConcurrentRemovals = 4 workers, FIFO
 Worker DotnetRestoreCommand                  shared obj/ and NuGet cache
@@ -356,6 +357,9 @@ RootWorktree      the Workspace-role repository alone and first (D10); its workt
 SourceWorktrees   only when the root succeeded; SemaphoreSlim(MaxParallelOperations); each row Ready/NeedsRepair
                   saved in its own AppDbContext; Sources live inside the root
 SeedProjections   SeedInitialFeatureProjectionsAsync (idempotent), then Feature Ready
+EffectiveVersions the effective versions of the new context (EffectiveVersionResolver, own scope): every repository is on its
+                  branch point, so this is where the Worker and the registry are asked. A failure is logged and Create
+                  still succeeds; the recompute after the next state write resolves again
 CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the definition switch is not required), then the watch (section 5F)
 ```
 
@@ -527,12 +531,38 @@ The claim is the mechanism Remove Feature uses; here it deletes nothing. A repos
 
 A hook of a Workspace that no longer exists is dropped before any work: `IWorkspaceCapabilityProvider.IsWorkspaceGoneAsync` is true only for an HTTP 404 from `GET /workspaces/{id}/capabilities` (never for an unreachable App, a 401 or a 5xx, and never cached), and `HookSyncDispatcher` then logs one Information line and runs no git, GitVersion or project scan. The hook file stays: the Worker deletes a hook only as part of an operation the user started.
 
+### Hook sync batches
+
+`WorkerSyncNotificationQueue` has one reader and applies notifications in arrival order. A notification is handled in two steps (`ISyncNotificationHandler`, implemented by `SyncCommandHandler`):
+
+```text
+ApplyAsync      per notification, in a scope of its own: attribute the path to a context, wait for a Feature
+                that is still being created, drop the groups a later operation superseded, write the repository's
+                state, tags and remote branch prune, the context "in sync" flag, RepositoryError, the definition
+                drift check
+CompleteAsync   once per batch: WorkspaceStateRecomputeScope.RecomputeAsync (effective versions, the file-version
+                check, dependency stats) when any item needs it, then ContextRepositorySynced per repository and
+                ContextSynced once (plus RepositorySynced / WorkspaceSynced for the special Workspace)
+```
+
+A batch is the run of consecutive notifications of one (Workspace, context) whose state is stored. It is completed when the channel is empty, when a notification of another context has been attributed (before that notification can wait for its Feature), at `MaxBatchSize` = 64 notifications, and it is released without a recompute on stop. There is no timer. The recompute is a full rebuild from the stored rows, so one run after N state writes gives the same result as N runs.
+
+Rules the queue keeps:
+
+- A notification stays pending for `IWorkerSyncNotificationBarrier` and the UI count until the completion that covers it has returned or thrown. A notification that wrote nothing (unknown repository or path, superseded, failed before its state write) is released at once.
+- Each notification is released exactly once. One failing notification does not cancel the batch, and one whose state write succeeded before it failed is still recomputed.
+- Refs-only notifications (branch lists only) never cause a recompute; a batch of only those still broadcasts.
+- The broadcasts are sent also when the recompute throws: the state rows changed and the grid has no other trigger.
+- Only shutdown ends the reader. Any other `OperationCanceledException` (the hook's file check joined a check a user job started, and that job was aborted) is a failed item or a failed completion, logged, and the reader goes on.
+
+`SyncCommandHandler.HandleAsync` is "apply, then complete" for one notification; tests and direct callers use it.
+
 ### Stale hook snapshots
 
-`WorkerSyncNotificationQueue` is serial, and a full snapshot costs a dependency recompute, so a burst of hooks can hold a snapshot for minutes. Nothing in the snapshot says when it was captured. The App therefore compares two readings of its own monotonic clock (`RepositoryStateFreshness.Now`):
+`WorkerSyncNotificationQueue` is serial, so a burst of hooks can hold a snapshot while earlier notifications are applied and recomputed. Nothing in the snapshot says when it was captured. The App therefore compares two readings of its own monotonic clock (`RepositoryStateFreshness.Now`):
 
 - the queue stamps each notification when it arrives (`Enqueue`);
-- Pull (`WorkspaceCommitSyncHandler`), Sync (`WorkspaceGitService.SyncAsync`, the fan-out start) and the single-repository version refresh pass the time read before their Worker command was sent as `RepositoryStateWriteOptions.OperationStartedAt`. After the write, `WorkspaceRepositoryStateWriter` records that time per context, repository and probed group.
+- Pull (`WorkspaceCommitSyncHandler`), Sync (`WorkspaceGitService.SyncAsync`, the fan-out start), the single-repository version refresh, Return to Default (`ReturnToDefaultDirectAsync`, also the batch after Merge), Switch branch and tag checkout, New Branch and Create Branches pass the time read before their Worker command was sent as `RepositoryStateWriteOptions.OperationStartedAt`. After the write, `WorkspaceRepositoryStateWriter` records that time per context, repository and probed group.
 
 A notification that arrived before such an operation began was captured before the operation read the checkout, so `SyncCommandHandler` removes the groups the operation wrote (`WithoutSupersededGroups`). A superseded identity takes version, commit counts, upstream and projects with it, because they describe the checkout; branch lists are judged on their own. When nothing is left the notification is dropped: no write, no recompute, no broadcast, one Information log line. A notification that arrived after the operation began is always applied.
 
@@ -876,7 +906,7 @@ GitChangesUpdated(workspaceId, repositoryId)      legacy, special Workspace only
 RepositoryError(workspaceId, repositoryId, message)
 ```
 
-The hook path (`SyncCommandHandler`) sends the legacy `RepositorySynced` / `WorkspaceSynced` only for the special Workspace context. Many mutation paths (for example `WorkspaceStateRecomputeScope.CompleteAsync` and branch operations) still send `WorkspaceSynced` regardless of context, so context-aware listeners must filter by the selected context and treat `WorkspaceSynced` as a coarse invalidation.
+The hook path (`SyncCommandHandler.CompleteAsync`) sends `ContextRepositorySynced` once per repository of a batch and then `ContextSynced` once, after the recompute. It sends the legacy `RepositorySynced` / `WorkspaceSynced` only for the special Workspace context. The file-version check does not broadcast when it runs inside a recompute (`deferDependencyRecompute`); the caller broadcasts once the recompute is whole. The Repositories page reloads a Feature grid on `ContextSynced` of its own context (debounced) and the special Workspace grid on `WorkspaceSynced`. The notification panel refreshes on `ContextSynced` and `WorkspaceSynced` only, one refresh per Workspace at a time. The Actions page listens to `ContextSynced` and `ContextRepositorySynced` of its own Feature context (the legacy pair for the special Workspace), and runs one GitHub polling loop per repository at a time: a sync that arrives during a loop asks for one more loop after it (`KeyedRerunGuard`). Many mutation paths (for example `WorkspaceStateRecomputeScope.CompleteAsync` and branch operations) still send `WorkspaceSynced` regardless of context, so context-aware listeners must filter by the selected context and treat `WorkspaceSynced` as a coarse invalidation.
 
 ---
 

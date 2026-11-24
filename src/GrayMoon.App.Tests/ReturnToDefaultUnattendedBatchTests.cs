@@ -595,7 +595,7 @@ public sealed class ReturnToDefaultUnattendedBatchTests
         UpstreamProbed = true,
     };
 
-    private static ReturnToDefaultBranchResponse ReturnResponse() => new()
+    private static ReturnToDefaultBranchResponse ReturnResponse() => new ReturnToDefaultBranchResponse
     {
         Success = true,
         CurrentBranch = "main",
@@ -609,7 +609,7 @@ public sealed class ReturnToDefaultUnattendedBatchTests
         DefaultBranchBehind = 0,
         DefaultBranchAhead = 0,
         GitVersion = "2.0.0",
-    };
+    }.WithProbedState();
 
     private sealed class ListProgress : IProgress<OperationProgress>
     {

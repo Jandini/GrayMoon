@@ -96,7 +96,8 @@ public sealed class WorkspaceHookContextAttributorTests
             RepositoryId = ctx.RepositoryId,
             RepositoryPath = @"C:\unknown\path",
             Version = "9.9.9",
-            Branch = "unknown-branch"
+            Branch = "unknown-branch",
+            State = WorkerStateTestExtensions.HookState("unknown-branch", "9.9.9")
         });
 
         var link = await ctx.ReadLinkAsync();
@@ -157,6 +158,7 @@ public sealed class WorkspaceHookContextAttributorTests
             OutgoingCommits = 1,
             IncomingCommits = 0,
             HasUpstream = true,
+            State = WorkerStateTestExtensions.HookState("feat-pollute", "9.9.9-feat", 1, 0, true),
         });
 
         var link = await ctx.ReadLinkAsync();
@@ -189,6 +191,7 @@ public sealed class WorkspaceHookContextAttributorTests
             OutgoingCommits = 0,
             IncomingCommits = 0,
             HasUpstream = true,
+            State = WorkerStateTestExtensions.HookState("main", "3.0.0", 0, 0, true),
         });
 
         var link = await ctx.ReadLinkAsync();

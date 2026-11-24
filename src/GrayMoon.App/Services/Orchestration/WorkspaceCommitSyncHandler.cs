@@ -388,40 +388,15 @@ public sealed class WorkspaceCommitSyncHandler(
         }
 
         var statusWrite = result.Success && !result.MergeConflict ? SyncStatusWrite.InSync : SyncStatusWrite.Error;
-        await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, BuildSnapshot(result), new RepositoryStateWriteOptions
+        // The Worker reports the state it left the repository in (CommitSyncResponse.State) whenever it read the
+        // checkout. A failure before that (the folder is missing, no branch to pull) reports none: nothing was read,
+        // so only the sync status is written.
+        await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, result.State ?? new RepositoryStateSnapshot(), new RepositoryStateWriteOptions
         {
             SyncStatus = statusWrite,
             OperationStartedAt = startedAt,
             DeferProjects = deferProjects,
         }, ct);
-    }
-
-    /// <summary>
-    /// A successful pull moves the branch, so the worker reports the whole count group (including the
-    /// comparison against the default branch) in <see cref="CommitSyncResponse.State"/>. Older workers and
-    /// the failure paths only report outgoing and incoming, so those are mapped as a count-only snapshot
-    /// that leaves the rest of the row untouched.
-    /// </summary>
-    private static RepositoryStateSnapshot BuildSnapshot(CommitSyncResponse result)
-    {
-        if (result.State != null)
-            return result.State;
-
-        var usableBranch = result.Branch is { Length: > 0 } and not "-" ? result.Branch : null;
-        return new RepositoryStateSnapshot
-        {
-            BranchName = usableBranch,
-            GitVersion = result.Version,
-            OutgoingCommits = result.OutgoingCommits,
-            IncomingCommits = result.IncomingCommits,
-            DefaultBranchBehind = result.DefaultBranchBehind,
-            DefaultBranchAhead = result.DefaultBranchAhead,
-            HasUpstream = result.HasUpstream,
-            IdentityProbed = usableBranch != null,
-            GitVersionProbed = result.Version is { Length: > 0 } and not "-",
-            CommitCountsProbed = false,
-            UpstreamProbed = false,
-        };
     }
 
     /// <summary>

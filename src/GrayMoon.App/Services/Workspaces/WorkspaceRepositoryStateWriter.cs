@@ -299,7 +299,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         {
             state.CheckedOutTag = snapshot.CheckedOutTag;
             state.BranchName = null;
-            state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit;
+            state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit!.Trim();
             state.BranchHasUpstream = null;
             state.OutgoingCommits = null;
             state.IncomingCommits = null;
@@ -311,9 +311,10 @@ public sealed class WorkspaceRepositoryStateWriter(
         state.CheckedOutTag = null;
         state.HasNewerTag = null;
         state.BranchName = Blank(snapshot.BranchName) || snapshot.BranchName == "-" ? null : snapshot.BranchName;
-        // Flat hook/sync payloads often omit HeadCommit; do not wipe a known SHA in that case.
-        if (!Blank(snapshot.HeadCommit))
-            state.HeadCommit = snapshot.HeadCommit;
+        // Replace semantics, like every probed group: a probed identity without a commit (a repository with no
+        // commits) clears the stored one. Keeping it left the commit of a checkout that is no longer there, and the
+        // file-version check and the effective version both decide from this column.
+        state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit!.Trim();
     }
 
     private static void MirrorIdentityToLink(WorkspaceRepositoryLink wr, WorkspaceRepositoryContextState state)
@@ -837,6 +838,43 @@ public sealed class WorkspaceRepositoryStateWriter(
         if (written > 0)
             await dbContext.SaveChangesAsync(cancellationToken);
         return written;
+    }
+
+    /// <summary>
+    /// Stores the HEAD commit an operation has just read from the checkouts of <paramref name="contextId"/>, keyed by
+    /// RepositoryId. Only existing context state rows are written: a repository without one has no recorded state to
+    /// correct, and none is created from a commit alone. The link is never touched. Returns how many rows changed.
+    /// </summary>
+    public async Task<int> WriteHeadCommitsAsync(
+        WorkspaceFeatureContextId contextId,
+        IReadOnlyDictionary<int, string> headCommitByRepositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        if (headCommitByRepositoryId.Count == 0)
+            return 0;
+
+        var repositoryIds = headCommitByRepositoryId.Keys.ToList();
+        var rows = await (
+            from state in dbContext.WorkspaceRepositoryContextStates
+            join link in dbContext.WorkspaceRepositories on state.WorkspaceRepositoryId equals link.WorkspaceRepositoryId
+            where state.WorkspaceFeatureContextId == contextId.Value && repositoryIds.Contains(link.RepositoryId)
+            select new { State = state, link.RepositoryId })
+            .ToListAsync(cancellationToken);
+
+        var changed = 0;
+        foreach (var row in rows)
+        {
+            var commit = headCommitByRepositoryId[row.RepositoryId].Trim();
+            if (commit.Length == 0 || string.Equals(row.State.HeadCommit, commit, StringComparison.Ordinal))
+                continue;
+
+            row.State.HeadCommit = commit;
+            changed++;
+        }
+
+        if (changed > 0)
+            await dbContext.SaveChangesAsync(cancellationToken);
+        return changed;
     }
 
     /// <summary>

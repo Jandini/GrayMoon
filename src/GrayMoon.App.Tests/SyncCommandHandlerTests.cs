@@ -272,8 +272,41 @@ public sealed class RepositorySyncNotificationBuilder(int workspaceId, int repos
     public List<string>? RemoteBranches { get; set; }
     public List<string>? RemoteTags { get; set; }
 
+    /// <summary>The commit the hook read. Every Worker notification reports one unless the repository has no commits.</summary>
+    public string? HeadCommit { get; set; } = "0123456789abcdef0123456789abcdef01234567";
+
+    /// <summary>
+    /// The snapshot a Worker hook sync sends with these fields (what <c>RepositoryStateProbe</c> builds): identity is
+    /// always probed, the other groups when the hook read them.
+    /// </summary>
+    private RepositoryStateSnapshot BuildState()
+    {
+        var onTag = !string.IsNullOrWhiteSpace(Tag);
+        return new RepositoryStateSnapshot
+        {
+            BranchName = Branch == "-" ? null : Branch,
+            CheckedOutTag = Tag,
+            HeadCommit = HeadCommit,
+            GitVersion = Version == "-" ? null : Version,
+            OutgoingCommits = OutgoingCommits,
+            IncomingCommits = IncomingCommits,
+            DefaultBranchBehind = DefaultBranchBehind,
+            DefaultBranchAhead = DefaultBranchAhead,
+            HasUpstream = HasUpstream,
+            Projects = Projects,
+            ErrorMessage = ErrorMessage,
+            IdentityProbed = true,
+            GitVersionProbed = Version != "-",
+            CommitCountsProbed = !onTag && (OutgoingCommits.HasValue || IncomingCommits.HasValue),
+            UpstreamProbed = !onTag && HasUpstream.HasValue,
+            BranchesProbed = false,
+            ProjectsProbed = Projects is { Count: > 0 },
+        };
+    }
+
     public RepositorySyncNotification Build() => new()
     {
+        State = BuildState(),
         WorkspaceId = workspaceId,
         RepositoryId = repositoryId,
         Version = Version,

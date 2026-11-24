@@ -135,6 +135,7 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<GrayMoon.App.Services.Connectors.PackageRegistrySyncService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<GrayMoon.App.Services.Versions.PackageAvailabilityCache>();
+        services.AddSingleton<GrayMoon.App.Services.Versions.BranchPointVersionCache>();
         services.AddScoped<GrayMoon.App.Services.Versions.PackageAvailabilityVerifier>();
         services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionResolver>();
         services.AddScoped<GrayMoon.App.Services.Versions.EffectiveVersionStartCheck>();
@@ -151,6 +152,9 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         services.AddScoped<WorkspaceRepositoryLinkListQueryService>();
         services.AddScoped<WorkspaceSyncHandler>();
         services.AddScoped<SyncCommandHandler>();
+        services.AddScoped<ISyncNotificationHandler>(sp => sp.GetRequiredService<SyncCommandHandler>());
+        // Per-host singleton, like the file-version check coalescer below.
+        services.AddSingleton<SyncRecomputeCoalescer>();
         services.AddScoped<WorkspaceBranchUpdateHandler>();
         services.AddScoped<IFeatureBranchGuard, FeatureBranchGuard>();
         services.AddScoped<IWorkspaceBranchOperations, WorkspaceBranchOperations>();

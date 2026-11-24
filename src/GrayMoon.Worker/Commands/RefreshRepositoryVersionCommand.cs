@@ -18,11 +18,15 @@ public sealed class RefreshRepositoryVersionCommand(
         var workspacePath = WorkerRepositoryPaths.GetWorkspacePath(request.WorkspaceRoot!, workspaceName);
         var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repositoryName, request.WorkspaceRepositoryName);
 
+        // A folder that is not there was not read. Answering with branch "-" made the App store "no branch" for a
+        // checkout nobody looked at.
+        if (!Directory.Exists(repoPath))
+            throw new DirectoryNotFoundException($"The folder of repository {repositoryName} was not found.");
+
         var version = "-";
         var branch = "-";
         int? outgoingCommits = null;
         int? incomingCommits = null;
-        if (Directory.Exists(repoPath))
         {
             var versionResult = await versionProviderFactory
                 .Create(request.EffectiveCapabilities)
@@ -91,7 +95,5 @@ public sealed class RefreshRepositoryVersionCommand(
                 DefaultBranchAhead = defaultAhead
             };
         }
-
-        return new RefreshRepositoryVersionResponse { Version = version, Branch = branch, OutgoingCommits = outgoingCommits, IncomingCommits = incomingCommits };
     }
 }

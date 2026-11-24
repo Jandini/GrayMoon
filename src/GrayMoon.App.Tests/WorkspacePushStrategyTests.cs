@@ -305,7 +305,7 @@ public sealed class WorkspacePushStrategyTests
             CurrentBranch = "main",
             DefaultBranch = "main",
             State = new RepositoryStateSnapshot { BranchName = "main", IdentityProbed = true },
-        });
+        }.WithProbedState());
         var special = await ctx.GetSpecialContextIdAsync();
 
         await using var scope = ctx.CreateScope();
@@ -859,6 +859,7 @@ public sealed class WorkspacePushStrategyTests
             services.AddScoped<IWorkspacePushOperations, WorkspacePushOperations>();
             services.AddSingleton<WorkspaceOperationOutcomeStore>();
             services.AddScoped<WorkspaceUndoPushHandler>();
+            services.AddSingleton<AppBackgroundWorkStateService>();
             services.AddSingleton<WorkerSyncNotificationQueue>();
             services.AddSingleton<IWorkerSyncNotificationBarrier>(sp => sp.GetRequiredService<WorkerSyncNotificationQueue>());
             services.AddScoped<DependencyUpdateOrchestrator>();

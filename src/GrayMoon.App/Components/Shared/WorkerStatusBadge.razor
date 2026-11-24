@@ -4,6 +4,7 @@
 @inject WorkerSecretService WorkerSecret
 @inject WorkerConnectionTracker WorkerConnectionTracker
 @inject WorkerQueueStateService WorkerQueueStateService
+@inject AppBackgroundWorkStateService AppBackgroundWork
 @inject IWorkerBridge WorkerBridge
 @inject NavigationManager NavigationManager
 @inject IToastService ToastService
@@ -58,6 +59,7 @@ else
         _subscribed = true;
         WorkerConnectionTracker.OnStateChanged(OnWorkerStateChanged);
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+        AppBackgroundWork.OnStateChanged(OnQueueStateChanged);
     }
 
     private void OnWorkerStateChanged(WorkerConnectionState state) => _ = InvokeAsync(StateHasChanged);
@@ -100,7 +102,7 @@ else
         && !LogonPasswordRequired
         && !InstallFailed
         && State == WorkerConnectionState.Online
-        && WorkerQueueStateService.GetTotalPendingCount() > 0;
+        && (WorkerQueueStateService.GetTotalPendingCount() > 0 || AppBackgroundWork.GetTotalPendingCount() > 0);
 
     private string BadgeClassFull => $"badge {BadgeClass} text-decoration-none ms-2";
 
@@ -119,7 +121,8 @@ else
         WorkerSemVer,
         WorkerQueueStateService.GetTotalPendingCount(),
         WorkerSecret.UnsecuredWorkerConnected,
-        InstallFailed);
+        InstallFailed,
+        AppBackgroundWork.GetTotalPendingCount());
 
     public void Dispose()
     {
@@ -129,5 +132,6 @@ else
         _subscribed = false;
         WorkerConnectionTracker.RemoveStateChanged(OnWorkerStateChanged);
         WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+        AppBackgroundWork.RemoveStateChanged(OnQueueStateChanged);
     }
 }

@@ -29,6 +29,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     [Inject] private WorkspaceDependencyService WorkspaceDependencyService { get; set; } = default!;
     [Inject] private WorkspaceBranchHandler WorkspaceBranchHandler { get; set; } = default!;
     [Inject] private WorkerQueueStateService WorkerQueueStateService { get; set; } = default!;
+    [Inject] private AppBackgroundWorkStateService AppBackgroundWork { get; set; } = default!;
     [Inject] private IBackgroundJobService JobService { get; set; } = default!;
     [Inject] private IScopedServiceExecutor ScopedExecutor { get; set; } = default!;
     [Inject] private IWorkspaceRepositoryLinkListQueryService LinkListQueryService { get; set; } = default!;
@@ -65,6 +66,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     protected override void OnInitialized()
     {
         WorkerQueueStateService.OnQueueStateChanged(OnQueueStateChanged);
+        AppBackgroundWork.OnStateChanged(OnQueueStateChanged);
         JobService.Changed += OnJobServiceChanged;
     }
 
@@ -500,6 +502,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
         StopPrPollingLoop();
         CancelBackgroundWork();
         WorkerQueueStateService.RemoveQueueStateChanged(OnQueueStateChanged);
+        AppBackgroundWork.RemoveStateChanged(OnQueueStateChanged);
         JobService.Changed -= OnJobServiceChanged;
         lock (_refreshDebounceLock)
         {

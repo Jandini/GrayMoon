@@ -208,7 +208,7 @@ public sealed class FeatureBranchGuardTests
             RemoteBranches = ["origin/main"],
             Tags = [],
             GitVersion = "2.0.0",
-        });
+        }.WithProbedState());
         var special = await ctx.GetSpecialContextIdAsync();
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceBranchOperations>();

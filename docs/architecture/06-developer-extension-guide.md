@@ -231,7 +231,7 @@ recompute once
 broadcast once
 ```
 
-Use the existing recompute-scope pattern: `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync` is the only sanctioned recompute entry, and hook bursts go through `SyncRecomputeCoalescer` (keyed `"{workspaceId}:{contextId}"`, at most one run per key at a time, every caller's write included in a run that started after it). `ReturnToDefaultUnattendedBatchAsync` is the reference bulk flow (parallel per-repo work, one recompute and broadcast at the end, only if something changed).
+Use the existing recompute-scope pattern: `WorkspaceStateRecomputeScope.RecomputeDependencyStatsAsync` is the only sanctioned recompute entry, and a hook burst is recomputed once per batch by `WorkerSyncNotificationQueue` (04, "Hook sync batches"). That recompute and a pull's go through `SyncRecomputeCoalescer` (keyed `"{workspaceId}:{contextId}"`, at most one run per key at a time, every caller's write included in a run that started after it), so they never overlap. A new step of the hook flow goes in `SyncCommandHandler.ApplyAsync` when it is per repository and in `CompleteAsync` when it is per context; never add a per-notification recompute or a Worker call for data the context state already stores. `ReturnToDefaultUnattendedBatchAsync` is the reference bulk flow (parallel per-repo work, one recompute and broadcast at the end, only if something changed).
 
 ---
 

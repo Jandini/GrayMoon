@@ -80,55 +80,77 @@ public sealed partial class WorkspaceActions : IDisposable
             _hubConnection.On<int>("WorkspaceSynced", async (workspaceId) =>
             {
                 if (workspaceId != WorkspaceId) return;
-
-                _syncDebounceCts?.Cancel();
-                _syncDebounceCts?.Dispose();
-                _syncDebounceCts = new CancellationTokenSource();
-                var cts = _syncDebounceCts;
-                try
-                {
-                    await Task.Delay(SyncDebounceMs, cts.Token);
-                    await InvokeAsync(RefreshFromSyncAsync);
-                }
-                catch (OperationCanceledException) { /* debounced */ }
-                finally
-                {
-                    if (cts == _syncDebounceCts)
-                    {
-                        _syncDebounceCts?.Dispose();
-                        _syncDebounceCts = null;
-                    }
-                }
+                await OnContextSyncedAsync();
             });
 
             _hubConnection.On<int, int>("RepositorySynced", async (workspaceId, repositoryId) =>
             {
                 if (workspaceId != WorkspaceId) return;
+                await OnRepositorySyncedAsync(repositoryId);
+            });
 
-                lock (_pendingRepositorySyncIds)
-                    _pendingRepositorySyncIds.Add(repositoryId);
+            // A hook sync of a Feature raises only the Context* events (the two above are sent for the special Workspace),
+            // so a push from a Feature never started the refresh that shows its running workflows.
+            _hubConnection.On<int, int>("ContextSynced", async (workspaceId, contextId) =>
+            {
+                if (workspaceId != WorkspaceId || !_isFeatureContext || _selectedContextId?.Value != contextId) return;
+                await OnContextSyncedAsync();
+            });
 
-                _repositorySyncDebounceCts?.Cancel();
-                _repositorySyncDebounceCts?.Dispose();
-                _repositorySyncDebounceCts = new CancellationTokenSource();
-                var cts = _repositorySyncDebounceCts;
-                try
-                {
-                    await Task.Delay(SyncDebounceMs, cts.Token);
-                    await InvokeAsync(RefreshFromRepositorySyncAsync);
-                }
-                catch (OperationCanceledException) { /* debounced */ }
-                finally
-                {
-                    if (cts == _repositorySyncDebounceCts)
-                    {
-                        _repositorySyncDebounceCts?.Dispose();
-                        _repositorySyncDebounceCts = null;
-                    }
-                }
+            _hubConnection.On<int, int, int>("ContextRepositorySynced", async (workspaceId, contextId, repositoryId) =>
+            {
+                if (workspaceId != WorkspaceId || !_isFeatureContext || _selectedContextId?.Value != contextId) return;
+                await OnRepositorySyncedAsync(repositoryId);
             });
 
             _ = WorkspaceSyncHubConnectionHelper.TryStartAsync(_hubConnection, Logger);
+        }
+    }
+
+    private async Task OnContextSyncedAsync()
+    {
+        _syncDebounceCts?.Cancel();
+        _syncDebounceCts?.Dispose();
+        _syncDebounceCts = new CancellationTokenSource();
+        var cts = _syncDebounceCts;
+        try
+        {
+            await Task.Delay(SyncDebounceMs, cts.Token);
+            await InvokeAsync(RefreshFromSyncAsync);
+        }
+        catch (OperationCanceledException) { /* debounced */ }
+        finally
+        {
+            if (cts == _syncDebounceCts)
+            {
+                _syncDebounceCts?.Dispose();
+                _syncDebounceCts = null;
+            }
+        }
+    }
+
+    private async Task OnRepositorySyncedAsync(int repositoryId)
+    {
+        lock (_pendingRepositorySyncIds)
+            _pendingRepositorySyncIds.Add(repositoryId);
+
+        _repositorySyncDebounceCts?.Cancel();
+        _repositorySyncDebounceCts?.Dispose();
+        _repositorySyncDebounceCts = new CancellationTokenSource();
+        var cts = _repositorySyncDebounceCts;
+        try
+        {
+            await Task.Delay(SyncDebounceMs, cts.Token);
+            await InvokeAsync(RefreshFromRepositorySyncAsync);
+        }
+        catch (OperationCanceledException) { /* debounced */ }
+        finally
+        {
+            if (cts == _repositorySyncDebounceCts)
+            {
+                _repositorySyncDebounceCts?.Dispose();
+                _repositorySyncDebounceCts = null;
+            }
         }
     }
 

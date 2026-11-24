@@ -460,6 +460,13 @@ public sealed class WorkspaceFeatureOperations(
                 await finalizeDb.SaveChangesAsync(cancellationToken);
             }
 
+            // Every repository of a new Feature is on its branch point, the one case where the effective version needs
+            // the Worker and the package registry. Decided here, inside the operation, so the grid opens with final
+            // versions; it used to run in the recompute of the first hook sync, seconds after the overlay had closed.
+            progress?.Report(new OperationProgress("Verifying published packages..."));
+            await ResolveInitialEffectiveVersionsAsync(workspaceId, contextId, name, progress, cancellationToken);
+            stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "EffectiveVersions", stageStart);
+
             await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
             if (createCodeGraphIndex)
                 await InitializeCodeGraphAsync(workspaceId, contextId, progress, cancellationToken, honorDefinitionSwitch: false);
@@ -492,6 +499,32 @@ public sealed class WorkspaceFeatureOperations(
                 ContextId = contextId,
                 WorkspaceFeatureId = feature.WorkspaceFeatureId
             };
+        }
+    }
+
+    /// <summary>
+    /// Resolves the effective versions of a Feature that was just seeded, in a scope of its own. The Feature is
+    /// complete without them: when the Worker or a registry cannot answer, the failure is logged, Create still
+    /// succeeds, and the recompute after the next state write resolves them as it does for every context.
+    /// </summary>
+    private async Task ResolveInitialEffectiveVersionsAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        string featureName,
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var resolver = scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Versions.EffectiveVersionResolver>();
+            await resolver.ResolveAsync(workspaceId, contextId, repositoryIds: null, bypassCache: false, cancellationToken, progress);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex,
+                "Effective versions were not resolved at the end of Feature Create; the next recompute resolves them. WorkspaceId={WorkspaceId} ContextId={ContextId} FeatureName={FeatureName}",
+                workspaceId, contextId.Value, featureName);
         }
     }
 
