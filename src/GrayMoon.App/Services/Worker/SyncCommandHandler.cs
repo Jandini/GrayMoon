@@ -114,7 +114,16 @@ public sealed class SyncCommandHandler(
         }
 
         var stateWriter = scope.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>();
-        var snapshot = n.State ?? BuildSnapshotFromFlatNotification(n);
+        // App and Worker are version-locked, and every Worker notification carries the snapshot with its probe
+        // markers. One without it says nothing GrayMoon can store: guessing the markers from the flat fields once
+        // marked a checkout as read whose commit was never reported.
+        if (n.State is not { } snapshot)
+        {
+            logger.LogWarning(
+                "SyncCommand: notification without a state snapshot ignored: workspace {WorkspaceId} repo {RepositoryId}",
+                n.WorkspaceId, n.RepositoryId);
+            return;
+        }
 
         // The queue is serial and a burst of hooks can hold a snapshot for minutes. A pull or sync that began after
         // the snapshot arrived has read the checkout since, so the groups it wrote are newer than the snapshot's.
@@ -295,36 +304,5 @@ public sealed class SyncCommandHandler(
         }
 
         await dbContext.SaveChangesAsync();
-    }
-
-    /// <summary>
-    /// Builds a snapshot from the flat notification fields, for workers that predate
-    /// <see cref="RepositorySyncNotification.State"/>. Only the groups those workers actually populate are
-    /// marked probed, so an older worker can never clear a column it knows nothing about.
-    /// </summary>
-    private static RepositoryStateSnapshot BuildSnapshotFromFlatNotification(RepositorySyncNotification n)
-    {
-        var onTag = !string.IsNullOrWhiteSpace(n.Tag);
-        return new RepositoryStateSnapshot
-        {
-            BranchName = n.Branch,
-            CheckedOutTag = n.Tag,
-            GitVersion = n.Version == "-" ? null : n.Version,
-            OutgoingCommits = n.OutgoingCommits,
-            IncomingCommits = n.IncomingCommits,
-            DefaultBranchBehind = n.DefaultBranchBehind,
-            DefaultBranchAhead = n.DefaultBranchAhead,
-            HasUpstream = n.HasUpstream,
-            Projects = n.Projects,
-            ErrorMessage = n.ErrorMessage,
-            IdentityProbed = true,
-            // A reported GitVersion failure is a probe result too: it clears the stored version (shown as unresolved).
-            GitVersionProbed = n.Version != "-" || n.GitVersionFailed,
-            CommitCountsProbed = !onTag && (n.OutgoingCommits.HasValue || n.IncomingCommits.HasValue),
-            UpstreamProbed = !onTag && n.HasUpstream.HasValue,
-            // The flat shape has no local-branch or tag list, and its remote list is pruned separately.
-            BranchesProbed = false,
-            ProjectsProbed = n.Projects is { Count: > 0 },
-        };
     }
 }

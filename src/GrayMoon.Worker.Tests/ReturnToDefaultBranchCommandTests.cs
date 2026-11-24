@@ -39,6 +39,24 @@ public sealed class ReturnToDefaultBranchCommandTests
     }
 
     /// <summary>
+    /// The checkout of the default branch runs with hooks off and has already moved HEAD when the pull fails. The
+    /// failure used to carry no state, so the App kept the branch and commit the repository had left.
+    /// </summary>
+    [Fact]
+    public async Task A_return_that_fails_at_the_pull_still_reports_the_state_the_checkout_left()
+    {
+        using var workspace = new TempWorkspaceRoot("ws", "repo");
+        var git = new RecordingGitService { PullError = "fatal: unable to access the remote" };
+
+        var response = await ExecuteAsync(workspace, git, deleteRemoteBranch: false);
+
+        Assert.False(response.Success);
+        Assert.Equal("fatal: unable to access the remote", response.ErrorMessage);
+        Assert.NotNull(response.State);
+        Assert.Equal("main", response.State.BranchName);
+    }
+
+    /// <summary>
     /// The command used to log a failed remote delete and answer plain success, so a user who ticked "delete remote
     /// branch" was told it worked while the branch was still on the remote.
     /// </summary>
@@ -129,8 +147,11 @@ public sealed class ReturnToDefaultBranchCommandTests
         public Task<(bool Success, string? ErrorMessage)> CheckoutBranchAsync(string repoPath, string branchName, CancellationToken ct, bool skipHooks = false)
             => Task.FromResult<(bool, string?)>((true, null));
 
+        /// <summary>What the pull after the checkout answers. Null means it works.</summary>
+        public string? PullError { get; init; }
+
         public Task<(bool Success, bool MergeConflict, string? ErrorMessage)> PullAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false)
-            => Task.FromResult<(bool, bool, string?)>((true, false, null));
+            => Task.FromResult<(bool, bool, string?)>((PullError is null, false, PullError));
 
         public Task<(bool Success, bool LocalChangesBlock, string? ErrorMessage)> PullFastForwardOnlyAsync(string repoPath, string branchName, string? bearerToken, CancellationToken ct, bool skipHooks = false) => throw new NotImplementedException();
 

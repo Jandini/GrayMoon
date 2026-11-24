@@ -536,6 +536,13 @@ public sealed class DependencyUpdateOrchestrator(
         return [];
     }
 
+    /// <summary>
+    /// The error shown on a repository that Update committed and could not refresh afterwards: the commit exists, and
+    /// the row still shows the commit and version from before it.
+    /// </summary>
+    internal static string StateNotRefreshedMessage(string cause) =>
+        $"{cause.TrimEnd().TrimEnd('.')}. The commit was made, but the repository's commit and version were not refreshed. Sync the repository.";
+
     private async Task<bool> RefreshRepositoryVersionsAsync(
         IReadOnlyList<int> repositoryIds,
         int workspaceId,
@@ -550,6 +557,7 @@ public sealed class DependencyUpdateOrchestrator(
 
         var totalRefresh = repositoryIds.Count;
         var completedRefresh = 0;
+        var refreshed = new System.Collections.Concurrent.ConcurrentDictionary<int, bool>();
         using var refreshSemaphore = new SemaphoreSlim(_maxConcurrent);
         var refreshTasks = repositoryIds.Select(async repoId =>
         {
@@ -561,25 +569,49 @@ public sealed class DependencyUpdateOrchestrator(
                 // No file-version check per repository: these run side by side, and one check follows below.
                 var (refreshSuccess, refreshError) = await svc.SyncSingleRepositoryAsync(
                     repoId, workspaceId, contextId, cancellationToken, checkFileVersions: false);
+                if (refreshSuccess)
+                    refreshed[repoId] = true;
                 var c = Interlocked.Increment(ref completedRefresh);
                 setProgress($"Updating version {c} of {totalRefresh}...");
                 return (RepoId: repoId, Success: refreshSuccess, Error: refreshError);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Refresh after commit failed for repository {RepositoryId} in workspace {WorkspaceId}", repoId, workspaceId);
+                return (RepoId: repoId, Success: false, Error: (string?)ex.Message);
             }
             finally
             {
                 refreshSemaphore.Release();
             }
-        });
+        }).ToList();
 
-        var refreshResults = await Task.WhenAll(refreshTasks);
+        // These repositories were committed with hooks off, so this refresh is the only thing that stores their new
+        // commit and version. One that is not refreshed keeps the old ones, and that is reported on the repository.
+        (int RepoId, bool Success, string? Error)[] refreshResults;
+        try
+        {
+            refreshResults = await Task.WhenAll(refreshTasks);
+        }
+        catch (OperationCanceledException)
+        {
+            foreach (var repoId in repositoryIds.Where(id => !refreshed.ContainsKey(id)))
+                onRepoError(repoId, StateNotRefreshedMessage("Update was stopped"));
+            throw;
+        }
+
+        var allRefreshed = true;
         foreach (var (repoId, success, err) in refreshResults)
         {
-            if (!success)
-            {
-                onRepoError(repoId, err ?? "Refresh version failed.");
-                return false;
-            }
+            if (success)
+                continue;
+
+            allRefreshed = false;
+            onRepoError(repoId, StateNotRefreshedMessage(err ?? "Refresh version failed."));
         }
+
+        if (!allRefreshed)
+            return false;
 
         // These repositories committed, so they left their branch point: their effective version is their own from now on
         // (no Worker or registry call is made for them).

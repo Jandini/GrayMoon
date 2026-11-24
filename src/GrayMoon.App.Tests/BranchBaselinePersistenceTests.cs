@@ -133,6 +133,7 @@ public sealed class BranchBaselinePersistenceTests
             branch = currentBranch,
             alreadyExisted = false,
             baseCommitSha = sha,
+            headCommitSha = sha,
             resolvedStartRef = startRef,
             outgoingCommits = 0,
             hasUpstream = false,

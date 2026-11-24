@@ -299,7 +299,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         {
             state.CheckedOutTag = snapshot.CheckedOutTag;
             state.BranchName = null;
-            state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit;
+            state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit!.Trim();
             state.BranchHasUpstream = null;
             state.OutgoingCommits = null;
             state.IncomingCommits = null;
@@ -311,9 +311,10 @@ public sealed class WorkspaceRepositoryStateWriter(
         state.CheckedOutTag = null;
         state.HasNewerTag = null;
         state.BranchName = Blank(snapshot.BranchName) || snapshot.BranchName == "-" ? null : snapshot.BranchName;
-        // Flat hook/sync payloads often omit HeadCommit; do not wipe a known SHA in that case.
-        if (!Blank(snapshot.HeadCommit))
-            state.HeadCommit = snapshot.HeadCommit;
+        // Replace semantics, like every probed group: a probed identity without a commit (a repository with no
+        // commits) clears the stored one. Keeping it left the commit of a checkout that is no longer there, and the
+        // file-version check and the effective version both decide from this column.
+        state.HeadCommit = Blank(snapshot.HeadCommit) ? null : snapshot.HeadCommit!.Trim();
     }
 
     private static void MirrorIdentityToLink(WorkspaceRepositoryLink wr, WorkspaceRepositoryContextState state)

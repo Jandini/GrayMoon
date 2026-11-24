@@ -52,4 +52,8 @@ public sealed class CreateBranchResponse
     /// <summary>The commit the new branch points at; null when the branch already existed or the repository has no commits.</summary>
     [JsonPropertyName("baseCommitSha")]
     public string? BaseCommitSha { get; set; }
+
+    /// <summary>The commit checked out after the command, also when the branch already existed; null when the repository has no commits.</summary>
+    [JsonPropertyName("headCommitSha")]
+    public string? HeadCommitSha { get; set; }
 }

@@ -147,6 +147,7 @@ public sealed class FeatureProjectionSeedTests
         Version = version,
         Branch = FeatureName,
         FreshWorktree = true,
+        State = WorkerStateTestExtensions.HookState(FeatureName, version),
     };
 
     [Fact]

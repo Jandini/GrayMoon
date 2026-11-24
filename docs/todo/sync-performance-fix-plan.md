@@ -1,6 +1,6 @@
 # Sync performance fix plan
 
-Status: phases 1 to 4 built on 2026-11-24, not yet measured on a real Workspace. What is still open is listed under "Open". Evidence and the measurements that started this are in `ideas/feature-create-background-sync-cost.md`. How the built parts work is in `docs/architecture/` (03 "WorkspaceFileLineStatus", 04 "Hook sync batches", 05 "File versioning").
+Status: built on 2026-11-24 (phases 1 to 5), not yet measured on a real Workspace. What is still open is listed under "Open". Evidence and the measurements that started this are in `ideas/feature-create-background-sync-cost.md`. How the built parts work is in `docs/architecture/` (03 "WorkspaceFileLineStatus", 04 "Hook sync batches", 05 "File versioning").
 
 ## Goal
 
@@ -43,20 +43,40 @@ After an operation finishes, the grid is final within a few seconds, and Update 
 - The notification panel no longer subscribes to `ContextRepositorySynced`. Its refreshes run one per Workspace at a time; an event during a refresh shares the next one. That also ends the last-writer-wins race between two refreshes. No timer was added.
 - **Decision 3, taken as recommended:** the Repositories page reloads a Feature grid on `ContextSynced` of its own context, with its existing debounce.
 
+### Phase 5: every path stores the commit it left behind
+
+The badge now depends on the stored commit, so the paths that could leave it old or blank are closed.
+
+| # | Was | Now |
+|---|---|---|
+| 1 | The state writer kept the old SHA when identity was probed on a branch but the SHA was blank | Blank clears it (`WorkspaceRepositoryStateWriter.ApplyIdentity`), as on a tag |
+| 2 | Create branch onto a branch that already existed, with hooks off (Prepare Workspace): HEAD moved, no SHA returned | `CreateBranchCommand` returns `headCommitSha` in every case; New Branch and Create Branches store it |
+| 3 | Update commits with hooks off; when the refresh after it failed or the run was aborted in between, the old SHA stayed and nothing said so | Every such repository gets the error "... The commit was made, but the repository's commit and version were not refreshed. Sync the repository." All failed refreshes are reported, not only the first |
+| 4 | Return to Default failing at the pull, after the checkout had moved HEAD, wrote no state | The Worker's failure carries the state the checkout left; the App stores it and still reports the failure |
+| 5 | Shapes built without a SHA that marked identity as probed (hook notification, Sync, Pull and Return to Default fallbacks for old Workers) | Deleted. A hook notification without `State` is logged and ignored; a pull that reports none writes only the sync status; a successful Return to Default without one is a failure |
+| 6 | `RefreshRepositoryVersionCommand` on a missing folder answered branch "-" and the App stored "no branch" | The command fails with "The folder of repository X was not found." |
+| 7 | Found in the logs of 2026-11-24 21:07 (Edx1.File.Backup after Merge with "return to default"): the return wrote main, then a push-hook snapshot taken on the feature branch before it was applied from the queue and put the feature branch back in the grid. Return to Default, Switch branch and Create branch did not tell the stale-snapshot guard when they began | They pass `OperationStartedAt`, so a snapshot received before the operation began no longer overwrites what it wrote (`StaleHookSnapshotTests`) |
+
+Not detectable at all, and unchanged: a HEAD moved with no hook GrayMoon hears (`git reset`, a rebase, a foreign `core.hooksPath`, a notification lost while the Worker was disconnected). The badge then compares with the old commit until the next hook, Sync or Update; Update itself reads the commits at its start.
+
 ### Tests
 
 - `WorkerSyncNotificationQueueBatchTests` (13): one completion per burst; the barrier and the UI count during a gated completion; a failing item; a failure after the state write; a failing completion; the non-shutdown cancellation; two notifications of one repository; the sequence A, A, B, A with B waiting; refs-only; skipped and superseded; a notification during a completion; the maximum batch size; stop with an open batch.
-- `FileVersionStoredCommitTests` (12): the stored commit is sent and `GetHeadCommits` is not called; a Feature uses its own commit; no state row; a blank commit with a seeded out-of-date row; the update still reads live; a hook sync end to end; the operation start (stored, unreadable, no token); Update stops before any change; Update decides from the live commit; a burst through the real handler gives one check and one context event.
+- `FileVersionStoredCommitTests` (13): the stored commit is sent and `GetHeadCommits` is not called; a Feature uses its own commit; no state row; a blank commit with a seeded out-of-date row; the update still reads live; a hook sync end to end; the operation start (stored, unreadable, no token); Update stops before any change; Update decides from the live commit; a burst through the real handler gives one check and one context event; a burst asks an unreachable registry and the branch-point version once.
+- `UpdateLevelFileCheckTests`: a two-level Update. Level 2's file gets level 1's new version and commit; four checks and two `GetHeadCommits` calls for the whole run.
+- `StoredHeadCommitPathsTests` (8): one per row of the phase 5 table, each with a seeded branch and commit the old code would have left or overwritten.
 - `FileVersionNotCheckedMigrationTests`: step 22 on a version 21 database.
+- Worker: `HeadCommitReportTests` (create onto an existing branch, refresh of a missing folder), `ReturnToDefaultBranchCommandTests` (failure at the pull carries the state).
 - `PullDependencyRefreshTests`: one context event per pull recompute instead of two.
+- Tests that built the deleted flat shapes now send the state snapshot the Worker sends (`WorkerStateTestExtensions`, `RepositorySyncNotificationBuilder`).
 
-All 5,463 tests of `GrayMoon.App.Tests` (without `Category=Long`) pass.
+All tests of `GrayMoon.App.Tests`, `GrayMoon.Worker.Tests` and `GrayMoon.Common.Tests` (without `Category=Long`) pass.
 
 ## Open
 
 ### Measure
 
-Not done: it needs the App running against a real Workspace. On Edx1, before and after:
+Not done: it needs the App and the Worker running against a real Workspace. The App and the Worker both changed and ship together. On Edx1, before and after:
 
 - Create Feature: time from "Feature Create finished" to the last `SyncCommand persisted` of that context.
 - Update and Push: run time, and the count and total of `CheckAndPersist` runs and `GetHeadCommits` calls.
@@ -64,25 +84,10 @@ Not done: it needs the App running against a real Workspace. On Edx1, before and
 
 The build that wrote the analysed logs (`0.2.1-main.43`) predates effective versions, so the first measurement on a current build is also the first one that includes them.
 
-### Paths that can leave the stored commit old or blank
+To look at while measuring:
 
-The badge now depends on the stored commit, so these matter more than before. Update itself is protected by the read at its start. A survey of the code found identity written without a commit in these places; none is changed yet, and each needs a regression test first.
-
-| # | Problem | Change |
-|---|---|---|
-| 1 | The state writer keeps the old SHA when identity was probed on a branch but the SHA is blank (`WorkspaceRepositoryStateWriter.ApplyIdentity`) | Blank clears the stored SHA, as the tag branch of the same method does. Only after 2 to 6: today several callers send identity without a SHA, and clearing would turn their repositories to "not checked" after every such operation |
-| 2 | Create branch onto a branch that already exists, with hooks off (Prepare Workspace): HEAD moves, no SHA is returned (`WorkspaceBranchOperations`, `WorkspaceGitService.Branches`) | `CreateBranchCommand` returns the HEAD SHA after checkout in every case; both App callers store it |
-| 3 | Update commits with hooks off; the SHA is stored by the refresh that follows. When that refresh fails or the run is aborted in between, the old SHA stays | The failure path reports "state not refreshed, run Sync" for those repositories |
-| 4 | Return to Default fails at the pull, after the checkout already moved HEAD; no state is written | Write the state the Worker reports for the checkout before returning the pull failure |
-| 5 | Shapes built without a SHA that mark identity as probed: `SyncCommandHandler.BuildSnapshotFromFlatNotification`, `WorkspaceGitService.SnapshotFromFlatInfo`, the flat branches of `WorkspaceCommitSyncHandler.BuildSnapshot` and of Return to Default | App and Worker are version-locked, so the Worker always sends `State`: delete the flat shapes. About 20 tests of `SyncCommandHandlerTests` build flat notifications and move to `State` in the same change |
-| 6 | `RefreshRepositoryVersionCommand` on a missing folder returns branch "-" with identity probed | Return identity not probed |
-
-Not detectable at all: a HEAD moved with no hook GrayMoon hears (`git reset`, a rebase, a foreign `core.hooksPath`, a notification lost while the Worker was disconnected). The badge then compares with the old commit until the next hook, Sync or Update.
-
-### Tests not written
-
-- A two-level Update with `{L1}` and `{L1:commit}` tokens in a level 2 file that counts the checks per level. The existing Update tests pass, and the start of the run is covered, but no test pins "level 2 is updated with level 1's new version and commit".
-- A burst for a new Feature asks the Worker for the branch-point version once per repository, and an `Unresolved` registry is probed once per recompute. It follows from one recompute per batch; no test asserts the count.
+- the dependency badge tooltip line "not checked: No commit is recorded for Repo. Sync the repository." (rendered with the existing tooltip styles, not looked at in a browser);
+- a Feature grid reloading by itself after a commit made in a terminal.
 
 ### Later, only if the numbers still call for it
 
@@ -103,7 +108,7 @@ Each needs its own note in `defects/` before it is worked on.
 
 ## Decisions
 
-All four were taken as the plan recommended, without a separate confirmation. Each is one small change to reverse.
+All four were taken as the plan recommended and confirmed by the owner on 2026-11-24.
 
 1. **HEAD moved without a hook**: the update reads the live commits once at its start; the badge stays on the stored value.
 2. **A `:commit` token without a value**: shown as not checked, with the reason, and counted as out of date.

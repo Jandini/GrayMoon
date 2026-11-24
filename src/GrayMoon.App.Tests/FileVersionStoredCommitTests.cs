@@ -300,6 +300,32 @@ public sealed class FileVersionStoredCommitTests
         Assert.Equal("WorkspaceSynced", sent[^1]);
     }
 
+    [Fact]
+    public async Task A_burst_of_hook_syncs_asks_an_unreachable_registry_once_not_once_per_notification()
+    {
+        // An unverifiable package is not stored as a decision to reuse, so every recompute asks again. With one
+        // recompute per notification a burst asked the registry (and waited for its timeout) once per repository.
+        await using var s = await EffectiveVersionScenario.CreateAsync();
+        s.Registry.TimesOut(EffectiveVersionScenario.PackageId);
+        s.Ctx.WorkerBridge.Calls.Clear();
+        var lookupsBefore = s.Registry.Lookups;
+        var queue = new WorkerSyncNotificationQueue(
+            s.Ctx.Resolve<IServiceScopeFactory>(),
+            new AppBackgroundWorkStateService(),
+            NullLogger<WorkerSyncNotificationQueue>.Instance);
+
+        queue.Enqueue(HookSync(s, s.ProducerId, EffectiveVersionScenario.BaseSha));
+        queue.Enqueue(HookSync(s, s.ConsumerId, EffectiveVersionScenario.ConsumerSha));
+        queue.Enqueue(HookSync(s, s.ProducerId, EffectiveVersionScenario.BaseSha));
+        var applied = queue.WaitForPendingAsync(s.Ctx.WorkspaceId, CancellationToken.None);
+        await queue.StartAsync(CancellationToken.None);
+        await applied.WaitAsync(TimeSpan.FromSeconds(30));
+        await queue.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, s.Registry.Lookups - lookupsBefore);
+        Assert.Equal(1, s.BranchPointCalls);
+    }
+
     private static RepositorySyncNotification HookSync(EffectiveVersionScenario s, int repositoryId, string headCommit) => new()
     {
         WorkspaceId = s.Ctx.WorkspaceId,

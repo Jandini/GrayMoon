@@ -445,7 +445,8 @@ public sealed partial class WorkspaceGitService
         if (resultList.Count == 0) return;
 
         var items = resultList
-            .Select(r => (r.RepoId, r.info.Snapshot ?? SnapshotFromFlatInfo(r.info)))
+            // Every parser of a Worker response builds the snapshot; a result without one was not read from a checkout.
+            .Select(r => (r.RepoId, r.info.Snapshot ?? throw new InvalidOperationException($"Repository {r.RepoId} has a version result without a state snapshot.")))
             .ToList();
         await _stateWriter.ApplyBatchAsync(
             contextId,
@@ -476,40 +477,6 @@ public sealed partial class WorkspaceGitService
 
         _logger.LogInformation("Persistence: saved WorkspaceRepository link versions. WorkspaceId={WorkspaceId}, RepoCount={RepoCount}",
             workspaceId, resultList.Count);
-    }
-
-    /// <summary>
-    /// Fallback for <see cref="RepoGitVersionInfo"/> values built by code paths that do not yet produce a
-    /// snapshot. Everything the flat shape carries is marked probed, which matches the merge behaviour those
-    /// paths had before, and the groups it says nothing about stay untouched.
-    /// </summary>
-    private static RepositoryStateSnapshot SnapshotFromFlatInfo(RepoGitVersionInfo info)
-    {
-        var onTag = !string.IsNullOrWhiteSpace(info.Tag);
-        return new RepositoryStateSnapshot
-        {
-            BranchName = info.Branch,
-            CheckedOutTag = info.Tag,
-            HeadCommit = info.Commit,
-            GitVersion = info.Version == "-" ? null : info.Version,
-            DefaultBranchName = info.DefaultBranch,
-            OutgoingCommits = info.OutgoingCommits,
-            IncomingCommits = info.IncomingCommits,
-            DefaultBranchBehind = info.DefaultBranchBehindCommits,
-            DefaultBranchAhead = info.DefaultBranchAheadCommits,
-            HasUpstream = info.HasUpstream,
-            LocalBranches = info.LocalBranches?.ToList(),
-            RemoteBranches = info.RemoteBranches?.ToList(),
-            Tags = info.Tags?.ToList(),
-            Projects = ToProjectNotifications(info.ProjectsDetail),
-            ErrorMessage = info.ErrorMessage,
-            IdentityProbed = true,
-            GitVersionProbed = info.Version != "-",
-            CommitCountsProbed = !onTag && (info.OutgoingCommits.HasValue || info.IncomingCommits.HasValue),
-            UpstreamProbed = !onTag && info.HasUpstream.HasValue,
-            BranchesProbed = info.LocalBranches != null || info.RemoteBranches != null || info.Tags != null,
-            ProjectsProbed = info.ProjectsDetail != null,
-        };
     }
 
     /// <summary>

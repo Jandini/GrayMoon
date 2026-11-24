@@ -322,7 +322,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             DefaultBranchBehind = 0,
             DefaultBranchAhead = 0,
             GitVersion = "2.0.0",
-        });
+        }.WithProbedState());
         await ctx.MutateLinkAsync(link =>
         {
             link.BranchName = "feature/x";
@@ -386,7 +386,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             DefaultBranchBehind = 0,
             DefaultBranchAhead = 0,
             GitVersion = "2.0.0",
-        });
+        }.WithProbedState());
         await ctx.MutateLinkAsync(link =>
         {
             link.BranchName = "feature/x";
@@ -429,7 +429,7 @@ public sealed class ReturnToDefaultAnalyzeTests
             DefaultBranchBehind = 0,
             DefaultBranchAhead = 0,
             GitVersion = "2.0.0",
-        });
+        }.WithProbedState());
         await ctx.MutateLinkAsync(link =>
         {
             link.BranchName = "feature/x";

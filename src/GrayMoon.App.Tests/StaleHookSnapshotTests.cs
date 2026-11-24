@@ -114,6 +114,57 @@ public sealed class StaleHookSnapshotTests
         Assert.Equal(broadcastsAfterPull, ctx.Broadcasts.Count);
     }
 
+    /// <summary>
+    /// Log 2026-11-24 21:07, Edx1.File.Backup: Merge with "return to default" returned the repository to main at
+    /// 21:07:07, and a push-hook snapshot taken on file-format before that was applied from the queue at 21:07:10. The
+    /// grid showed file-format again, although the checkout was on main.
+    /// </summary>
+    [Fact]
+    public async Task A_hook_snapshot_queued_before_a_return_to_default_does_not_put_the_left_branch_back()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.BranchName = "file-format";
+            link.GitVersion = "0.1.0-file-format.9";
+        });
+        ctx.WorkerBridge.Respond("ReturnToDefaultBranch", new GrayMoon.App.Models.Api.ReturnToDefaultBranchResponse
+        {
+            Success = true,
+            CurrentBranch = "main",
+            DefaultBranch = "main",
+            LocalBranches = ["main"],
+            RemoteBranches = ["origin/main"],
+            Tags = [],
+            GitVersion = "0.1.0-main.160",
+        }.WithProbedState());
+
+        var receivedAt = RepositoryStateFreshness.Now();
+        var queued = new RepositorySyncNotification
+        {
+            WorkspaceId = ctx.WorkspaceId,
+            RepositoryId = ctx.RepositoryId,
+            Version = "0.1.0-file-format.9",
+            Branch = "file-format",
+            State = WorkerStateTestExtensions.HookState("file-format", "0.1.0-file-format.9", 0, 0, true, headCommit: "ffffffffffffffffffffffffffffffffffffffff"),
+        };
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var special = await ctx.GetSpecialContextIdAsync();
+            var outcome = await scope.ServiceProvider.GetRequiredService<WorkspaceGitService>().ReturnToDefaultDirectAsync(
+                ctx.WorkspaceId, special, ctx.RepositoryId, "file-format",
+                deleteRemoteBranch: false, allowForceDeleteLocalBranch: true, CancellationToken.None);
+            Assert.True(outcome.Success, outcome.ErrorMessage);
+        }
+
+        await HandleHookAsync(ctx, queued, receivedAt);
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal("main", link.BranchName);
+        Assert.Equal("0.1.0-main.160", link.GitVersion);
+    }
+
     [Fact]
     public async Task A_hook_snapshot_received_after_a_pull_is_applied()
     {

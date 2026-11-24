@@ -16,7 +16,7 @@ namespace GrayMoon.App.Tests;
 /// </summary>
 public sealed class ReturnToDefaultPersistenceTests
 {
-    private static ReturnToDefaultBranchResponse SuccessfulResponse() => new()
+    private static ReturnToDefaultBranchResponse SuccessfulResponse() => new ReturnToDefaultBranchResponse
     {
         Success = true,
         CurrentBranch = "main",
@@ -40,7 +40,7 @@ public sealed class ReturnToDefaultPersistenceTests
                 TargetFramework = "net10.0",
             }
         ],
-    };
+    }.WithProbedState();
 
     [Fact]
     public async Task Successful_sync_persists_branch_version_counts_and_upstream()
@@ -148,7 +148,7 @@ public sealed class ReturnToDefaultPersistenceTests
         {
             Success = false,
             ErrorMessage = "Could not determine default branch",
-        });
+        }.WithProbedState());
 
         await using var scope = ctx.CreateScope();
         var git = scope.ServiceProvider.GetRequiredService<WorkspaceGitService>();

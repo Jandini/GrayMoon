@@ -371,6 +371,8 @@ public sealed class WorkspaceBranchOperations(
                     workspaceRoot,
                     workspaceRepositoryName
                 };
+                // A hook snapshot received before this moment describes the checkout this command leaves.
+                var tagStartedAt = RepositoryStateFreshness.Now();
                 var tagResponse = await workerBridge.SendCommandAsync("CheckoutTag", tagArgs, cancellationToken);
                 var tagCheckout = WorkerResponseJson.DeserializeWorkerResponse<CheckoutTagResponse>(tagResponse.Data);
                 var tagSuccess = tagCheckout?.Success ?? tagResponse.Success;
@@ -385,7 +387,7 @@ public sealed class WorkspaceBranchOperations(
                     CheckedOutTag = checkedOutTag,
                     HeadCommit = tagCheckout?.Commit,
                     IdentityProbed = true,
-                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
+                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true, OperationStartedAt = tagStartedAt });
 
                 await UpdateFeaturePinnedTagAsync(contextId, wr.WorkspaceRepositoryId, checkedOutTag, cancellationToken);
 
@@ -410,6 +412,8 @@ public sealed class WorkspaceBranchOperations(
                 workspaceRoot,
                 workspaceRepositoryName
             };
+            // A hook snapshot received before this moment describes the checkout this command leaves.
+            var checkoutStartedAt = RepositoryStateFreshness.Now();
             var response = await workerBridge.SendCommandAsync("CheckoutBranch", args, cancellationToken);
 
             var checkoutResponse = WorkerResponseJson.DeserializeWorkerResponse<CheckoutBranchResponse>(response.Data);
@@ -433,7 +437,7 @@ public sealed class WorkspaceBranchOperations(
                     // The effective version is decided per HEAD; the checkout moved it.
                     HeadCommit = checkoutResponse?.Commit,
                     IdentityProbed = true,
-                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
+                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true, OperationStartedAt = checkoutStartedAt });
             }
 
             if (leavingTag)
@@ -764,6 +768,8 @@ public sealed class WorkspaceBranchOperations(
                 workspaceId,
                 capabilities
             };
+            // A hook snapshot received before this moment describes the checkout this command leaves.
+            var createStartedAt = RepositoryStateFreshness.Now();
             var response = await workerBridge.SendCommandAsync("CreateBranch", args, cancellationToken);
 
             var createResponse = WorkerResponseJson.DeserializeWorkerResponse<CreateBranchResponse>(response.Data);
@@ -792,10 +798,11 @@ public sealed class WorkspaceBranchOperations(
                 await stateWriter.ApplyAsync(contextId, workspaceId, repositoryId, new RepositoryStateSnapshot
                 {
                     BranchName = checkedOutBranch,
-                    // A new branch starts on its base commit; the hook reports the same SHA later.
-                    HeadCommit = createResponse?.AlreadyExisted == false ? createResponse.BaseCommitSha : null,
+                    // What the Worker read after the checkout: the base commit of a new branch, the tip of one that
+                    // was already there. Blank for a repository with no commits, which clears the stored commit.
+                    HeadCommit = createResponse?.HeadCommitSha,
                     IdentityProbed = true,
-                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true });
+                }, new RepositoryStateWriteOptions { ReconcilePullRequest = true, OperationStartedAt = createStartedAt });
             }
 
             if (leavingTag)

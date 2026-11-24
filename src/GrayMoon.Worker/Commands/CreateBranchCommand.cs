@@ -38,6 +38,9 @@ public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader re
         }
 
         var currentBranch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
+        // Read after the checkout in every case: onto a branch that was already there, HEAD is that branch's tip, not
+        // the requested base, and with hooks off nothing else reports it. Null for a repository with no commits.
+        var headCommitSha = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
 
         if (!request.SkipHooks)
         {
@@ -47,7 +50,8 @@ public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader re
                 CurrentBranch = currentBranch,
                 AlreadyExisted = alreadyExisted,
                 ResolvedStartRef = created.ResolvedStartRef,
-                BaseCommitSha = created.BaseCommitSha
+                BaseCommitSha = created.BaseCommitSha,
+                HeadCommitSha = headCommitSha
             };
         }
 
@@ -109,7 +113,8 @@ public sealed class CreateBranchCommand(IGitService git, IGitRepositoryReader re
             FetchError = fetchError,
             AlreadyExisted = alreadyExisted,
             ResolvedStartRef = created.ResolvedStartRef,
-            BaseCommitSha = created.BaseCommitSha
+            BaseCommitSha = created.BaseCommitSha,
+            HeadCommitSha = headCommitSha
         };
     }
 }

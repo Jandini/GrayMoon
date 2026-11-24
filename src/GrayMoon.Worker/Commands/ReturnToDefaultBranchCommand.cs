@@ -96,10 +96,20 @@ public sealed class ReturnToDefaultBranchCommand(IGitService git, IGitRepository
         var (pullSuccess, mergeConflict, pullError) = await git.PullAsync(repoPath, defaultBranch, request.BearerToken, cancellationToken, skipHooks: true);
         if (!pullSuccess)
         {
+            // The checkout above already moved HEAD and ran with hooks off, so nothing else reports where the
+            // repository is now. The failure carries that state; the App stores it and still reports the failure.
+            var (failedPullState, _) = await stateProbe.CaptureAsync(repoPath, new RepositoryStateProbeOptions
+            {
+                IncludeGitVersion = true,
+                IncludeBranchLists = true,
+                Capabilities = request.Capabilities
+            }, cancellationToken);
+
             return new ReturnToDefaultBranchResponse
             {
                 Success = false,
                 ErrorMessage = mergeConflict ? (pullError ?? "Merge conflict after pull.") : (pullError ?? "Failed to pull after switching to default branch"),
+                State = failedPullState,
                 CurrentBranch = defaultBranch,
                 DefaultBranch = defaultBranch,
                 RemoteBranchDeleteError = remoteBranchDeleteError,
