@@ -90,7 +90,7 @@ flowchart LR
   In["Incoming commands"] --> Route{"route by name"}
   Route -->|"everything else"| Main["main pool"]
   Route -->|"GetGitChangeStatus, ListGitWorktrees, InspectWorktree"| Read["read pool"]
-  Route -->|"GetGitFileDiff"| Diff["diff pool"]
+  Route -->|"GetGitFileDiff, version-file reads"| Diff["diff pool"]
   Route -->|"CollectGitEvidence, GenerateAiText, GetAiProviders"| Ai["AI pool"]
   Main -.-> Cap["bounded concurrency"]
   Read -.-> Cap
@@ -98,7 +98,7 @@ flowchart LR
   Ai -.-> Cap
 ```
 
-Routing is by command name in `WorkerCommandPoolRouter` (called from `SignalRConnectionHostedService`): `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`, `GetGitChangesMonitoring`, `ListWorkspaceRootFolders`, `InspectWorkspaceFolder`, `CheckFileVersions`, `ResolveGeneratedPackageReferences` (the last two only read files, and the App waits for them each time it applies hook syncs, so they do not wait behind the GitVersion runs of the main pool); `DiffCommands` = `GetGitFileDiff`; `AiCommands` = `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, `AiJobBackgroundService`, all derived from `JobBackgroundService`).
+Routing is by command name in `WorkerCommandPoolRouter` (called from `SignalRConnectionHostedService`): `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`, `GetGitChangesMonitoring`, `ListWorkspaceRootFolders`, `InspectWorkspaceFolder`; `DiffCommands` = `GetGitFileDiff`, `CheckFileVersions`, `ResolveGeneratedPackageReferences` (the last two only read files and take milliseconds, and the App waits for them each time it applies hook syncs, so they wait neither behind the GitVersion runs of the main pool nor behind the status scans and worktree inspections of the read pool); `AiCommands` = `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, `AiJobBackgroundService`, all derived from `JobBackgroundService`).
 
 Sizes (`WorkerOptions`):
 

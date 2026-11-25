@@ -439,8 +439,8 @@ Pool selection is by command name in `Services/WorkerCommandPoolRouter.cs` (call
 
 | Pool | Commands | Option (default) |
 |---|---|---|
-| Read (`ReadOnlyCommands`) | `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`, `GetGitChangesMonitoring`, `ListWorkspaceRootFolders`, `InspectWorkspaceFolder`, `CheckFileVersions`, `ResolveGeneratedPackageReferences` | `MaxConcurrentReadCommands` (8) |
-| Diff (`DiffCommands`) | `GetGitFileDiff` | `MaxConcurrentDiffCommands` (4) |
+| Read (`ReadOnlyCommands`) | `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`, `GetGitChangesMonitoring`, `ListWorkspaceRootFolders`, `InspectWorkspaceFolder` | `MaxConcurrentReadCommands` (8) |
+| Diff (`DiffCommands`) | `GetGitFileDiff`, `CheckFileVersions`, `ResolveGeneratedPackageReferences` | `MaxConcurrentDiffCommands` (4) |
 | AI (`AiCommands`) | `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders` | `MaxConcurrentAiCommands` (4) |
 | Main | everything else, including worktree create/remove and CodeGraph | `MaxConcurrentCommands` (`ProcessorCount * 2`) |
 

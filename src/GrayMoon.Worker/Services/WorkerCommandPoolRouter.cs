@@ -18,15 +18,16 @@ public static class WorkerCommandPoolRouter
     /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
     private static readonly HashSet<string> ReadOnlyCommands =
         ["GetGitChangeStatus", "EnsureGitChangesWatchers", WorkerHubMethods.ListGitWorktrees, WorkerHubMethods.InspectWorktree,
-         WorkerHubMethods.GetGitChangesMonitoring, WorkerHubMethods.ListWorkspaceRootFolders, WorkerHubMethods.InspectWorkspaceFolder,
-         // Both only read files, and the App waits for them each time it applies hook syncs: on the main pool they
-         // waited up to 7.5 s for a GitVersion run of those same hook syncs to end (logs of 2026-11-25, round 2).
-         WorkerHubMethods.CheckFileVersions, WorkerHubMethods.ResolveGeneratedPackageReferences];
+         WorkerHubMethods.GetGitChangesMonitoring, WorkerHubMethods.ListWorkspaceRootFolders, WorkerHubMethods.InspectWorkspaceFolder];
 
-    /// <summary>Diff commands get their own dedicated pool, separate from <see cref="ReadOnlyCommands"/>,
-    /// so opening a diff never queues behind a workspace status rescan (which can fan out many
-    /// GetGitChangeStatus calls) or any other command.</summary>
-    private static readonly HashSet<string> DiffCommands = ["GetGitFileDiff"];
+    /// <summary>Short reads that someone is waiting for get their own dedicated pool, separate from
+    /// <see cref="ReadOnlyCommands"/>, so they never queue behind a workspace status rescan (which can fan out many
+    /// GetGitChangeStatus calls) or any other command: opening a diff, and the two file reads of the version-file
+    /// check, which the App waits for each time it applies hook syncs. Those two take milliseconds, but waited up
+    /// to 7.5 s on the main pool behind a GitVersion run and up to 45 s on the read pool behind status scans and
+    /// worktree inspections of 16 to 26 s each (logs of 2026-11-25, rounds 2 and 3).</summary>
+    private static readonly HashSet<string> DiffCommands =
+        ["GetGitFileDiff", WorkerHubMethods.CheckFileVersions, WorkerHubMethods.ResolveGeneratedPackageReferences];
 
     /// <summary>AI commands: bounded read-only Git evidence and one provider CLI process per generation. They get
     /// their own pool so a long CLI run never holds a main-pool slot (Sync, push, Update, hook syncs) or a read-pool

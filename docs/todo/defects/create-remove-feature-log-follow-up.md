@@ -183,3 +183,28 @@ Same steps. The App and the Worker both changed.
 | Checkboxes | Unticked boxes are gray in the dialogs listed above. |
 
 Still open: Remove Feature time (93 s alone), `EffectiveVersions` (58 to 67 s, the GitVersion runs themselves), C, and the six other context pages.
+
+## Round 3 (2026-11-25, 18:29 to 18:55, build 0.2.1-optimization-followup.49)
+
+Tester: no more reload, everything works.
+
+| Point | Result |
+|---|---|
+| Grid loads | One per context switch. No refresh burst after Create. |
+| Warning | No unordered query warning. |
+| HeadSnapshot | 52 s, with a removal running beside it (129 s for the same overlap in round 2). `SumHeadMs` 67.9 s and `SumCollisionMs` 60.5 s for 40 repositories: 1.5 to 1.7 s per git process. No run with the Worker to itself. |
+| Sync apply | Worse. In the read pool `ResolveGeneratedPackageReferences` (5 to 24 ms) waited 9 to 45 s behind `GetGitChangeStatus` (up to 16 s each) and `InspectWorktree` (up to 26 s each); "CheckAndPersist completed" took 44 to 66 s while a removal ran and 12 to 13 s without one. The refresh with the version-file state came about 2 minutes after the Sync had settled, twice. |
+| Remove Feature | 211 s and 225 s. Both ran beside the Sync that starts when the page lands on the Workspace again; the second also beside the start of a Create. |
+| `RepositoryBranches` unique error | Once during Create (twice in the earlier rounds). It is the lost race `AppDbContext.SaveDroppingStoredBranchRowsAsync` handles: EF Core logs the failed insert as two errors, the save drops the stored row and is repeated. The Feature was created with 40 of 40 repositories. |
+| Watchers of the new Feature | 31 "watcher overflow" warnings and one "TooManyChanges" (27,287 paths, limit 15,000) for `sightline-archive` while its worktree was checked out. |
+| "InspectWorktree failed" | 16 warnings at 18:49:04 were cancelled commands, logged as failures. |
+
+### Built after round 3
+
+`CheckFileVersions` and `ResolveGeneratedPackageReferences` run in the diff pool (4 workers; besides them only `GetGitFileDiff`), where no status scan, worktree inspection or GitVersion run is ahead of them. Test: `WorkerCommandPoolRouterTests`.
+
+### Round 4: what to read
+
+"CheckAndPersist completed" near 1 s also while a removal runs; `queued` of `ResolveGeneratedPackageReferences` in the Worker log near 0; the `trigger=refresh` grid load within seconds of "fan-out settled".
+
+Still open: Remove Feature beside a Sync (over 200 s), `EffectiveVersions`, the watchers that start during a Feature checkout, the cancelled `InspectWorktree` logged as failed, C, and the six other context pages.
