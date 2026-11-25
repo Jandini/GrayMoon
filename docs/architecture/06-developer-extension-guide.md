@@ -440,7 +440,7 @@ Pool selection is by command name in `Services/WorkerCommandPoolRouter.cs` (call
 | Pool | Commands | Option (default) |
 |---|---|---|
 | Read (`ReadOnlyCommands`) | `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`, `GetGitChangesMonitoring`, `ListWorkspaceRootFolders`, `InspectWorkspaceFolder` | `MaxConcurrentReadCommands` (8) |
-| Diff (`DiffCommands`) | `GetGitFileDiff`, `CheckFileVersions`, `ResolveGeneratedPackageReferences` | `MaxConcurrentDiffCommands` (4) |
+| Diff (`DiffCommands`) | `GetGitFileDiff`, `CheckFileVersions`, `ResolveGeneratedPackageReferences`, `HoldWorktreeHookSyncs` | `MaxConcurrentDiffCommands` (4) |
 | AI (`AiCommands`) | `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders` | `MaxConcurrentAiCommands` (4) |
 | Main | everything else, including worktree create/remove and CodeGraph | `MaxConcurrentCommands` (`ProcessorCount * 2`) |
 

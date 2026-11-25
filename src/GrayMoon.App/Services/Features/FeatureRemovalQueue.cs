@@ -18,6 +18,7 @@ namespace GrayMoon.App.Services.Features;
 public sealed class FeatureRemovalQueue(
     IServiceScopeFactory scopeFactory,
     IFeatureFolderCleanupService folderCleanup,
+    IWorkspaceCheckoutRefresh checkoutRefresh,
     ILogger<FeatureRemovalQueue> logger,
     TimeProvider? timeProvider = null)
     : BackgroundService, IFeatureRemovalQueue
@@ -25,7 +26,8 @@ public sealed class FeatureRemovalQueue(
     private static readonly TimeSpan ShutdownMarkTimeout = TimeSpan.FromSeconds(5);
 
     private readonly Channel<QueuedRemoval> _channel = Channel.CreateUnbounded<QueuedRemoval>();
-    private readonly ConcurrentDictionary<int, byte> _pending = new();
+    // Feature context id -> its Workspace id, for every removal that is queued or running.
+    private readonly ConcurrentDictionary<int, int> _pending = new();
 
     public event Action<FeatureRemovalCompleted>? Completed;
 
@@ -46,7 +48,7 @@ public sealed class FeatureRemovalQueue(
         if (info.IsSpecialWorkspace)
             throw new InvalidOperationException("Cannot remove the special Workspace context.");
 
-        if (!_pending.TryAdd(featureContextId.Value, 0))
+        if (!_pending.TryAdd(featureContextId.Value, info.WorkspaceId))
             return false;
 
         var queued = new QueuedRemoval(info.WorkspaceId, featureContextId, info.FeatureName ?? "", options);
@@ -203,12 +205,38 @@ public sealed class FeatureRemovalQueue(
         }
 
         _pending.TryRemove(removal.FeatureContextId.Value, out _);
+        await StartWorkspaceRefreshAsync(removal);
 
         // A folder the Worker had to leave behind (something still has it open) is retried every 30 minutes until it is gone.
         if (result.Success && !string.IsNullOrEmpty(result.RemoveFeaturePendingDeletionFolder))
             folderCleanup.ArmRetry(removal.WorkspaceId);
 
         Announce(removal, result);
+    }
+
+    /// <summary>
+    /// Starts the Workspace status refresh once no other removal of the same Workspace is queued or running, whether
+    /// this one succeeded or not: branches and worktrees may have changed either way. Not waited for. A failure to
+    /// start it is logged and does not change the outcome of the removal.
+    /// </summary>
+    private async Task StartWorkspaceRefreshAsync(QueuedRemoval removal)
+    {
+        if (_pending.Values.Contains(removal.WorkspaceId))
+            return;
+
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+            var specialId = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(removal.WorkspaceId);
+            checkoutRefresh.Start(removal.WorkspaceId, specialId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex, "Workspace status refresh could not be started after the Feature removal. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                removal.WorkspaceId, removal.FeatureName);
+        }
     }
 
     private void Announce(QueuedRemoval removal, OperationResult result)

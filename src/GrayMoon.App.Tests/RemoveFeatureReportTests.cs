@@ -626,9 +626,12 @@ public sealed class RemoveFeatureReportTests
             ],
         };
 
-        // By the time the queued removal runs, both worktrees are dirty.
+        // By the time the queued removal runs, both worktrees are dirty. Git refuses the one removed without force.
+        const string refusal = "fatal: 'graymoon-web' contains modified or untracked files, use --force to delete it";
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, DirtyInspectWorktree());
-        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, args => GetArg(args, "force") is true
+            ? new WorkerCommandResponse(true, new { success = true }, null)
+            : new WorkerCommandResponse(false, new { success = false, errorMessage = refusal, failureKind = "UncommittedChanges" }, refusal));
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
@@ -646,10 +649,13 @@ public sealed class RemoveFeatureReportTests
         Assert.Contains("graymoon-web", result.Error);
         Assert.Contains("changed since the check, run Remove again", result.Error);
 
-        // Only the repository the user saw as dirty reached the Worker, and only that one with force.
-        var remove = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
-        Assert.EndsWith("graymoon-api", GetWorktreePath(remove.Args), StringComparison.Ordinal);
-        Assert.Equal(true, GetArg(remove.Args, "force"));
+        // Only the repository the user saw as dirty was removed with force; the other was left to git, which refused.
+        var removes = ctx.WorkerBridge.Calls.Where(c => c.Command == WorkerHubMethods.RemoveGitWorktree).ToList();
+        Assert.Equal(2, removes.Count);
+        var forced = Assert.Single(removes, c => GetArg(c.Args, "force") is true);
+        Assert.EndsWith("graymoon-api", GetWorktreePath(forced.Args), StringComparison.Ordinal);
+        // The removal asks for no inspection of its own: that was about ten git processes per repository.
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectWorktree);
 
         await using var read = ctx.CreateScope();
         var db = read.ServiceProvider.GetRequiredService<AppDbContext>();

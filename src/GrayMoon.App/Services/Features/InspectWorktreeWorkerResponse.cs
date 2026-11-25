@@ -30,6 +30,24 @@ internal sealed class InspectWorktreeWorkerResponse
     [JsonPropertyName("isDirty")]
     public bool? IsDirty { get; set; }
 
+    /// <summary>Files with staged changes; null when the status could not be read.</summary>
+    [JsonPropertyName("stagedCount")]
+    public int? StagedCount { get; set; }
+
+    /// <summary>Tracked files changed in the working tree; null when the status could not be read.</summary>
+    [JsonPropertyName("unstagedCount")]
+    public int? UnstagedCount { get; set; }
+
+    [JsonPropertyName("untrackedCount")]
+    public int? UntrackedCount { get; set; }
+
+    [JsonPropertyName("conflictCount")]
+    public int? ConflictCount { get; set; }
+
+    /// <summary>True while a merge, rebase or cherry-pick is unfinished in the worktree; null when it could not be read.</summary>
+    [JsonPropertyName("hasOperationInProgress")]
+    public bool? HasOperationInProgress { get; set; }
+
     /// <summary>True when the current branch has a configured upstream. Null means unknown (older Worker, or not reported).</summary>
     [JsonPropertyName("hasUpstream")]
     public bool? HasUpstream { get; set; }

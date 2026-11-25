@@ -201,6 +201,7 @@ builder.Services.AddSingleton<ICommandHandler<EnsureGitChangesWatchersRequest, E
         builder.Services.AddSingleton<ICommandHandler<InspectWorktreeRequest, InspectWorktreeResponse>, InspectWorktreeCommand>();
         builder.Services.AddSingleton<ICommandHandler<CleanupFeatureFolderRequest, CleanupFeatureFolderResponse>, CleanupFeatureFolderCommand>();
         builder.Services.AddSingleton<ICommandHandler<SweepPendingFeatureFoldersRequest, SweepPendingFeatureFoldersResponse>, SweepPendingFeatureFoldersCommand>();
+        builder.Services.AddSingleton<ICommandHandler<HoldWorktreeHookSyncsRequest, HoldWorktreeHookSyncsResponse>, HoldWorktreeHookSyncsCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtDefaultTipRequest, GetGitVersionAtDefaultTipResponse>, GetGitVersionAtDefaultTipCommand>();
         builder.Services.AddSingleton<ICommandHandler<GetGitVersionAtBranchPointRequest, GetGitVersionAtBranchPointResponse>, GetGitVersionAtBranchPointCommand>();
         builder.Services.AddSingleton<ICommandHandler<AttachWorkspaceRepositoryRequest, AttachWorkspaceRepositoryResponse>, AttachWorkspaceRepositoryCommand>();

@@ -38,10 +38,20 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         bool? hasUpstream = true,
         int? aheadOfUpstream = 0,
         int? aheadOfDefault = 0,
-        string? branch = "feat-refresh") => new
+        string? branch = "feat-refresh",
+        int? stagedCount = 0,
+        int? unstagedCount = 0,
+        int? untrackedCount = 0,
+        int? conflictCount = 0,
+        bool? hasOperationInProgress = false) => new
     {
         exists,
         isDirty,
+        stagedCount,
+        unstagedCount,
+        untrackedCount,
+        conflictCount,
+        hasOperationInProgress,
         hasUpstream,
         aheadOfUpstream,
         aheadOfDefault,
@@ -69,77 +79,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         tags = Array.Empty<string>(),
         projects = Array.Empty<object>(),
     };
-
-    private static object CleanGitChangeStatus(string branch = "feat-refresh") => new
-    {
-        success = true,
-        snapshot = new
-        {
-            version = 1L,
-            branchName = branch,
-            headCommit = "abc123",
-            changes = Array.Empty<object>(),
-            scannedAt = DateTimeOffset.UtcNow,
-        },
-    };
-
-    private static object DirtyGitChangeStatus(
-        bool uncommitted = false,
-        bool staged = false,
-        bool conflicted = false,
-        string branch = "feat-refresh")
-    {
-        var changes = new List<object>();
-        if (uncommitted)
-        {
-            changes.Add(new
-            {
-                path = "dirty.txt",
-                indexChange = (int)GitChangeKind.None,
-                worktreeChange = (int)GitChangeKind.Modified,
-                isTracked = true,
-                isConflicted = false,
-            });
-        }
-
-        if (staged)
-        {
-            changes.Add(new
-            {
-                path = "staged.txt",
-                indexChange = (int)GitChangeKind.Modified,
-                worktreeChange = (int)GitChangeKind.None,
-                isTracked = true,
-                isConflicted = false,
-            });
-        }
-
-        if (conflicted)
-        {
-            changes.Add(new
-            {
-                path = "conflict.txt",
-                indexChange = (int)GitChangeKind.Unmerged,
-                worktreeChange = (int)GitChangeKind.Unmerged,
-                isTracked = true,
-                isConflicted = true,
-            });
-        }
-
-        return new
-        {
-            success = true,
-            snapshot = new
-            {
-                version = 1L,
-                branchName = branch,
-                headCommit = "abc123",
-                isMerging = conflicted,
-                changes,
-                scannedAt = DateTimeOffset.UtcNow,
-            },
-        };
-    }
 
     private static void AssertNoWorkspaceMutationCommands(FakeWorkerBridge bridge)
     {
@@ -502,7 +441,10 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     {
         // F
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        await AssertAnalyzeNotAutomaticallySafeAsync(ctx, DirtyGitChangeStatus(uncommitted: true));
+        var plan = await AssertAnalyzeNotAutomaticallySafeAsync(ctx, CleanInspectWorktree(isDirty: true, unstagedCount: 1));
+        Assert.True(plan.HasUncommittedChanges);
+        Assert.False(plan.HasStagedChanges);
+        Assert.False(plan.HasConflicts);
     }
 
     [Fact]
@@ -510,7 +452,10 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     {
         // G
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        await AssertAnalyzeNotAutomaticallySafeAsync(ctx, DirtyGitChangeStatus(staged: true));
+        var plan = await AssertAnalyzeNotAutomaticallySafeAsync(ctx, CleanInspectWorktree(isDirty: true, stagedCount: 1));
+        Assert.False(plan.HasUncommittedChanges);
+        Assert.True(plan.HasStagedChanges);
+        Assert.False(plan.HasConflicts);
     }
 
     [Fact]
@@ -518,7 +463,37 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     {
         // H
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        await AssertAnalyzeNotAutomaticallySafeAsync(ctx, DirtyGitChangeStatus(conflicted: true));
+        var plan = await AssertAnalyzeNotAutomaticallySafeAsync(ctx, CleanInspectWorktree(isDirty: true, conflictCount: 1));
+        Assert.True(plan.HasConflicts);
+    }
+
+    [Fact]
+    public async Task Analyze_unfinished_rebase_in_a_clean_worktree_is_not_automatically_safe()
+    {
+        // A rebase can be stopped with nothing changed in the working tree; removing the worktree would drop it.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var plan = await AssertAnalyzeNotAutomaticallySafeAsync(ctx, CleanInspectWorktree(hasOperationInProgress: true));
+        Assert.True(plan.HasConflicts);
+        Assert.False(plan.HasUncommittedChanges);
+    }
+
+    [Fact]
+    public async Task Analyze_reads_each_worktree_with_one_Worker_command()
+    {
+        // The analysis asked for GetGitChangeStatus besides InspectWorktree: git status twice per repository, on a
+        // machine where a git process costs over a second (logs of 2026-11-25).
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
+        var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+
+        await using var scope = ctx.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+
+        Assert.True(plan.IsAutomaticallySafe);
+        Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.InspectWorktree);
+        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "GetGitChangeStatus");
     }
 
     [Fact]
@@ -528,8 +503,7 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", data: null, success: false, error: "status failed");
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(isDirty: null));
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -545,13 +519,12 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     [Fact]
     public async Task Remove_with_empty_options_succeeds_when_not_auto_safe_only_because_live_status_failed()
     {
-        // GetGitChangeStatus failed: not automatically safe, but dirty flags stay false so the dialog
-        // shows no discard checkbox and enables Remove. The server must not demand authorization.
+        // The inspection did not say whether the worktree is dirty: not automatically safe, but the dirty flags stay
+        // false so the dialog shows no discard checkbox and enables Remove. The server must not demand authorization.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", data: null, success: false, error: "status failed");
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(isDirty: null));
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
         ctx.WorkerBridge.Respond("SyncRepository", SyncResponse());
@@ -576,7 +549,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -651,8 +623,7 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var worktreePath = @"Z:\nope\does-not-exist\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(exists: true, isDirty: true));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", DirtyGitChangeStatus(uncommitted: true));
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(exists: true, isDirty: true, unstagedCount: 1));
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -702,7 +673,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         }
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
         ctx.WorkerBridge.Respond(
             WorkerHubMethods.RemoveGitWorktree,
             data: null,
@@ -751,7 +721,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         }
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var read = ctx.CreateScope();
         var ops = read.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -793,7 +762,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         ctx.WorkerBridge.Respond(
             WorkerHubMethods.InspectWorktree,
             CleanInspectWorktree(hasUpstream: false, aheadOfUpstream: null, aheadOfDefault: 0));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var read = ctx.CreateScope();
         var ops = read.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -819,7 +787,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var featureContextId = await SeedFeatureWithWorktreeNoPrAsync(ctx, worktreePath);
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: 2, aheadOfDefault: 2));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -843,7 +810,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: null));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -867,7 +833,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new { exists = true, isDirty = false });
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -898,7 +863,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         }
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -925,7 +889,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         }
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
         ctx.WorkerBridge.Respond("SyncRepository", SyncResponse());
@@ -952,7 +915,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: null));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
         ctx.WorkerBridge.Respond("SyncRepository", SyncResponse());
@@ -1012,7 +974,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         }
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
         ctx.WorkerBridge.Respond("SyncRepository", SyncResponse());
@@ -1036,8 +997,7 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
 
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(isDirty: true));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", DirtyGitChangeStatus(uncommitted: true));
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(isDirty: true, unstagedCount: 1));
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1056,7 +1016,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var featureContextId = await SeedFeatureWithWorktreeNoPrAsync(ctx, worktreePath);
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: 2, aheadOfDefault: 2));
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1154,7 +1113,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             featureBranchHasUpstream = false,
             featureBranchAheadOfUpstream = (int?)null,
         });
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1191,7 +1149,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             featureBranchHasUpstream = true,
             featureBranchAheadOfUpstream = 0,
         });
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1221,7 +1178,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             aheadOfUpstream = 0,
             aheadOfDefault = 0,
         });
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1245,7 +1201,6 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", CleanGitChangeStatus());
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1280,12 +1235,11 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         return featureContextId;
     }
 
-    private static async Task AssertAnalyzeNotAutomaticallySafeAsync(SyncStateTestContext ctx, object statusResponse)
+    private static async Task<RemoveFeatureRepositoryPlan> AssertAnalyzeNotAutomaticallySafeAsync(SyncStateTestContext ctx, object inspectResponse)
     {
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
-        ctx.WorkerBridge.Respond("GetGitChangeStatus", statusResponse);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, inspectResponse);
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1296,6 +1250,7 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
         Assert.False(plan.IsAutomaticallySafe);
         var repo = Assert.Single(plan.Repositories);
         Assert.True(repo.LiveStatusEstablished);
+        return repo;
     }
 
     private static async Task<WorkspaceFeatureContextId> SeedMergedFeatureWithWorktreeAsync(

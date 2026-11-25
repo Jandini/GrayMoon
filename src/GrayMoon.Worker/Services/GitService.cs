@@ -848,14 +848,24 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         if (string.IsNullOrWhiteSpace(localName))
             return (false, "Invalid branch name");
 
-        if (!await reader.RefExistsAsync(repoPath, $"refs/heads/{localName}", ct))
+        // One process says whether the branch exists and whether it is the one checked out here: "%(HEAD)" is "*"
+        // for the current branch. They were two processes, for every repository of a removed Feature.
+        var localRef = $"refs/heads/{localName}";
+        var (exitRef, stdoutRef, _) = await runner.RunAsync(
+            "git", ["for-each-ref", "--format=%(HEAD)%(refname)", "--", localRef], repoPath, null, ct, GitLockIntent.Read);
+        // The pattern also lists branches below this name ("team" lists "team/login"), so the line must name this ref.
+        var refLine = exitRef != 0
+            ? null
+            : (stdoutRef ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.TrimEnd('\r'))
+                .FirstOrDefault(l => l.Length == localRef.Length + 1 && l.EndsWith(localRef, StringComparison.Ordinal));
+        if (refLine is null)
         {
             logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", localName, repoPath);
             return (false, "Branch does not exist.");
         }
 
-        var (exitCurrent, stdoutCurrent, _) = await runner.RunAsync("git", "branch --show-current", repoPath, ct);
-        if (exitCurrent == 0 && (stdoutCurrent ?? "").Trim().Equals(localName, StringComparison.Ordinal))
+        if (refLine[0] == '*')
         {
             logger.LogWarning("Cannot delete current branch {Branch} in {RepoPath}", localName, repoPath);
             return (false, "Cannot delete the current branch. Check out another branch first.");

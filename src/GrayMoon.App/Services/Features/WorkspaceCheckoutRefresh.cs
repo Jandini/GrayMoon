@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace GrayMoon.App.Services.Features;
 
 /// <summary>
-/// Refreshes the special Workspace checkout. Independent of Feature removal: background removal
-/// must not start it, wait for it, or run it when the Feature is gone.
+/// Refreshes the special Workspace checkout. The Feature removal queue starts it when the last queued removal of
+/// the Workspace has ended and never waits for it. It does not run beside a removal: a Sync of every Workspace
+/// repository and the removal of every worktree compete for git processes, and on a machine where one costs over a
+/// second the removal took 160 to 225 s beside the Sync against 93 s alone (logs of 2026-11-25).
 /// </summary>
 public interface IWorkspaceCheckoutRefresh
 {

@@ -39,6 +39,7 @@ public sealed class InspectWorktreeCommand(IGitWorktreeService worktreeService)
             FeatureBranchHasUpstream = result.FeatureBranchHasUpstream,
             FeatureBranchAheadOfUpstream = result.FeatureBranchAheadOfUpstream,
             HeadOnRemote = result.HeadOnRemote,
+            HasOperationInProgress = result.HasOperationInProgress,
         };
     }
 }

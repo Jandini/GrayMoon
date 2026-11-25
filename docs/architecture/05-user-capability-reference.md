@@ -1560,7 +1560,7 @@ Continue removal   when a removal stopped part-way (IsRemoveIncomplete); replace
 
 ### Remove Feature
 
-Opening the dialog analyzes the Feature live (`AnalyzeRemoveFeatureAsync`): per repository a Worker `InspectWorktree` probe and status check, plus one live PR refresh. The Feature is classified completed, abandoned or active, with per-repository status. The dialog shows:
+Opening the dialog analyzes the Feature live (`AnalyzeRemoveFeatureAsync`): per repository one Worker `InspectWorktree` probe, plus one live PR refresh. The probe reads HEAD, the branch, its upstream with the ahead and behind counts and the changes from one `git status --porcelain=v2 --branch`, reuses those answers for the Feature branch when the worktree is on it, and reports an unfinished merge, rebase or cherry-pick (`hasOperationInProgress`, shown as a conflict). The Feature is classified completed, abandoned or active, with per-repository status. The dialog shows:
 
 ```text
 Delete local Feature branches       checkbox, on by default when applicable
