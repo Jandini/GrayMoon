@@ -25,7 +25,7 @@
                     <div class="form-check">
                         <input id="updateDepsIncludeDeps"
                                type="checkbox"
-                               class="form-check-input"
+                               class="form-check-input form-check-input-gray"
                                style="@(!_includeDepsInMessage ? "opacity: 0.4;" : "")"
                                @bind="_includeDepsInMessage"
                                disabled="@IsBusy" />
@@ -36,7 +36,7 @@
                         <div class="form-check mt-2">
                             <input id="updateDepsRestorePackages"
                                    type="checkbox"
-                                   class="form-check-input"
+                                   class="form-check-input form-check-input-gray"
                                    style="@(!_restorePackages ? "opacity: 0.4;" : "")"
                                    @bind="_restorePackages"
                                    disabled="@IsBusy" />

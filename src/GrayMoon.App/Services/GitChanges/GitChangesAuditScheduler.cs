@@ -17,6 +17,9 @@ public enum GitChangesAuditReason
 
     /// <summary>A workspace became active after nothing was looking at it.</summary>
     Activation,
+
+    /// <summary>Create Feature finished its worktrees; the context was paused until then, so nothing watched it.</summary>
+    FeatureCreated,
 }
 
 /// <summary>Asks for an authoritative status scan of one workspace context.</summary>
@@ -279,7 +282,7 @@ public sealed class GitChangesAuditScheduler(
 
         if (monitoringPause.IsPaused(contextId.Value))
         {
-            logger.LogDebug("[GCDiag] audit skipped, context paused for removal: workspace={WorkspaceId} context={ContextId}", workspaceId, contextId.Value);
+            logger.LogDebug("[GCDiag] audit skipped, context paused: workspace={WorkspaceId} context={ContextId}", workspaceId, contextId.Value);
             return;
         }
 

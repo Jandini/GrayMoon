@@ -52,6 +52,11 @@ public sealed class CancelCommandDispatchTests
         try
         {
             var connectionId = await state.Connected.Task.WaitAsync(Wait);
+            // The hub sees the connection before the client is Connected: the SignalR client starts its receive loop
+            // first and changes its state after. A request sent in between is handled while the Worker is still
+            // "Connecting", and the Worker drops a response it cannot send (failed on CI, 2026-11-25). The Worker
+            // reports its version only after its start returned, so from then on it can answer.
+            await state.VersionReported.Task.WaitAsync(Wait);
             var clients = app.Services.GetRequiredService<IHubContext<FakeWorkerHub>>().Clients.Client(connectionId);
 
             // The request that cannot be queued, then its cancel: the second only arrives if the first returned.
@@ -88,6 +93,8 @@ public sealed class CancelCommandDispatchTests
     {
         public TaskCompletionSource<string> Connected { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource VersionReported { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public TaskCompletionSource<(string RequestId, WorkerCommandResponse Response)> Responses { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
@@ -99,7 +106,11 @@ public sealed class CancelCommandDispatchTests
             return Task.CompletedTask;
         }
 
-        public Task ReportSemVer(string semVer) => Task.CompletedTask;
+        public Task ReportSemVer(string semVer)
+        {
+            state.VersionReported.TrySetResult();
+            return Task.CompletedTask;
+        }
 
         public Task ResponseCommand(string requestId, WorkerCommandResponse response)
         {

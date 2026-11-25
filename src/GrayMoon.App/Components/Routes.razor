@@ -2,10 +2,11 @@
 
 @* The router is static (pages are interactive on their own), so this runs once per navigation on the server.
    PageQueryRouteData puts a page's [PageQuery] values next to its route values: both then reach the page in
-   one parameter update. See PageQueryAttribute. *@
+   one parameter update. See PageQueryAttribute. PageRouteView keys a page marked [KeepsInstanceOnQueryChange],
+   so a change of ?context= updates that page instead of replacing it. *@
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="PageQueryRouteData.WithQueryParameters(routeData, Navigation.Uri)" DefaultLayout="typeof(Layout.MainLayout)" />
+        <PageRouteView RouteData="PageQueryRouteData.WithQueryParameters(routeData, Navigation.Uri)" DefaultLayout="typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>

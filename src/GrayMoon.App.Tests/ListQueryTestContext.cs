@@ -116,6 +116,13 @@ public sealed class ListQueryTestContext : IAsyncDisposable
         return (ctx, workspaceId);
     }
 
+    /// <summary>A link-list query over the same database that fails on EF's "First without OrderBy" warning.</summary>
+    public WorkspaceRepositoryLinkListQueryService CreateWorkspaceRepoLinkQueryFailingOnUnorderedFirst() =>
+        new(new TestDbContextFactory(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .ConfigureWarnings(w => w.Throw(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.FirstWithoutOrderByAndFilterWarning))
+            .Options));
+
     /// <summary>A link-list query over the same database whose contexts carry <paramref name="interceptors"/> (for example to record the SQL a call issues).</summary>
     public WorkspaceRepositoryLinkListQueryService CreateWorkspaceRepoLinkQuery(params IInterceptor[] interceptors) =>
         new(new TestDbContextFactory(new DbContextOptionsBuilder<AppDbContext>()

@@ -1,9 +1,10 @@
 namespace GrayMoon.App.Services.GitChanges;
 
 /// <summary>
-/// Tracks which Feature contexts the periodic Git Changes monitoring sweep must skip while Remove
+/// Tracks which Feature contexts the periodic Git Changes monitoring sweep must skip: while Remove
 /// Feature is deleting their worktrees, so the sweep never asks the Worker to scan a path that is
-/// being deleted at the same time (D2). Reference-counted per context id, never per workspace: the
+/// being deleted at the same time (D2), and while Create Feature is checking their worktrees out, so
+/// no watcher or status scan runs on a half-written tree. Reference-counted per context id, never per workspace: the
 /// special Workspace context is never paused by any caller, so its monitoring keeps running while a
 /// sibling Feature is removed.
 /// </summary>

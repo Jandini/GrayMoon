@@ -4,6 +4,8 @@ Status: partly built. Seven defects were found in the logs of one manual test (C
 
 Logs: `GrayMoon.Logs/20261125/` in the workspace root (three cumulative snapshots of `graymoon-app-20261124.log` and `graymoon-worker-20261124.log`; line numbers below are the same in every snapshot that has the line).
 
+Follow-up: `create-remove-feature-log-follow-up.md` reads the second run (2026-11-25). A (option 2) and B were built from it on 2026-11-25 and wait for confirmation in the next run; C is still to validate. The "Open" section below is kept as written on 2026-11-24.
+
 ## Built
 
 | # | Defect | Fix | Test (fails on the old code) |

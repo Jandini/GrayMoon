@@ -109,7 +109,16 @@ public sealed class BatchLookupTests
     }
 
     [Fact]
-    public async Task Scanner_batch_scan_resolves_paths_once_and_reaches_but_never_exceeds_the_limit()
+    public Task Scanner_batch_scan_resolves_paths_once_and_reaches_but_never_exceeds_the_limit()
+        => ScanSixRepositoriesAsync(workerUnavailableReason: null);
+
+    // A Worker of another version refuses every command. The scan asked it once per repository and logged a
+    // warning for each answer: 40 warnings in 75 ms while the Worker was updating (App log of 2026-11-25).
+    [Fact]
+    public Task Scanner_asks_the_Worker_nothing_while_it_cannot_take_commands()
+        => ScanSixRepositoriesAsync(workerUnavailableReason: "The GrayMoon Worker version does not match. Update the Worker.");
+
+    private static async Task ScanSixRepositoriesAsync(string? workerUnavailableReason)
     {
         const int limit = 3;
         var connectionString = $"Data Source=file:gmbatch{Guid.NewGuid():N}?mode=memory&cache=shared";
@@ -156,7 +165,7 @@ public sealed class BatchLookupTests
         var clientProbe = new BatchLookupStatusProbe(TimeSpan.FromMilliseconds(40));
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IWorkerBridge>(new BatchLookupConnectedWorker());
+        services.AddSingleton<IWorkerBridge>(new BatchLookupConnectedWorker { UnavailableReason = workerUnavailableReason });
         services.AddSingleton<IWorkspaceContextPathResolver>(resolverProbe);
         services.AddSingleton<IGitChangesWorkerClient>(clientProbe);
         services.AddSingleton<WorkspaceGitChangesWriteQueue>(new BatchLookupWriteQueue());
@@ -169,6 +178,12 @@ public sealed class BatchLookupTests
 
         var requested = repositoryIds.Take(6).ToList();
         await scanner.ScanRepositoriesAsync(workspaceId, new WorkspaceFeatureContextId(1), requested, CancellationToken.None);
+
+        if (workerUnavailableReason is not null)
+        {
+            Assert.Empty(clientProbe.ScannedRepositoryIds);
+            return;
+        }
 
         Assert.Equal(requested.OrderBy(i => i), clientProbe.ScannedRepositoryIds.OrderBy(i => i));
         Assert.Equal(limit, clientProbe.MaxConcurrent);
@@ -266,6 +281,10 @@ public sealed class BatchLookupTests
     private sealed class BatchLookupConnectedWorker : IWorkerBridge
     {
         public bool IsWorkerConnected => true;
+
+        public string? UnavailableReason { get; init; }
+
+        public string? GetUnavailableReason() => UnavailableReason;
 
         public Task<WorkerCommandResponse> SendCommandAsync(string command, object args, CancellationToken cancellationToken = default)
             => Task.FromResult(new WorkerCommandResponse(false, null, "unused"));

@@ -18,7 +18,8 @@ public class WorkerOptions
     public int MaxConcurrentReadCommands { get; set; } = 8;
 
     /// <summary>
-    /// Worker count for the dedicated diff command pool (GetGitFileDiff). Kept separate from both
+    /// Worker count for the dedicated diff command pool (GetGitFileDiff, and the short file reads CheckFileVersions
+    /// and ResolveGeneratedPackageReferences). Kept separate from both
     /// <see cref="MaxConcurrentCommands"/> and <see cref="MaxConcurrentReadCommands"/> so opening a diff
     /// never queues behind a workspace status rescan (which can fan out many GetGitChangeStatus calls) or
     /// any other write/read command.

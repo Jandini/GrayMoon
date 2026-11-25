@@ -200,7 +200,7 @@ dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj
 
 GrayMoon uses interactive Blazor Server components.
 
-The router (`Components/Routes.razor`) is static; each page declares its own interactive render mode and is a root component of the circuit. A navigation is a server render of the new page followed by one parameter update of the page's root component. A page's query-string values travel in that same update: a page property marked `[Parameter, PageQuery("name")]` is read from the URL by `PageQueryRouteData` during the server render and passed next to the route values. `[SupplyParameterFromQuery]` is not used on a page, because it is pushed from the circuit's location change at the start of the navigation together with the previous route values, so a page would see a Workspace id and a `?context=` that never belonged together (`PageQueryRouteDataTests` fails on it).
+The router (`Components/Routes.razor`) is static; each page declares its own interactive render mode and is a root component of the circuit. A navigation is a server render of the new page followed by one parameter update of the page's root component. A page's query-string values travel in that same update: a page property marked `[Parameter, PageQuery("name")]` is read from the URL by `PageQueryRouteData` during the server render and passed next to the route values. `[SupplyParameterFromQuery]` is not used on a page, because it is pushed from the circuit's location change at the start of the navigation together with the previous route values, so a page would see a Workspace id and a `?context=` that never belonged together (`PageQueryRouteDataTests` fails on it). Blazor replaces an interactive root component that has no key whenever its parameters change, so a change of `?context=` normally disposes the page and creates a new one. A page marked `[KeepsInstanceOnQueryChange]` (the Repositories page) is rendered by `PageRouteView` with a key made of its type and its route values without the query-bound ones: a query change then sets the parameters on the existing instance, and another Workspace still creates a new one (`PageRouteViewTests`). Mark a page only when it applies a changed query value in `OnParametersSet(Async)`.
 
 Workspace pages are split into Razor markup and partial code-behind files to keep large workflows manageable.
 
@@ -709,7 +709,7 @@ Git diff pool
 Git AI pool
 ```
 
-This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees` and `InspectWorktree`; the AI commands run in their own AI pool. The `RequestCommand` handler never waits for room in a full queue, so a `CancelCommand` is always delivered at once. Pool sizes, routing and cancellation are in 04.
+This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees`, `InspectWorktree`; the diff pool also takes the file reads of the version-file check (`CheckFileVersions`, `ResolveGeneratedPackageReferences`); the AI commands run in their own AI pool. The `RequestCommand` handler never waits for room in a full queue, so a `CancelCommand` is always delivered at once. Pool sizes, routing and cancellation are in 04.
 
 Core hosted services include:
 

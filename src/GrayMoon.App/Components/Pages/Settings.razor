@@ -188,7 +188,7 @@
                             <div class="row g-3">
                                 <div class="col-md-6">
                                     <div class="form-check settings-terminal-card__radio settings-terminal-card__radio--green p-3 rounded-3 h-100">
-                                        <input class="form-check-input" type="radio" name="terminalColorScheme" id="terminalScheme_Green"
+                                        <input class="form-check-input form-check-input-gray" type="radio" name="terminalColorScheme" id="terminalScheme_Green"
                                                checked="@(terminalColorScheme == TerminalColorScheme.Green)"
                                                @onchange="@(() => OnTerminalColorSchemeChanged(TerminalColorScheme.Green))" />
                                         <label class="form-check-label w-100" for="terminalScheme_Green">
@@ -200,7 +200,7 @@
                                 </div>
                                 <div class="col-md-6">
                                     <div class="form-check settings-terminal-card__radio settings-terminal-card__radio--yellow p-3 rounded-3 h-100">
-                                        <input class="form-check-input" type="radio" name="terminalColorScheme" id="terminalScheme_Yellow"
+                                        <input class="form-check-input form-check-input-gray" type="radio" name="terminalColorScheme" id="terminalScheme_Yellow"
                                                checked="@(terminalColorScheme == TerminalColorScheme.Yellow)"
                                                @onchange="@(() => OnTerminalColorSchemeChanged(TerminalColorScheme.Yellow))" />
                                         <label class="form-check-label w-100" for="terminalScheme_Yellow">

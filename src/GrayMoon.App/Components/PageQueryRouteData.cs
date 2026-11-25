@@ -41,6 +41,28 @@ public static class PageQueryRouteData
         return new RouteData(routeData.PageType, values);
     }
 
+    /// <summary>
+    /// The key <see cref="PageRouteView"/> renders the page with, or null for a page that is not marked
+    /// <see cref="KeepsInstanceOnQueryChangeAttribute"/>. It holds the page type and the route values but not the
+    /// query-bound ones: a change of <c>?context=</c> keeps the key (and the instance), another Workspace does not.
+    /// </summary>
+    public static string? InstanceKey(RouteData routeData)
+    {
+        ArgumentNullException.ThrowIfNull(routeData);
+
+        if (routeData.PageType.GetCustomAttribute<KeepsInstanceOnQueryChangeAttribute>() is null)
+            return null;
+
+        var queryBound = BindingsByPageType.GetOrAdd(routeData.PageType, ReadBindings)
+            .Select(binding => binding.PropertyName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var routeValues = routeData.RouteValues
+            .Where(pair => !queryBound.Contains(pair.Key))
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => string.Create(CultureInfo.InvariantCulture, $"{pair.Key.ToLowerInvariant()}={pair.Value}"));
+        return $"{routeData.PageType.FullName}|{string.Join('&', routeValues)}";
+    }
+
     private static string QueryOf(string uri)
     {
         var start = uri.IndexOf('?');

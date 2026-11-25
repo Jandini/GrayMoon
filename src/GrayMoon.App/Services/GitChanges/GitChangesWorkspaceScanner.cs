@@ -105,6 +105,16 @@ public sealed class GitChangesWorkspaceScanner(
             return;
         }
 
+        // A Worker that cannot take commands (another version, still updating) refuses each one: one line for the
+        // scan instead of a warning per repository (40 warnings in 75 ms in the App log of 2026-11-25).
+        if (workerBridge.GetUnavailableReason() is { } unavailable)
+        {
+            logger.LogInformation(
+                "[GCDiag] Git Changes scan skipped for workspace {WorkspaceId} context {ContextId}: {Reason}",
+                workspaceId, contextId.Value, unavailable);
+            return;
+        }
+
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var pathResolver = scope.ServiceProvider.GetRequiredService<IWorkspaceContextPathResolver>();
         var workerClient = scope.ServiceProvider.GetRequiredService<IGitChangesWorkerClient>();

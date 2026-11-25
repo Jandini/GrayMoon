@@ -90,7 +90,7 @@ flowchart LR
   In["Incoming commands"] --> Route{"route by name"}
   Route -->|"everything else"| Main["main pool"]
   Route -->|"GetGitChangeStatus, ListGitWorktrees, InspectWorktree"| Read["read pool"]
-  Route -->|"GetGitFileDiff"| Diff["diff pool"]
+  Route -->|"GetGitFileDiff, version-file reads"| Diff["diff pool"]
   Route -->|"CollectGitEvidence, GenerateAiText, GetAiProviders"| Ai["AI pool"]
   Main -.-> Cap["bounded concurrency"]
   Read -.-> Cap
@@ -98,7 +98,7 @@ flowchart LR
   Ai -.-> Cap
 ```
 
-Routing is by command name in `WorkerCommandPoolRouter` (called from `SignalRConnectionHostedService`): `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`; `DiffCommands` = `GetGitFileDiff`; `AiCommands` = `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, `AiJobBackgroundService`, all derived from `JobBackgroundService`).
+Routing is by command name in `WorkerCommandPoolRouter` (called from `SignalRConnectionHostedService`): `ReadOnlyCommands` = `GetGitChangeStatus`, `EnsureGitChangesWatchers`, `ListGitWorktrees`, `InspectWorktree`, `GetGitChangesMonitoring`, `ListWorkspaceRootFolders`, `InspectWorkspaceFolder`; `DiffCommands` = `GetGitFileDiff`, `CheckFileVersions`, `ResolveGeneratedPackageReferences` (the last two only read files and take milliseconds, and the App waits for them each time it applies hook syncs, so they wait neither behind the GitVersion runs of the main pool nor behind the status scans and worktree inspections of the read pool); `AiCommands` = `CollectGitEvidence`, `GenerateAiText`, `GetAiProviders`; everything else goes to the main pool. Each pool is a bounded `Channel<JobEnvelope>` drained by its own hosted service (`MainJobBackgroundService`, `ReadJobBackgroundService`, `DiffJobBackgroundService`, `AiJobBackgroundService`, all derived from `JobBackgroundService`).
 
 Sizes (`WorkerOptions`):
 
@@ -109,7 +109,7 @@ MaxConcurrentDiffCommands   diff pool   default 4
 MaxConcurrentAiCommands     AI pool     default 4
 ```
 
-The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job.
+The main pool also carries Sync, push, restore, worktree create/remove (`CreateGitWorktree`, `RemoveGitWorktree`), Feature folder cleanup, the CodeGraph commands and every hook notify job. Its queue (`TrackedJobQueue`) holds commands and hook notify jobs apart and its workers always take a command first: the App waits for a command, nobody waits for a hook sync. A hook sync that is already running is not interrupted, so a command waits at most for one worker to finish its current job (`TrackedJobQueueTests`).
 
 Intake and cancellation (`CommandRequestIntake`, in `SignalRConnectionHostedService.cs`):
 
@@ -365,14 +365,14 @@ CodeGraph         when Create asked for an index: InitializeCodeGraphAsync (the 
 
 - Worktree paths are built from the persisted `ManagedFeatureStorageRoot` with `WorkerPath.Combine`. Do not call the path resolver inside the intent transaction: it opens a second `AppDbContext` and deadlocks SQLite against this write and against `WorkspaceGitChangesWriteQueue`.
 - Any failure after the intent commit lands in `NeedsRepair`; the failure write uses `CancellationToken.None`, so Abort still persists it.
-- `GetHeadCommits` (Worker) runs with an internal `SemaphoreSlim` of `DefaultMaxConcurrent` = 8 (a constant, not `MaxParallelOperations`).
+- `GetHeadCommits` (Worker) runs with an internal `SemaphoreSlim` of `DefaultMaxConcurrent` = 8 (a constant, not `MaxParallelOperations`). Per repository it starts one git process for HEAD (`IGitRepositoryReader.GetHeadStateAsync`: commit and branch from one `rev-parse`), a second one (`describe`) only when HEAD is detached, and one for the branch collision check. A git process costs over a second on some machines, so the count per repository is what the stage costs.
 - Per worktree (`GitWorktreeService.CreateWorktreeAsync`): `git worktree list --porcelain` pre-check; idempotent success if the path already hosts the expected branch (or is detached at the base SHA) and the worktree is finished; else `WorktreePathConflict` / `BranchOccupied` / `PathExists` (an existing empty folder is allowed); `EnsureWindowsLongPaths`; `git worktree add --no-checkout -b <name> -- <path> <sha>` or `--no-checkout --detach -- <path> <sha>`, never `--force`; then `git checkout --progress --force` in the new worktree writes the files; verify list, `VerifyFailed` if not listed.
 - Worktree checkout and its heartbeat: `git worktree add` writes the files without any output when it is not on a terminal, so it ran silently under the 60 s default tier and was killed for repositories whose checkout takes longer. The add now only registers the worktree, and the separate `checkout --progress` reports `Updating files: n% (x/y)` throughout. `GitProcessRunner` gives `checkout --progress` the clone tier (`CloneTimeoutSeconds`, no total bound by default, and `CloneIdleTimeoutSeconds` = 180 s without any output), and every progress line streamed to the App restarts `WorkerBridge`'s own inactivity window (`CommandTimeoutSeconds` = 240 s) for the `CreateGitWorktree` command, the same way clone progress does.
 - Unfinished worktrees: git writes a worktree's index only when its checkout completes, so a registered worktree with no index (`git rev-parse --git-path index`) was never finished - what a killed add leaves (with a stale `index.lock` and git's "initializing" lock) or an interrupted checkout. A checkout that fails or is cancelled removes its new worktree (`git worktree remove --force`) and the branch the add created (only while it still points at the base commit), and reports `CheckoutFailed`. An unfinished worktree found by the pre-check (an older Create, a Worker that stopped) is removed through `RemoveWorktreeAsync` (exclusive claim, unlock, force) with the same branch rule, then created again; if that removal fails, or the branch has moved, the result is `WorktreeUnfinished` and nothing more is deleted. From the on-disk checks until git returns it holds a Mutating lease on the worktree path: while a removal or a leftover-folder sweep (`FeatureFolderCleaner`) claims that folder or the Feature root above it the create fails with `PathUnderRemoval`, and a claim that starts during the add waits for it, so the sweep's re-check sees the new worktree and refuses to delete.
 - `CreateGitWorktreeCommand` first rewrites the main checkout's hooks (so the new worktree's `post-checkout` is attributed by path), then wraps `git worktree add` in `IWorktreeCreateHookDeferral.BeginCreate(worktreePath)` and `BeginExternalRepositoryMutation(mainPath)`.
 - Hook deferral (`WorktreeCreateHookDeferral`): a `Checkout` notify job for a worktree being created is held (one per path, re-created with `FreshWorktree = true`) and re-enqueued once no create has been active for `QuietPeriod` = 500 ms, so held syncs do not occupy main-pool slots the remaining creates need. A fresh-worktree `CheckoutHookSyncCommand` skips the token lookup and network fetch, projects, commit counts and remote branches, but still runs GitVersion; `SyncCommandHandler` skips PR reconciliation for it.
 - Finalization barrier (`FeatureFinalizationCoordinator`, App singleton): `Arm(contextId)` before the first worktree of Create or Repair, disposed when the Create or Repair core returns, which in Create is after the seed, the lifecycle change, the `EffectiveVersions` stage and the CodeGraph start. A sync notification of a finalizing Feature context is not applied until then (bounded by `MaxBarrierWait` = 15 min, then applied anyway), so the deferred GitVersion lands after the seed and is never overwritten by it. The sync queue sets such notifications aside instead of waiting in its reader ("Hook sync batches"); `SyncCommandHandler.HandleAsync` waits in place. In memory only: a restart drops it and Repair's idempotent seed reconciles. `AcquireProjectionAsync(contextId)` serializes every writer of a context's `WorkspaceProjects` / `ProjectDependencies` (the seed and the project merges), so the unique (context, repository, name) index is never raced.
-- Telemetry (Information): App `Feature Create timing` per stage, `Feature Create repository timing` (`GateWaitMs`, `PathMs`, `WorkerRoundTripMs`, `DbMs`, `TotalMs`); Worker `GetHeadCommits timing`, `CreateGitWorktree timing`, `Git worktree created ... PreListMs LongPathsMs AddMs CheckoutMs VerifyListMs`, `NotifySync completed ... hook=...`. See section 19 for `FeatureOperationLog`.
+- Telemetry (Information): App `Feature Create timing` per stage, `Feature Create repository timing` (`GateWaitMs`, `PathMs`, `WorkerRoundTripMs`, `DbMs`, `TotalMs`); Worker `GetHeadCommits timing` (with `SumHeadMs` and `SumCollisionMs`), `CreateGitWorktree timing`, `Git worktree created ... PreListMs LongPathsMs AddMs CheckoutMs VerifyListMs`, `NotifySync completed ... hook=...`. See section 19 for `FeatureOperationLog`.
 
 Repair (`repair-feature`) re-runs worktree create only for `Pending` / `NeedsRepair` rows, keeps `Ready` rows and re-seeds idempotently. Rollback (`rollback-feature`) refuses dirty repositories, removes Sources first and the root last, non-force. After the rows are deleted it sends `CleanupFeatureFolder` (`onlyIfMarked: false`) for the Feature root, so a folder that still holds non-worktree files (`codegraph.json`, `.codegraph`) is deleted or marked pending deletion and a later Create with the same name is not refused with "folder exists". A cleanup that cannot run does not fail the rollback.
 
@@ -614,7 +614,7 @@ For example, pre-push is intentionally not a general-purpose fetch operation.
 
 The listener queues a job only for a request that passes its checks (JSON content type, 64 KB body cap, a `repositoryPath` GrayMoon manages; 02 section 11). A rejected request gets 400 or 413 and no job; the hook scripts ignore the status, so the Git command is never affected.
 
-Notify jobs (`NotifySyncJob`) run on the Worker main pool. `Checkout` jobs for worktrees being created are deferred (section 5C).
+Notify jobs (`NotifySyncJob`) run on the Worker main pool, after any command that is queued there. `Checkout` jobs for worktrees being created are deferred (section 5C).
 
 The state writer's partial/probed-group semantics are therefore essential.
 
@@ -709,7 +709,7 @@ Worker: `IGitChangesRefreshSuppressor.BeginExternalRepositoryMutation(repoPath)`
 - Closing the last scope schedules exactly one debounced refresh, and only if a watcher event was seen.
 - Not suppressed: manual `RefreshNowAsync`, stage, unstage and commit.
 
-App: `IWorkspaceGitChangesMonitoringPause` makes the keeper and the audit scheduler skip a Feature context while Remove Feature or Roll back deletes its worktrees. Ref-counted per context id; the special Workspace context is never paused.
+App: `IWorkspaceGitChangesMonitoringPause` makes the keeper and the audit scheduler skip a Feature context while Remove Feature or Roll back deletes its worktrees, and while Create Feature checks them out (from the moment the context is stored until the last worktree exists). A watcher that starts during a checkout overflows, and its status scan reads a half-written tree whose result is thrown away. When Create Feature releases the pause it requests one audit (`GitChangesAuditReason.FeatureCreated`), which starts the watchers and reads the state at once instead of at the next keeper tick. Ref-counted per context id; the special Workspace context is never paused.
 
 ---
 
@@ -988,7 +988,7 @@ Worker rules:
 
 ## 21. Known gaps
 
-- No dedicated Worker lane for worktree create/remove: they share the main pool with hook notify jobs. `GetHeadCommits` concurrency is the constant 8, independent of `MaxParallelOperations`.
+- No dedicated Worker lane for worktree create/remove: they share the main pool with hook notify jobs, which are taken after them. `GetHeadCommits` concurrency is the constant 8, independent of `MaxParallelOperations`.
 - Only `SyncRepositoryCommand` uses the LibGit2Sharp snapshot; hook syncs, commit counts, branch refresh and Git Changes status use the CLI. Linked-worktree config reads always go native.
 - `FetchAsync` is always `fetch origin --prune --tags`; there is no narrower fetch policy for Sync.
 - The watcher does not filter ignored build output; it drops only `.git` and nested repositories.

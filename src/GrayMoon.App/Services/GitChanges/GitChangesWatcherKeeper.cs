@@ -228,10 +228,11 @@ public sealed class GitChangesWatcherKeeper(
         await gate.WaitAsync(cancellationToken);
         try
         {
-            // Remove Feature owns a paused context; renewing there would re-create a watcher on a folder being deleted.
+            // Remove Feature or Create Feature owns a paused context; renewing there would re-create a watcher on a
+            // folder being deleted, or start one on worktrees still being checked out.
             if (monitoringPause.IsPaused(contextId.Value))
             {
-                logger.LogDebug("[GCDiag] keeper context skipped (paused for removal): workspace={WorkspaceId} context={ContextId}", workspaceId, contextId.Value);
+                logger.LogDebug("[GCDiag] keeper context skipped (paused): workspace={WorkspaceId} context={ContextId}", workspaceId, contextId.Value);
                 return;
             }
 

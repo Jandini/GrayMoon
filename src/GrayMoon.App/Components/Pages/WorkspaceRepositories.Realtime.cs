@@ -112,6 +112,16 @@ public sealed partial class WorkspaceRepositories
         }
     }
 
+    /// <summary>Drops a grid refresh that is waiting for the debounce or for the end of a job. Dispatcher only.</summary>
+    private void CancelPendingGridRefresh()
+    {
+        _pendingRefreshAfterJob = false;
+        lock (_refreshDebounceLock)
+        {
+            _refreshDebounceCts?.Cancel();
+        }
+    }
+
     private void OnQueueStateChanged(object? sender, EventArgs e) => _ = InvokeAsync(StateHasChanged);
 
     private void OnJobServiceChanged()
@@ -126,8 +136,10 @@ public sealed partial class WorkspaceRepositories
         {
             if (_disposed) return;
             StateHasChanged();
+            // Debounced, so a context switch that follows the job at once (Create Feature selects the new
+            // Feature) cancels it in CancelPendingGridRefresh instead of loading the context being left.
             if (shouldRefreshAfterJob)
-                await RefreshFromSync();
+                await RefreshFromSyncDebouncedAsync();
         });
     }
 

@@ -35,7 +35,11 @@ public partial class AppDbContext
     private async Task<(int Saved, int Dropped)> SaveDroppingStoredBranchRowsAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
         KeepWorkspaceRepositoryWritable();
-        var dropped = 0;
+        // Checked right before the insert: the caller decided "no row yet" from an earlier read, often many
+        // milliseconds ago. Dropping the rows stored since then here means the insert is not sent and fails only
+        // when another writer commits in the moment between this read and the save. Each failed insert is logged
+        // by EF Core as two errors with a stack trace, for a case that is expected (logs of 2026-11-25).
+        var dropped = await DetachAddedBranchRowsAlreadyStoredAsync(cancellationToken);
         for (var attempt = 1; ; attempt++)
         {
             try
