@@ -278,7 +278,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
                 var progress = new Progress<OperationProgress>(p =>
                 {
                     if (p.Completed is int done && p.Total is int total && total > 0)
-                        job.ReportProgress($"Checked {done} of {total}");
+                        job.ReportProgress($"Checked {done} of {total} repositories");
                     else if (!string.IsNullOrWhiteSpace(p.Message))
                         job.ReportProgress(p.Message);
                 });

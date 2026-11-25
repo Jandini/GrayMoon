@@ -56,7 +56,7 @@ public sealed class EffectiveVersionStartCheckTests
 
         // The count is shown before the first GitVersion run returns: without "0 of 1" the overlay kept the caller's
         // label for the whole wait (87 to 112 s at "Verifying published packages..." in the logs of 2026-11-25).
-        Assert.Equal(["Checking versions...", "Checked 0 of 1 repositories...", "Checked 1 of 1 repositories..."], steps.Messages);
+        Assert.Equal(["Checking versions...", "Checked 1 of 1 repositories..."], steps.Messages);
         var lines = terminal.GetSnapshot();
         Assert.Contains(lines, l => l.StreamLabel == EffectiveVersionResolver.TerminalLabel
             && l.Kind == WorkerCommandStreamKind.Stdout

@@ -18,7 +18,10 @@ public static class WorkerCommandPoolRouter
     /// run on the dedicated read pool instead of queuing behind long-running writes.</summary>
     private static readonly HashSet<string> ReadOnlyCommands =
         ["GetGitChangeStatus", "EnsureGitChangesWatchers", WorkerHubMethods.ListGitWorktrees, WorkerHubMethods.InspectWorktree,
-         WorkerHubMethods.GetGitChangesMonitoring, WorkerHubMethods.ListWorkspaceRootFolders, WorkerHubMethods.InspectWorkspaceFolder];
+         WorkerHubMethods.GetGitChangesMonitoring, WorkerHubMethods.ListWorkspaceRootFolders, WorkerHubMethods.InspectWorkspaceFolder,
+         // Both only read files, and the App waits for them each time it applies hook syncs: on the main pool they
+         // waited up to 7.5 s for a GitVersion run of those same hook syncs to end (logs of 2026-11-25, round 2).
+         WorkerHubMethods.CheckFileVersions, WorkerHubMethods.ResolveGeneratedPackageReferences];
 
     /// <summary>Diff commands get their own dedicated pool, separate from <see cref="ReadOnlyCommands"/>,
     /// so opening a diff never queues behind a workspace status rescan (which can fan out many

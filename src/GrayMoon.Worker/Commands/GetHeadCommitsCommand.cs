@@ -7,7 +7,8 @@ using GrayMoon.Worker.Services;
 namespace GrayMoon.Worker.Commands;
 
 /// <summary>
-/// Batch <c>git rev-parse HEAD</c>, <c>git branch --show-current</c> and checked-out tag for the requested repository names under a workspace.
+/// Batch read of HEAD (commit, branch, checked-out tag) for the requested repository names under a workspace: one
+/// git process per repository, two when it is detached.
 /// When <see cref="GetHeadCommitsRequest.CollisionBranchName"/> is set, also reports existing local/remote-tracking refs with that name
 /// for repositories that are not on a tag.
 /// </summary>
@@ -46,8 +47,9 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
         var slowestMs = 0L;
         string? slowestRepo = null;
         // Summed over all repositories, per step, so the log shows what one git call costs on this machine
-        // (2026-11-25: 36 to 60 s for 40 repositories with nothing else running on the Worker).
-        long headMs = 0, branchMs = 0, tagMs = 0, collisionMs = 0;
+        // (2026-11-25: 1.4 s per git process with nothing else running; four processes per repository made this
+        // command 51 s for 40 repositories, which is why HEAD is one read now).
+        long headMs = 0, collisionMs = 0;
         await Task.WhenAll(names.Select(async repoName =>
         {
             await semaphore.WaitAsync(cancellationToken);
@@ -56,22 +58,19 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
             {
                 var repoPath = WorkerRepositoryPaths.Resolve(workspacePath, repoName, request.WorkspaceRepositoryName);
                 var stepStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
-                var sha = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
+                var head = await reader.GetHeadStateAsync(repoPath, cancellationToken);
                 Interlocked.Add(ref headMs, ElapsedMs(ref stepStartedAt));
-                if (!string.IsNullOrWhiteSpace(sha))
-                    commits[repoName] = sha;
+                if (head.Commit != null)
+                    commits[repoName] = head.Commit;
                 else
                     logger.LogWarning(
                         "GetHeadCommits: could not resolve HEAD for repository {RepositoryName} under {WorkspacePath} (missing, unborn, or git failed).",
                         repoName, workspacePath);
 
-                var branch = await reader.GetCurrentBranchNameAsync(repoPath, cancellationToken);
-                Interlocked.Add(ref branchMs, ElapsedMs(ref stepStartedAt));
-                if (!string.IsNullOrWhiteSpace(branch))
-                    branches[repoName] = branch;
+                if (head.Branch != null)
+                    branches[repoName] = head.Branch;
 
-                var tag = await reader.GetCheckedOutTagAsync(repoPath, cancellationToken);
-                Interlocked.Add(ref tagMs, ElapsedMs(ref stepStartedAt));
+                var tag = head.Tag;
                 if (tag != null)
                     tags[repoName] = tag;
 
@@ -101,9 +100,9 @@ public sealed class GetHeadCommitsCommand(IGitRepositoryReader reader, ILogger<G
 
         logger.LogInformation(
             "GetHeadCommits timing. Repositories={Count} MaxConcurrent={MaxConcurrent} TotalMs={TotalMs} SlowestRepository={SlowestRepository} SlowestMs={SlowestMs} "
-            + "SumHeadMs={SumHeadMs} SumBranchMs={SumBranchMs} SumTagMs={SumTagMs} SumCollisionMs={SumCollisionMs}",
+            + "SumHeadMs={SumHeadMs} SumCollisionMs={SumCollisionMs}",
             names.Count, DefaultMaxConcurrent, (long)System.Diagnostics.Stopwatch.GetElapsedTime(totalStartedAt).TotalMilliseconds, slowestRepo, slowestMs,
-            headMs, branchMs, tagMs, collisionMs);
+            headMs, collisionMs);
 
         return new GetHeadCommitsResponse
         {

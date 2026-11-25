@@ -85,6 +85,29 @@ public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitC
         return string.IsNullOrWhiteSpace(sha) ? null : sha;
     }
 
+    public async Task<HeadState> GetHeadStateAsync(string repoPath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
+            return HeadState.None;
+
+        // Prints the commit, then "refs/heads/<branch>" on a branch or "HEAD" when detached. Fails when unborn.
+        var (exitCode, stdout, _) = await RunGitReadAsync("rev-parse HEAD --symbolic-full-name HEAD", repoPath, ct);
+        if (exitCode != 0)
+            return HeadState.None;
+
+        var lines = (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length != 2)
+            return HeadState.None;
+
+        const string headsPrefix = "refs/heads/";
+        if (lines[1].StartsWith(headsPrefix, StringComparison.Ordinal))
+            return new HeadState(lines[0], lines[1][headsPrefix.Length..], null);
+
+        var (descExit, described, _) = await RunGitReadAsync("describe --tags --exact-match", repoPath, ct);
+        var tag = descExit == 0 ? (described ?? "").Trim() : "";
+        return new HeadState(lines[0], null, tag.Length == 0 ? null : tag);
+    }
+
     public async Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))

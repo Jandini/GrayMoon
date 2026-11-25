@@ -100,7 +100,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                             && wr.PullRequest.State == "open"),
                     })
                     .ExpandRepositoryPolicy()
-                    .FirstOrDefaultAsync(cancellationToken);
+                    .SingleOrDefaultAsync(cancellationToken);
 
                 return new WorkspaceRepositoryHeaderStateDto(
                     basic?.Total ?? 0,
@@ -144,7 +144,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                         && wr.PullRequest.State == "open"),
                 })
                 .ExpandRepositoryPolicy()
-                .FirstOrDefaultAsync(cancellationToken);
+                .SingleOrDefaultAsync(cancellationToken);
 
             return new WorkspaceRepositoryHeaderStateDto(
                 legacy?.Total ?? 0,
@@ -206,7 +206,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     ParentOpenPr = g.Count(x => x.pr != null && x.pr.ParentPullRequestNumber != null && x.pr.ParentState == "open"),
                 })
                 .ExpandRepositoryPolicy()
-                .FirstOrDefaultAsync(cancellationToken);
+                .SingleOrDefaultAsync(cancellationToken);
 
             var basicOpen = (basicFeature?.OpenPr ?? 0) > 0;
             var basicCreatable = (basicFeature?.CreatablePr ?? 0) > 0;
@@ -261,7 +261,7 @@ public sealed class WorkspaceRepositoryLinkListQueryService(IDbContextFactory<Ap
                     ParentOpenPr = g.Count(x => x.pr != null && x.pr.ParentPullRequestNumber != null && x.pr.ParentState == "open"),
             })
             .ExpandRepositoryPolicy()
-            .FirstOrDefaultAsync(cancellationToken);
+            .SingleOrDefaultAsync(cancellationToken);
 
         var hasOpenPr = (feature?.OpenPr ?? 0) > 0;
         var hasCreatablePr = (feature?.CreatablePr ?? 0) > 0;

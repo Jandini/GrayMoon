@@ -19,6 +19,14 @@ public interface IGitRepositoryReader
     Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct);
 
     /// <summary>
+    /// Commit, branch and checked-out tag of HEAD from one git process (a second one only when detached), with the
+    /// same answers as <see cref="GetHeadCommitAsync"/>, <see cref="GetCurrentBranchNameAsync"/> and
+    /// <see cref="GetCheckedOutTagAsync"/>. For callers that read many repositories: a git process costs over a
+    /// second on some machines.
+    /// </summary>
+    Task<HeadState> GetHeadStateAsync(string repoPath, CancellationToken ct);
+
+    /// <summary>
     /// Returns short names of local (<c>refs/heads/&lt;name&gt;</c>) and remote-tracking (<c>refs/remotes/*/&lt;name&gt;</c>)
     /// refs that collide with <paramref name="branchName"/>, including refs nested under it (e.g. <c>name/sub</c>).
     /// Empty when none exist or the repository cannot be read.

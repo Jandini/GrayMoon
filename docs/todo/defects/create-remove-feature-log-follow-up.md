@@ -1,6 +1,6 @@
 # Create Feature and Remove Feature: follow-up run of 2026-11-25
 
-Status: partly built. This is the reading of the second manual test, done after the five fixes of `create-remove-feature-log-findings.md`, and what was built from it on 2026-11-25. Not built: the unordered query warning, the removal time, and C. The fixes are not yet confirmed in a run; "Next test round" at the end says what to read. Written 2026-11-25.
+Status: partly built. This is the reading of the second manual test, done after the five fixes of `create-remove-feature-log-findings.md`, and what was built from it on 2026-11-25. Not built: the unordered query warning, the removal time, and C. The fixes were checked in a second run the same day; "Round 2" at the end has the results and what is open. Written 2026-11-25.
 
 Logs: `GrayMoon.Logs/20261125-follow-up/` in the workspace root (`graymoon-app-20261125.log`, `graymoon-worker-20261125.log`, and the tester's notes in `README.md`). Line numbers below are from these two files. Workspace AVR, 40 repositories, App 0.2.1-main.46.
 
@@ -86,7 +86,7 @@ Built: option 2 of the first document. The main queue (`TrackedJobQueue`) holds 
 
 ### New: nothing is shown during "Verifying published packages..."
 
-Tester's note: for 87 to 112 s the overlay shows the label and nothing else. The resolver already reported "Checked N of M repositories..." after each answer, but no answer came for the first 45 to 70 s because of the queue (A). Built: the resolver reports "Checked 0 of M repositories..." before the first Worker call, and with A the first answers come after one GitVersion run. Test: `EffectiveVersionStartCheckTests.Bulk_push_plan_counts_the_GitVersion_runs_and_writes_every_decision_to_the_job_terminal`.
+Tester's note: for 87 to 112 s the overlay shows the label and nothing else. The resolver already reported "Checked N of M repositories..." after each answer, but no answer came for the first 45 to 70 s because of the queue (A). Built and taken out again: a "Checked 0 of M repositories..." report before the first Worker call; the tester does not want a count of 0. The label counts from the first answer, and with A the first answers come after one GitVersion run. Test: `EffectiveVersionStartCheckTests.Bulk_push_plan_counts_the_GitVersion_runs_and_writes_every_decision_to_the_job_terminal`.
 
 ## Remove Feature takes about 200 s in the background
 
@@ -123,7 +123,7 @@ Same steps as this run (Create Feature, switch contexts in the selector, Remove 
 |---|---|
 | B | One "Repositories grid load" per context change, `trigger=context selected`, and no "Repositories page instance ... created" after it. No `trigger=refresh` of context 1 just before the switch after Create. One `trigger=refresh` after "Refreshing workspace state...". |
 | A | `Stage=EffectiveVersions` well under the 87 s of this run; `queued` of `GetGitVersionAtBranchPoint` in the Worker log at most about one GitVersion run (20 s). |
-| Label | "Checked 0 of N repositories..." appears when the stage starts. |
+| Label | "Checked 1 of N repositories..." after the first answer; no "Checked 0". |
 | HeadSnapshot | The `Sum...Ms` values of "GetHeadCommits timing". |
 | Fix 1 | "CodeGraph uninit in ...: put back N tracked file(s)" or "Git tracks no file" in the Worker log at Remove Feature. |
 | Noise | No "UNIQUE constraint failed: RepositoryBranches" error; no burst of "Git Changes scan failed" during a Worker update. |
@@ -132,3 +132,54 @@ Same steps as this run (Create Feature, switch contexts in the selector, Remove 
 Also: `git ls-files .codegraph` in the AVR Workspace repository.
 
 Watch on the Repositories page, because its instance now survives a context switch: the grid, the header buttons and the live updates must belong to the selected context after each switch, and browser Back and Forward between two contexts must still load the right one.
+
+## Round 2 (2026-11-25, 12:29 to 13:12, build 0.2.1-optimization-followup.48)
+
+Steps: Remove BAM-8888, Create BAM-7777 while that removal was still running, two aborted creates, Create BAM-1111, Create BAM-2222 aborted late, Remove BAM-2222. All logs are from an enterprise VDI.
+
+| Point | Result |
+|---|---|
+| B | Confirmed. One page instance (41e06f11) from 12:29 to 12:57 through a removal, a Create and the context changes; every change is one `trigger=context selected` load. No load of context 1 before the switch after Create. One `trigger=refresh` after the Workspace refresh (12:49:41). |
+| A | Better, not at the target. `Stage=EffectiveVersions` 58.5 s and 66.7 s (was 87 to 112 s). `GetGitVersionAtBranchPoint`: 58 runs, queued 11.8 s on average and 28.8 s at most, running 16.2 s on average. The requests now wait for each other, not for hook syncs. |
+| HeadSnapshot | 129 s, 87 s, 51 s. Per git process (sum divided by 40): 4.2 s, 2.3 s, 1.4 s for `rev-parse HEAD`, and the same for the other three steps. The 129 s run shared the Worker with the removal of BAM-8888 (39 `worktree remove`, 80 change scans); the 51 s run had the Worker to itself. So one git process costs 1.4 s on this machine with nothing else running; 160 of them, 8 at once, are the 51 s. |
+| Fix 1 | Confirmed: "CodeGraph uninit in ...BAM-8888-flicker-test: put back 1 tracked file(s) of .codegraph". |
+| Noise | Confirmed: no "UNIQUE constraint failed", no error in either log, no "Git Changes scan failed". |
+| Removal | 252 s for BAM-8888 (a Create ran beside it), 93 s for BAM-2222 alone. |
+
+New in this round:
+
+- After a Create that was waited for, the grid loads once for the new context and then 5 more times in 18 s (12:55:40 to 12:55:57, `trigger=refresh`). Each is a batch of hook syncs of the new worktrees being applied and broadcast; batches 2 to 6 s apart are not merged by the 200 ms debounce. This is the flicker still seen after Create.
+- A `trigger=refresh` load 240 ms after a `context selected` load (13:06:24, 13:06:40): a hub event that arrived after the switch started its own debounce.
+- Applying a batch of hook syncs took 8.1 to 8.4 s twice ("CheckAndPersist completed ... in 8103ms"; 22 "Slow sync notification" warnings at 13:03:37).
+- Two "ensure watchers timed out" warnings at 12:51:21, while the removal and HeadSnapshot ran together.
+- The EF warning about 'First' without 'OrderBy' is still logged after a grid load (12:29:54, 12:48:27).
+- A Create aborted after its worktrees were made ends as `NeedsRepair` (BAM-2222); removing it worked.
+
+Tester's notes of this round: no "Checked 0 of N" (done, see above); "Checked 1 of 40" without the word "repositories" in the Remove Feature check (done: `WorkspaceFeatureOperations` and the Repositories page); unticked checkboxes are white where they should be gray, seen at "Create CodeGraph index" and in one modal (open).
+
+### Built after round 2
+
+| Point | Change | Test |
+|---|---|---|
+| Flicker after Create | A grid refresh dropped the loaded rows first and read the visible ones after; a render in between showed the grid without rows. `ApplyWorkspaceReloadSnapshotAsync` now reads the visible rows first and swaps them in one step. The refreshes stay (each batch of hook syncs brings new versions), they no longer blank the rows. That the blanking is the flicker the tester saw is a reading of the code, not something seen in the log. | None: the page has no component test. Round 3 checks it. |
+| HeadSnapshot | `GetHeadCommits` starts one git process for HEAD per repository (`GetHeadStateAsync`: commit and branch from one `rev-parse HEAD --symbolic-full-name HEAD`; `describe` only when detached) and one for the collision check: 2 per repository on a branch, was 4. The log line now has `SumHeadMs` and `SumCollisionMs` only. | `GetHeadCommitsCommandTests` |
+| 8 s apply of a sync batch | The time was one Worker call: `ResolveGeneratedPackageReferences` ran 420 ms and waited 7.5 s in the main pool for a GitVersion run of the same hook syncs to end. It and `CheckFileVersions` only read files and now run in the read pool. | `WorkerCommandPoolRouterTests` |
+| Unordered query warning | Found by making the warning throw in the App tests: the four header aggregates of `WorkspaceRepositoryLinkListQueryService.GetHeaderStateAsync` took the one row of a constant group with `FirstOrDefaultAsync`. They use `SingleOrDefaultAsync`. | `WorkspaceRepositoryLinkHeaderStateProfileTests.Header_state_reads_its_one_aggregate_row_without_an_unordered_first` |
+| Checkboxes | The unticked checkboxes and radios that were Bootstrap white got `form-check-input-gray`: Create Feature (CodeGraph index), Return to default options, Version files commit, Branch (skip tags), Push with dependencies, Update dependencies, and the two terminal colour radios in Settings. Switches and the grids' own checkbox classes already had a gray. | None (markup class). |
+
+Not changed: a hub event that arrives while a context switch is loading still causes one more load about 240 ms later. It may carry data newer than the load, so it is not dropped; with the row swap it does not blank the grid.
+
+## Round 3: what to read
+
+Same steps. The App and the Worker both changed.
+
+| Point | Expected |
+|---|---|
+| Flicker | After a Create that was waited for, the rows stay on screen while the versions arrive. The log still shows several `trigger=refresh` loads. |
+| HeadSnapshot | About half of round 2 for the same load: near 25 s with the Worker to itself (was 51 s). `SumHeadMs` divided by the repository count is the cost of one git process. |
+| Sync apply | No "CheckAndPersist completed ... in" above about 1 s caused by a queued `ResolveGeneratedPackageReferences`; its `queued` value in the Worker log stays small. Fewer "Slow sync notification" warnings. |
+| Warning | No "'First'/'FirstOrDefault' operator without 'OrderBy'" after a grid load. |
+| Label | No "Checked 0 of N"; "Checked N of M repositories" in the Remove Feature check. |
+| Checkboxes | Unticked boxes are gray in the dialogs listed above. |
+
+Still open: Remove Feature time (93 s alone), `EffectiveVersions` (58 to 67 s, the GitVersion runs themselves), C, and the six other context pages.

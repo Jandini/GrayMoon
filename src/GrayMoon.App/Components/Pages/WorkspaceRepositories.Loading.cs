@@ -202,6 +202,25 @@ public sealed partial class WorkspaceRepositories
             _reloadGate.Release();
         }
     }
+    /// <summary>The row ids of the slots <paramref name="start"/> to <paramref name="end"/>; empty for an empty grid or range.</summary>
+    private List<int> RowIdsInSlotRange(int start, int end)
+    {
+        var ids = new List<int>();
+        if (_slots.Count == 0 || end < start)
+        {
+            return ids;
+        }
+        start = Math.Clamp(start, 0, _slots.Count - 1);
+        end = Math.Clamp(end, start, _slots.Count - 1);
+        for (var i = start; i <= end; i++)
+        {
+            if (_slots[i].Kind == VirtualSlotKind.Row)
+            {
+                ids.Add(_slots[i].WorkspaceRepositoryId);
+            }
+        }
+        return ids;
+    }
     private async Task<bool> EnsureSlotsHydratedAsync(int start, int end, CancellationToken cancellationToken)
     {
         if (_slots.Count == 0 || end < start)
@@ -516,22 +535,26 @@ public sealed partial class WorkspaceRepositories
         totalCount = snapshot.Index.Count;
         _appliedSearch = snapshot.Search;
         _headerState = snapshot.HeaderState;
-        _linkByRepoId.Clear();
-        _linkByWrlId.Clear();
-        prByRepositoryId = new Dictionary<int, PullRequestInfo?>();
-        repoSyncStatus = new();
-        _tooltipLoadedRepoIds.Clear();
-        _tooltipLoadInFlight.Clear();
         var rangeStart = _lastKnownScrollTopPx - (VirtualOverscanSlots * VirtualRowHeightPx);
         var rangeEnd = _lastKnownScrollTopPx + _lastKnownClientHeightPx + (VirtualOverscanSlots * VirtualRowHeightPx);
         var (rebuiltStart, rebuiltEnd) = ComputeRangeForPixelWindow(rangeStart, rangeEnd);
         UpdateVisibleRange(rebuiltStart, Math.Max(-1, rebuiltEnd));
-        // Awaited on the dispatcher: the continuation (and the row hydration it applies) stays there.
-        await EnsureSlotsHydratedAsync(_visibleStart, _visibleEnd, snapshot.QueryToken);
-        if (!PageStateApplyGuard.ShouldApply(_disposed, snapshot.ContextGeneration, _contextGeneration))
+        // The rows on screen are read before the old ones are dropped. Dropping them first left the grid without
+        // rows for the time of the query, and any render in between (a job or Git Changes event) showed that as a
+        // flicker: five times in 18 s after a Create Feature (logs of 2026-11-25, round 2).
+        // Awaited on the dispatcher: the continuation (and the row swap) stays there.
+        var slotsVersion = _slotsVersion;
+        var rows = await LinkListQueryService.GetByIdsAsync(
+            WorkspaceId, RowIdsInSlotRange(_visibleStart, _visibleEnd), _selectedContextId, !_isFeatureContext, snapshot.QueryToken);
+        if (!PageStateApplyGuard.ShouldApply(_disposed, snapshot.ContextGeneration, _contextGeneration)
+            || snapshot.QueryToken.IsCancellationRequested
+            || slotsVersion != _slotsVersion)
         {
             return;
         }
+        _tooltipLoadedRepoIds.Clear();
+        _tooltipLoadInFlight.Clear();
+        ApplyItemsFromDtos(rows, replace: true);
         if (_virtualScrollAttached)
         {
             try

@@ -11,6 +11,7 @@ internal sealed class StubRepositoryReader : IGitRepositoryReader
 
     public Task<string?> GetCurrentBranchNameAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
     public Task<string?> GetHeadCommitAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
+    public Task<HeadState> GetHeadStateAsync(string repoPath, CancellationToken ct) => throw new NotImplementedException();
     public Task<IReadOnlyList<string>> FindBranchCollisionsAsync(string repoPath, string branchName, CancellationToken ct) => throw new NotImplementedException();
     public Task<string?> RevParseAsync(string repoPath, string rev, CancellationToken ct) => throw new NotImplementedException();
     public Task<bool> RefExistsAsync(string repoPath, string revision, CancellationToken ct) => throw new NotImplementedException();

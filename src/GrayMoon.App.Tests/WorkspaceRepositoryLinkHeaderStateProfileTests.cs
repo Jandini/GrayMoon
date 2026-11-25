@@ -46,6 +46,29 @@ public sealed class WorkspaceRepositoryLinkHeaderStateProfileTests
         }
     }
 
+    /// <summary>
+    /// Every grid load logged "The query uses the 'First'/'FirstOrDefault' operator without 'OrderBy'" (logs of
+    /// 2026-11-25): the header aggregates took the one row of a constant group with FirstOrDefault.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task Header_state_reads_its_one_aggregate_row_without_an_unordered_first(bool isSpecialWorkspace, bool basic)
+    {
+        var (ctx, workspaceId) = await ListQueryTestContext.CreateWithWorkspaceLinksAsync(30);
+        await using (ctx)
+        {
+            var query = ctx.CreateWorkspaceRepoLinkQueryFailingOnUnorderedFirst();
+
+            var header = await query.GetHeaderStateAsync(
+                workspaceId, new WorkspaceFeatureContextId(987654), isSpecialWorkspace, basic ? BasicNone : null);
+
+            Assert.Equal(30, header.TotalCount);
+        }
+    }
+
     [Fact]
     public async Task Basic_gitversion_workspace_is_treated_like_basic_for_dependency_state()
     {

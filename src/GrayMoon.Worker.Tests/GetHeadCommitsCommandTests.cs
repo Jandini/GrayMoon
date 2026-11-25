@@ -49,15 +49,43 @@ public sealed class GetHeadCommitsCommandTests : IDisposable
         Assert.NotNull(response.Branches);
         Assert.True(response.Branches!.ContainsKey("RepoA"));
         Assert.False(string.IsNullOrWhiteSpace(response.Branches["RepoA"]));
-        var revParseCalls = _recorder.Calls.Count(c =>
-            c.Arguments.Contains("rev-parse", StringComparison.OrdinalIgnoreCase)
-            && c.Arguments.Contains("HEAD", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(2, revParseCalls);
-        var branchShowCalls = _recorder.Calls.Count(c =>
-            c.Arguments.Contains("branch --show-current", StringComparison.OrdinalIgnoreCase)
-            || (c.Arguments.Contains("branch", StringComparison.OrdinalIgnoreCase)
-                && c.Arguments.Contains("--show-current", StringComparison.OrdinalIgnoreCase)));
-        Assert.Equal(2, branchShowCalls);
+        // One git process per repository on a branch: a process costs 1.4 s on the test machine of 2026-11-25, and
+        // four per repository made Create Feature wait 51 s for 40 repositories.
+        Assert.Equal(2, _recorder.Calls.Count);
+    }
+    [Fact]
+    public async Task Reads_branch_tag_and_collisions_with_at_most_three_git_processes_per_repository()
+    {
+        var workspacePath = Path.Combine(_root, "ws");
+        var onBranch = Path.Combine(workspacePath, "OnBranch");
+        var onTag = Path.Combine(workspacePath, "OnTag");
+        var detached = Path.Combine(workspacePath, "Detached");
+        foreach (var repoPath in new[] { onBranch, onTag, detached })
+        {
+            Directory.CreateDirectory(repoPath);
+            await InitGitWithCommitAsync(repoPath);
+        }
+        await RunGitAsync(onBranch, "checkout -b work");
+        await RunGitAsync(onBranch, "branch feature-x");
+        await RunGitAsync(onTag, "tag v1.2.3");
+        await RunGitAsync(onTag, "checkout --detach v1.2.3");
+        await RunGitAsync(detached, "checkout --detach");
+
+        var response = await _command.ExecuteAsync(new GetHeadCommitsRequest
+        {
+            WorkspaceRoot = _root,
+            WorkspaceName = "ws",
+            RepositoryNames = ["OnBranch", "OnTag", "Detached"],
+            CollisionBranchName = "feature-x",
+        });
+
+        Assert.Equal(3, response.Commits!.Count);
+        Assert.Equal(KeyValuePair.Create("OnBranch", "work"), Assert.Single(response.Branches!));
+        Assert.Equal(KeyValuePair.Create("OnTag", "v1.2.3"), Assert.Single(response.Tags!));
+        Assert.Equal(["feature-x"], response.BranchCollisions!["OnBranch"]);
+        Assert.False(response.BranchCollisions.ContainsKey("OnTag"));
+        // OnBranch: HEAD + collisions. OnTag: HEAD + describe. Detached: HEAD + describe + collisions.
+        Assert.Equal(7, _recorder.Calls.Count);
     }
     [Fact]
     public async Task Unborn_repository_omits_commit()

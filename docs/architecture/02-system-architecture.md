@@ -709,7 +709,7 @@ Git diff pool
 Git AI pool
 ```
 
-This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees` and `InspectWorktree`; the AI commands run in their own AI pool. The `RequestCommand` handler never waits for room in a full queue, so a `CancelCommand` is always delivered at once. Pool sizes, routing and cancellation are in 04.
+This prevents expensive or long-running mutations from making Git Changes status and diff feel unresponsive. The read pool takes `GetGitChangeStatus`, `ListGitWorktrees`, `InspectWorktree` and the file reads of the version-file check (`CheckFileVersions`, `ResolveGeneratedPackageReferences`); the AI commands run in their own AI pool. The `RequestCommand` handler never waits for room in a full queue, so a `CancelCommand` is always delivered at once. Pool sizes, routing and cancellation are in 04.
 
 Core hosted services include:
 

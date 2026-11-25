@@ -661,7 +661,7 @@ public sealed class WorkspaceFeatureOperations(
                 finally
                 {
                     var done = Interlocked.Increment(ref probeCompleted);
-                    progress.Report($"Checked {done} of {probeTotal}", done, probeTotal);
+                    progress.Report($"Checked {done} of {probeTotal} repositories", done, probeTotal);
                     gate.Release();
                 }
             });

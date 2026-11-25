@@ -54,7 +54,7 @@
                     @if (RepoItems.Any(r => r.HasRemote))
                     {
                         <div class="form-check mt-1">
-                            <input class="form-check-input" type="checkbox" id="deleteRemoteCheck"
+                            <input class="form-check-input form-check-input-gray" type="checkbox" id="deleteRemoteCheck"
                                    checked="@DeleteRemoteBranches"
                                    @onchange="OnDeleteRemoteChanged" />
                             <label class="form-check-label" for="deleteRemoteCheck">
@@ -63,7 +63,7 @@
                         </div>
                     }
                     <div class="form-check mt-1">
-                        <input class="form-check-input" type="checkbox" id="forceDeleteLocalCheck"
+                        <input class="form-check-input form-check-input-gray" type="checkbox" id="forceDeleteLocalCheck"
                                checked="@AllowForceDeleteLocalBranch"
                                @onchange="OnAllowForceDeleteLocalChanged" />
                         <label class="form-check-label" for="forceDeleteLocalCheck">

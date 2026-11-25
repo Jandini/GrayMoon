@@ -29,7 +29,7 @@
                         </div>
                     }
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="vfcm-commit-check"
+                        <input class="form-check-input form-check-input-gray" type="checkbox" id="vfcm-commit-check"
                                checked="@_commitChanges"
                                @onchange="e => _commitChanges = (bool)(e.Value ?? true)"
                                disabled="@IsBusy" />
