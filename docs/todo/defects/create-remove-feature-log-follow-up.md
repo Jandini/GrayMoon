@@ -203,8 +203,10 @@ Tester: no more reload, everything works.
 
 `CheckFileVersions` and `ResolveGeneratedPackageReferences` run in the diff pool (4 workers; besides them only `GetGitFileDiff`), where no status scan, worktree inspection or GitVersion run is ahead of them. Test: `WorkerCommandPoolRouterTests`.
 
+Create Feature pauses Git Changes monitoring of the new context (`IWorkspaceGitChangesMonitoringPause`) from the stored context until the last worktree exists, then requests one audit (`GitChangesAuditReason.FeatureCreated`). Before, the keeper and the audit reached the context mid-checkout: the watchers overflowed and git status scanned half-written trees. How much that slowed the checkout was not measured. Repair Feature does not pause. Test: `CreateFeatureMonitoringPauseTests`.
+
 ### Round 4: what to read
 
-"CheckAndPersist completed" near 1 s also while a removal runs; `queued` of `ResolveGeneratedPackageReferences` in the Worker log near 0; the `trigger=refresh` grid load within seconds of "fan-out settled".
+"CheckAndPersist completed" near 1 s also while a removal runs; `queued` of `ResolveGeneratedPackageReferences` in the Worker log near 0; the `trigger=refresh` grid load within seconds of "fan-out settled". During Create: no "watcher overflow" and no "TooManyChanges" for the new Feature folder before `Stage=SourceWorktrees`, then one "audit start ... reason=FeatureCreated"; compare `Stage=SourceWorktrees` with the 73.7 s of round 3.
 
-Still open: Remove Feature beside a Sync (over 200 s), `EffectiveVersions`, the watchers that start during a Feature checkout, the cancelled `InspectWorktree` logged as failed, C, and the six other context pages.
+Still open: Remove Feature beside a Sync (over 200 s), `EffectiveVersions`, the cancelled `InspectWorktree` logged as failed, C, and the six other context pages.

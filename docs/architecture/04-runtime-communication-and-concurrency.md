@@ -709,7 +709,7 @@ Worker: `IGitChangesRefreshSuppressor.BeginExternalRepositoryMutation(repoPath)`
 - Closing the last scope schedules exactly one debounced refresh, and only if a watcher event was seen.
 - Not suppressed: manual `RefreshNowAsync`, stage, unstage and commit.
 
-App: `IWorkspaceGitChangesMonitoringPause` makes the keeper and the audit scheduler skip a Feature context while Remove Feature or Roll back deletes its worktrees. Ref-counted per context id; the special Workspace context is never paused.
+App: `IWorkspaceGitChangesMonitoringPause` makes the keeper and the audit scheduler skip a Feature context while Remove Feature or Roll back deletes its worktrees, and while Create Feature checks them out (from the moment the context is stored until the last worktree exists). A watcher that starts during a checkout overflows, and its status scan reads a half-written tree whose result is thrown away. When Create Feature releases the pause it requests one audit (`GitChangesAuditReason.FeatureCreated`), which starts the watchers and reads the state at once instead of at the next keeper tick. Ref-counted per context id; the special Workspace context is never paused.
 
 ---
 

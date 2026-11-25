@@ -89,6 +89,8 @@ public sealed class SyncStateTestContext : IAsyncDisposable
 
         services.AddSingleton<IWorkspaceGitChangesNotifier, WorkspaceGitChangesNotifier>();
         services.AddSingleton<IWorkspaceGitChangesMonitoringPause, WorkspaceGitChangesMonitoringPause>();
+        services.AddSingleton<RecordingAuditScheduler>();
+        services.AddSingleton<IGitChangesAuditScheduler>(sp => sp.GetRequiredService<RecordingAuditScheduler>());
         services.AddScoped<AppSettingRepository>();
         services.AddScoped<ConnectorRepository>();
         services.AddScoped<GitHubRepositoryRepository>();

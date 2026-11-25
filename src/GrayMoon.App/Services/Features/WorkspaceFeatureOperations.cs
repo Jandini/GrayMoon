@@ -33,6 +33,7 @@ public sealed class WorkspaceFeatureOperations(
     WorkspaceService workspaceService,
     WorkspacePullRequestService workspacePullRequestService,
     IWorkspaceGitChangesMonitoringPause gitChangesMonitoringPause,
+    IGitChangesAuditScheduler gitChangesAuditScheduler,
     IWorkspaceCapabilitiesResolver capabilitiesResolver,
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger,
@@ -327,6 +328,13 @@ public sealed class WorkspaceFeatureOperations(
         // below has run. Armed from here to the end of the method (including the failure write), the barrier keeps
         // those syncs from racing the seed; it is in memory only, so it cannot outlive a crash.
         using var finalizationBarrier = finalizationCoordinator?.Arm(contextId.Value);
+
+        // No file watcher and no status scan of this context while its worktrees are checked out. The context
+        // exists from the transaction above, so the watcher keepalive and the audit reached it mid-checkout: the
+        // watchers overflowed and git status read half-written trees whose result was thrown away (27,287 changed
+        // paths in one repository, logs of 2026-11-25), on a machine where a git process costs over a second.
+        // Released when the last worktree exists, and by the using on every other way out.
+        using var monitoringPause = gitChangesMonitoringPause.Pause(contextId.Value);
         try
         {
             var anyFailure = 0;
@@ -429,6 +437,11 @@ public sealed class WorkspaceFeatureOperations(
             stageStart = logger.FeatureStageFinished(
                 "Create", workspaceId, name, "SourceWorktrees", stageStart,
                 $"Sources={sourceRows.Count} MaxParallel={MaxParallel} Failed={anyFailure}");
+
+            // The worktrees that could be created exist. One scan starts their watchers and reads their state now,
+            // instead of at the next keepalive up to WatcherRenewalIntervalMinutes later.
+            monitoringPause.Dispose();
+            gitChangesAuditScheduler.Request(workspaceId, contextId, GitChangesAuditReason.FeatureCreated);
 
             await using (var finalizeDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
             {
