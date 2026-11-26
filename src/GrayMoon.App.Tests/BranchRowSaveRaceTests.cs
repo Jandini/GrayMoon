@@ -66,6 +66,102 @@ public sealed class BranchRowSaveRaceTests
         Assert.Equal(42, (await ctx.ReadLinkAsync()).OutgoingCommits);
     }
 
+    // 2026-11-26: Return to Default after Prepare Workspace failed with DbUpdateConcurrencyException. It deletes
+    // the local branch; the reference-transaction hook reported the same deletion, and the hook sync removed the
+    // branch row while the operation's own result, which had loaded that row, was about to remove it too.
+    [Fact]
+    public async Task A_branch_row_another_writer_removed_first_does_not_fail_the_save_that_removes_it_too()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedLocalAsync(ctx, Branch);
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.RepositoryBranches.SingleAsync(b => b.BranchName == Branch && !b.IsRemote);
+            var link = await db.WorkspaceRepositories.SingleAsync(wr => wr.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId);
+            await DeleteFromAnotherContextAsync(ctx, Branch);
+
+            db.RepositoryBranches.Remove(row);
+            link.OutgoingCommits = 42;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(0, await CountAsync(ctx, Branch, isRemote: false));
+        // What was saved with it is not lost.
+        Assert.Equal(42, (await ctx.ReadLinkAsync()).OutgoingCommits);
+    }
+
+    [Fact]
+    public async Task A_branch_row_another_writer_removed_is_stored_again_by_the_save_that_still_lists_it()
+    {
+        // This writer's list has the branch; the other one's did not. The later save decides, as it does for every other row.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedLocalAsync(ctx, Branch);
+        await SeedLocalAsync(ctx, "kept");
+
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rows = await db.RepositoryBranches.Where(b => !b.IsRemote && (b.BranchName == Branch || b.BranchName == "kept")).ToListAsync();
+            await DeleteFromAnotherContextAsync(ctx, Branch);
+
+            foreach (var row in rows)
+            {
+                row.LastSeenAt = new DateTime(2026, 11, 26, 21, 33, 54, DateTimeKind.Utc);
+                row.IsDefault = row.BranchName == Branch;
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        await using var read = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        var stored = await read.RepositoryBranches.AsNoTracking()
+            .Where(b => !b.IsRemote && (b.BranchName == Branch || b.BranchName == "kept"))
+            .OrderBy(b => b.BranchName)
+            .Select(b => new { b.BranchName, b.IsDefault })
+            .ToListAsync();
+        Assert.Equal([("kept", false), (Branch, true)], stored.Select(b => (b.BranchName, b.IsDefault)));
+    }
+
+    [Fact]
+    public async Task A_row_of_another_kind_that_was_removed_meanwhile_still_fails_the_save()
+    {
+        // Only branch rows are a list that several writers replace. Anything else that vanished is a real conflict.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using (var seed = ctx.CreateScope())
+        {
+            await seed.ServiceProvider.GetRequiredService<WorkspaceRepositoryStateWriter>().ApplyAsync(
+                special, ctx.WorkspaceId, ctx.RepositoryId, new RepositoryStateSnapshot { BranchName = "main", IdentityProbed = true });
+        }
+
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var state = await db.WorkspaceRepositoryContextStates.SingleAsync(s => s.WorkspaceFeatureContextId == special.Value);
+        await using (var other = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+            await other.WorkspaceRepositoryContextStates.Where(s => s.WorkspaceFeatureContextId == special.Value).ExecuteDeleteAsync();
+
+        state.BranchName = "other";
+
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => db.SaveChangesAsync());
+    }
+
+    private static async Task SeedLocalAsync(SyncStateTestContext ctx, string name)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        db.RepositoryBranches.Add(new RepositoryBranch { WorkspaceRepositoryId = ctx.WorkspaceRepositoryId, BranchName = name, IsRemote = false, LastSeenAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task DeleteFromAnotherContextAsync(SyncStateTestContext ctx, string name)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        Assert.Equal(1, await db.RepositoryBranches
+            .Where(b => b.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId && b.BranchName == name && !b.IsRemote)
+            .ExecuteDeleteAsync());
+    }
+
     [Fact]
     public async Task A_duplicate_with_no_stored_row_behind_it_still_fails()
     {

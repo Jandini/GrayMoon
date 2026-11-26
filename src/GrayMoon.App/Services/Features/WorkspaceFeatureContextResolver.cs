@@ -7,7 +7,18 @@ namespace GrayMoon.App.Services.Features;
 
 public sealed class WorkspaceFeatureContextResolver(IDbContextFactory<AppDbContext> dbContextFactory) : IWorkspaceFeatureContextResolver
 {
-    public async Task<WorkspaceFeatureContextId> GetOrCreateSpecialWorkspaceContextIdAsync(int workspaceId, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// A Workspace gets its special context from the first caller that asks, and several ask at once for a new,
+    /// imported or restored Workspace (the page, the sidebar, hook syncs, parallel per-repository work). Each finds
+    /// none and adds one, and the unique index lets one through. The caller that lost reads again and returns the
+    /// stored context, so every caller gets the same id. The same holds for the selected-context row, which
+    /// <see cref="WorkspaceSelectedFeatureContextService.SetSelectedAsync"/> can store between the check and the save.
+    /// </remarks>
+    public Task<WorkspaceFeatureContextId> GetOrCreateSpecialWorkspaceContextIdAsync(int workspaceId, CancellationToken cancellationToken = default)
+        => DbWriteConflict.RetryAsync(() => GetOrCreateSpecialWorkspaceContextIdOnceAsync(workspaceId, cancellationToken), cancellationToken);
+
+    /// <summary>One read-decide-save on a context of its own, so a repeat after a lost race reads what is stored now.</summary>
+    private async Task<WorkspaceFeatureContextId> GetOrCreateSpecialWorkspaceContextIdOnceAsync(int workspaceId, CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var existing = await db.WorkspaceFeatureContexts

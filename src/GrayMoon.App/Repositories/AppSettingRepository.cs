@@ -33,31 +33,56 @@ public sealed class AppSettingRepository(AppDbContext db)
         return setting?.Value;
     }
 
+    /// <remarks>
+    /// Two callers can set a key for the first time together (two tabs, two requests): both find no row and add
+    /// one, and the unique index on the key rejects the later save. A caller can also find a row that another
+    /// one clears before the save. Neither is a failure of this call: it reads again and stores its value, so the
+    /// key ends with what this call asked for, as when nobody raced it.
+    /// <para>
+    /// The context is the scope's (one per circuit or request) and other services track rows in it, so the repeat
+    /// must not clear the tracker as <see cref="DbWriteConflict.RetryAsync(Func{Task}, CancellationToken)"/> expects.
+    /// Only the setting that collided is detached; everything else stays tracked and is saved with the repeat. A
+    /// conflict on any other row of that save is not this method's and is rethrown.
+    /// </para>
+    /// </remarks>
     public async Task SetValueAsync(string key, string? value)
     {
-        var setting = await db.Settings.FirstOrDefaultAsync(s => s.Key == key);
-
-        if (string.IsNullOrWhiteSpace(value))
+        for (var attempt = 1; ; attempt++)
         {
-            if (setting != null)
+            var setting = await db.Settings.FirstOrDefaultAsync(s => s.Key == key);
+
+            if (string.IsNullOrWhiteSpace(value))
             {
+                if (setting == null)
+                    return;
+
                 db.Settings.Remove(setting);
-                await db.SaveChangesAsync();
             }
-            return;
-        }
+            else if (setting == null)
+            {
+                setting = new Setting { Key = key, Value = value };
+                db.Settings.Add(setting);
+            }
+            else
+            {
+                setting.Value = value;
+                db.Settings.Update(setting);
+            }
 
-        if (setting == null)
-        {
-            db.Settings.Add(new Setting { Key = key, Value = value });
+            try
+            {
+                await db.SaveChangesAsync();
+                return;
+            }
+            catch (DbUpdateException ex) when (attempt < DbWriteConflict.MaxAttempts
+                                              && DbWriteConflict.IsLostRace(ex)
+                                              && ex.Entries.Any(entry => ReferenceEquals(entry.Entity, setting)))
+            {
+                // Another caller added or removed this key first. Nothing of the failed save is stored. Forget this
+                // row only, then read the key again and decide from what is stored now.
+                db.Entry(setting).State = EntityState.Detached;
+            }
         }
-        else
-        {
-            setting.Value = value;
-            db.Settings.Update(setting);
-        }
-
-        await db.SaveChangesAsync();
     }
 
     public async Task<bool> GetBoolAsync(string key, bool defaultValue = false)

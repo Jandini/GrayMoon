@@ -15,6 +15,15 @@ namespace GrayMoon.App.Data;
 /// before it commits. No other writer can commit between that read and the insert, so the insert of a row that
 /// is already stored is never sent. A unique violation that still occurs is a real conflict and surfaces.
 /// </para>
+/// <para>
+/// The same writers also remove rows. A writer that loaded a row and then updates or removes it can find it gone:
+/// another writer's list did not have that ref and its save came first (Return to Default deletes the local branch,
+/// and the reference-transaction hook reports the same deletion while the operation's result is being stored).
+/// EF Core reports that as <see cref="DbUpdateConcurrencyException"/>. For branch rows it is the same lost race:
+/// a row this save wanted to remove is already removed, and a row this save still lists is stored again, so the
+/// later save decides, as it does for every row that did not collide. The save is then repeated. A conflict on
+/// any other kind of row is not handled here and surfaces.
+/// </para>
 /// </summary>
 public partial class AppDbContext
 {
@@ -34,7 +43,60 @@ public partial class AppDbContext
         return dropped;
     }
 
+    /// <summary>How often a save is repeated after branch rows were removed by another writer. Each repeat settles the rows that collided.</summary>
+    private const int MaxBranchRowConflictRetries = 3;
+
     private async Task<(int Saved, int Dropped)> SaveDroppingStoredBranchRowsAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await SaveDroppingStoredBranchRowsOnceAsync(acceptAllChangesOnSuccess, cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < MaxBranchRowConflictRetries && SettleBranchRowsRemovedByAnotherWriter(ex))
+            {
+                // Nothing of the failed save is stored: EF Core rolled its own transaction back, or went back to its
+                // savepoint in the caller's transaction. The rows that collided are settled; save again.
+            }
+        }
+    }
+
+    /// <summary>
+    /// When every row the failed save could not find is a branch row: forgets the ones it wanted to remove (they are
+    /// gone) and turns the ones it wanted to update into new rows (this writer still lists them). Returns false, and
+    /// changes nothing, when another kind of row is involved.
+    /// </summary>
+    private bool SettleBranchRowsRemovedByAnotherWriter(DbUpdateConcurrencyException exception)
+    {
+        if (exception.Entries.Count == 0 || exception.Entries.Any(entry => entry.Entity is not RepositoryBranch))
+            return false;
+
+        foreach (var entry in exception.Entries)
+        {
+            var branch = (RepositoryBranch)entry.Entity;
+            var wasRemoval = entry.State == EntityState.Deleted;
+            entry.State = EntityState.Detached;
+            if (wasRemoval)
+                continue;
+
+            // Stored again under a new id. Should yet another writer store it first, the added row is dropped like any other.
+            RepositoryBranches.Add(new RepositoryBranch
+            {
+                WorkspaceRepositoryId = branch.WorkspaceRepositoryId,
+                BranchName = branch.BranchName,
+                IsRemote = branch.IsRemote,
+                LastSeenAt = branch.LastSeenAt,
+                IsDefault = branch.IsDefault,
+                IsTag = branch.IsTag,
+                SortIndex = branch.SortIndex,
+            });
+        }
+
+        return true;
+    }
+
+    private async Task<(int Saved, int Dropped)> SaveDroppingStoredBranchRowsOnceAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
         KeepWorkspaceRepositoryWritable();
         if (!ChangeTracker.Entries<RepositoryBranch>().Any(entry => entry.State == EntityState.Added))

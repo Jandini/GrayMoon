@@ -5,6 +5,7 @@ using GrayMoon.App.Repositories;
 using GrayMoon.Application.Features;
 using GrayMoon.Application.Workspaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace GrayMoon.App.Services.Workspaces;
 
@@ -148,6 +149,7 @@ public sealed class WorkspaceRepositoryStateWriter(
             .FirstOrDefaultAsync(
                 s => s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == wr.WorkspaceRepositoryId,
                 cancellationToken);
+        LinkBeforeStaging? linkBeforeFirstRow = null;
         if (state is null)
         {
             state = new WorkspaceRepositoryContextState
@@ -157,21 +159,39 @@ public sealed class WorkspaceRepositoryStateWriter(
                 SyncStatus = RepoSyncStatus.NeedsSync
             };
             dbContext.WorkspaceRepositoryContextStates.Add(state);
+            linkBeforeFirstRow = LinkBeforeStaging.Capture(dbContext.Entry(wr));
         }
 
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
         var isReferenceSnapshot = !isSpecialWorkspace
             && (await LoadReferenceSnapshotLinkIdsAsync(contextId, [wr.WorkspaceRepositoryId], cancellationToken)).Count > 0;
-        // A new row has nothing stored to compare with: everything the snapshot probed is a change.
-        var isNewState = dbContext.Entry(state).State == EntityState.Added;
-        var before = TrackedValues.Read(state, wr);
-        var previousBranch = StageTracked(context, wr, state, snapshot, options, isReferenceSnapshot);
-        if (snapshot.BranchesProbed)
-            StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
         var probed = RepositoryStateFreshness.ProbedGroups(snapshot);
-        var changed = isNewState ? probed & RepositoryFactGroups.Checkout : TrackedValues.Diff(before, TrackedValues.Read(state, wr));
+        var isNewState = false;
+        string? previousBranch = null;
+        var changed = RepositoryFactGroups.None;
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        void Stage()
+        {
+            // A new row has nothing stored to compare with: everything the snapshot probed is a change.
+            isNewState = dbContext.Entry(state).State == EntityState.Added;
+            var before = TrackedValues.Read(state, wr);
+            previousBranch = StageTracked(context, wr, state, snapshot, options, isReferenceSnapshot);
+            if (snapshot.BranchesProbed)
+                StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
+            changed = isNewState ? probed & RepositoryFactGroups.Checkout : TrackedValues.Diff(before, TrackedValues.Read(state, wr));
+        }
+
+        Stage();
+        await SaveStagedAsync(
+            linkBeforeFirstRow is null ? [] : [state],
+            stored =>
+            {
+                // Another writer stored the first row meanwhile: the write is staged again, on that row.
+                linkBeforeFirstRow!.Restore(dbContext.Entry(wr));
+                state = stored;
+                Stage();
+            },
+            cancellationToken);
 
         if (snapshot.BranchesProbed)
         {
@@ -247,27 +267,38 @@ public sealed class WorkspaceRepositoryStateWriter(
             return false;
         }
 
+        var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
         var state = await dbContext.WorkspaceRepositoryContextStates
             .FirstOrDefaultAsync(
                 s => s.WorkspaceFeatureContextId == contextId.Value && s.WorkspaceRepositoryId == workspaceRepositoryId,
                 cancellationToken);
+        LinkBeforeStaging? linkBeforeFirstRow = null;
         if (state is null)
         {
             // Nothing to clear on a context that has no state yet, and no row is created just to say "not on a tag".
-            if (Blank(currentTag) && context.Kind != WorkspaceFeatureContextKind.Workspace)
+            if (Blank(currentTag) && !isSpecialWorkspace)
                 return true;
             state = new WorkspaceRepositoryContextState
             {
                 WorkspaceFeatureContextId = contextId.Value,
                 WorkspaceRepositoryId = workspaceRepositoryId,
-                SyncStatus = context.Kind == WorkspaceFeatureContextKind.Workspace ? wr.SyncStatus : RepoSyncStatus.NeedsSync,
-                CheckedOutTag = context.Kind == WorkspaceFeatureContextKind.Workspace ? wr.CheckedOutTag : null,
+                SyncStatus = isSpecialWorkspace ? wr.SyncStatus : RepoSyncStatus.NeedsSync,
+                CheckedOutTag = isSpecialWorkspace ? wr.CheckedOutTag : null,
             };
             dbContext.WorkspaceRepositoryContextStates.Add(state);
+            linkBeforeFirstRow = LinkBeforeStaging.Capture(dbContext.Entry(wr));
         }
 
-        StageTagRefresh(wr, state, context.Kind == WorkspaceFeatureContextKind.Workspace, tags, currentTag);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        StageTagRefresh(wr, state, isSpecialWorkspace, tags, currentTag);
+        await SaveStagedAsync(
+            linkBeforeFirstRow is null ? [] : [state],
+            stored =>
+            {
+                // Another writer stored the first row meanwhile: the refresh is staged again, on that row.
+                linkBeforeFirstRow!.Restore(dbContext.Entry(wr));
+                StageTagRefresh(wr, stored, isSpecialWorkspace, tags, currentTag);
+            },
+            cancellationToken);
         return true;
     }
 
@@ -614,6 +645,9 @@ public sealed class WorkspaceRepositoryStateWriter(
     /// Applies every snapshot on this writer's context, then one <see cref="AppDbContext.SaveChangesAsync"/>
     /// (or the project-row batch save, which flushes the same context). Does not merge dependency edges;
     /// callers that already have the full graph call <c>MergeWorkspaceProjectDependenciesAsync</c> once after.
+    /// Only when a batch both stores the first state row of a repository and carries projects, the staged rows are
+    /// saved before the project reconcile instead of with it: a first row can lose a race to another writer
+    /// (see <see cref="SaveStagedAsync"/>), and a save that failed inside the reconcile cannot be repeated there.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, RepositoryStateWriteResult>> ApplyBatchAsync(
         WorkspaceFeatureContextId contextId,
@@ -655,6 +689,37 @@ public sealed class WorkspaceRepositoryStateWriter(
             : await LoadReferenceSnapshotLinkIdsAsync(contextId, wrlIds, cancellationToken);
         var staged = new List<(WorkspaceRepositoryLink Wr, WorkspaceRepositoryContextState State, string? PreviousBranch)>();
         var projectBatch = new List<(int RepositoryId, IReadOnlyList<SyncProjectInfo> Projects)>();
+        var passes = new List<BatchPass>();
+        var firstRows = new List<WorkspaceRepositoryContextState>();
+        var linkBeforeFirstRow = new Dictionary<int, LinkBeforeStaging>();
+
+        // Stages one item on the state row its link has now. Run again for a link whose first row another writer stored.
+        void Stage(BatchPass pass)
+        {
+            var wr = pass.Wr;
+            var snapshot = pass.Snapshot;
+            var state = stateByWrl[wr.WorkspaceRepositoryId];
+            var isNewState = dbContext.Entry(state).State == EntityState.Added;
+            var before = TrackedValues.Read(state, wr);
+            pass.PreviousBranch = StageTracked(
+                context, wr, state, snapshot, options, referenceSnapshotLinkIds.Contains(wr.WorkspaceRepositoryId));
+            if (snapshot.BranchesProbed)
+                StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
+            pass.Changed = isNewState
+                ? RepositoryStateFreshness.ProbedGroups(snapshot) & RepositoryFactGroups.Checkout
+                : TrackedValues.Diff(before, TrackedValues.Read(state, wr));
+
+            if (pass.Projects is { } projects)
+            {
+                state.Projects = projects.Count;
+                state.RepositoryType = ComputeRepositoryType(projects);
+                if (isSpecialWorkspace)
+                {
+                    wr.Projects = state.Projects;
+                    wr.RepositoryType = state.RepositoryType;
+                }
+            }
+        }
 
         foreach (var (repositoryId, snapshot) in items)
         {
@@ -674,19 +739,21 @@ public sealed class WorkspaceRepositoryStateWriter(
                 };
                 dbContext.WorkspaceRepositoryContextStates.Add(state);
                 stateByWrl[wr.WorkspaceRepositoryId] = state;
+                firstRows.Add(state);
+                linkBeforeFirstRow[wr.WorkspaceRepositoryId] = LinkBeforeStaging.Capture(dbContext.Entry(wr));
             }
 
-            var isNewState = dbContext.Entry(state).State == EntityState.Added;
-            var before = TrackedValues.Read(state, wr);
-            var previousBranch = StageTracked(
-                context, wr, state, snapshot, options, referenceSnapshotLinkIds.Contains(wr.WorkspaceRepositoryId));
-            staged.Add((wr, state, previousBranch));
-            var branchesChanged = false;
+            var pass = new BatchPass(
+                repositoryId,
+                snapshot,
+                wr,
+                snapshot.ProjectsProbed && discoversProjects ? ToSyncProjects(snapshot.Projects) : null);
+            passes.Add(pass);
+            Stage(pass);
 
             if (snapshot.BranchesProbed)
             {
-                StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
-                branchesChanged = await branchWriter.PersistAsync(
+                pass.BranchesChanged = await branchWriter.PersistAsync(
                     wr.WorkspaceRepositoryId,
                     snapshot.LocalBranches,
                     snapshot.RemoteBranches,
@@ -696,30 +763,32 @@ public sealed class WorkspaceRepositoryStateWriter(
                     save: false);
             }
 
-            var probed = RepositoryStateFreshness.ProbedGroups(snapshot);
-            var changed = isNewState ? probed & RepositoryFactGroups.Checkout : TrackedValues.Diff(before, TrackedValues.Read(state, wr));
-            if (branchesChanged)
-                changed |= RepositoryFactGroups.Branches;
-            if (snapshot.ProjectsProbed)
-                changed |= RepositoryFactGroups.Projects;
-            results[repositoryId] = new RepositoryStateWriteResult(true, probed, changed);
+            if (pass.Projects is not null)
+                projectBatch.Add((repositoryId, pass.Projects));
+        }
 
-            if (snapshot.ProjectsProbed && discoversProjects)
-            {
-                var projects = ToSyncProjects(snapshot.Projects);
-                projectBatch.Add((repositoryId, projects));
-                state.Projects = projects.Count;
-                state.RepositoryType = ComputeRepositoryType(projects);
-                if (isSpecialWorkspace)
-                {
-                    wr.Projects = state.Projects;
-                    wr.RepositoryType = state.RepositoryType;
-                }
-            }
+        // Another writer stored the first row of a link meanwhile: every item of that link is staged again, on that
+        // row. The branch rows and the projects do not depend on the state row and stay staged as they are.
+        void StageAgainOnStoredRow(WorkspaceRepositoryContextState stored)
+        {
+            var linkId = stored.WorkspaceRepositoryId;
+            stateByWrl[linkId] = stored;
+            var linkPasses = passes.Where(p => p.Wr.WorkspaceRepositoryId == linkId).ToList();
+            if (linkPasses.Count == 0)
+                return;
+
+            linkBeforeFirstRow[linkId].Restore(dbContext.Entry(linkPasses[0].Wr));
+            foreach (var pass in linkPasses)
+                Stage(pass);
         }
 
         if (projectBatch.Count > 0)
         {
+            // A first state row is stored before the reconcile: its insert can lose a race, and the reconcile's save,
+            // made under the projection gate with the project rows it decided there, cannot be repeated from here.
+            if (firstRows.Count > 0)
+                await SaveStagedAsync(firstRows, StageAgainOnStoredRow, cancellationToken);
+
             // Saves this context, including the staged checkout rows and branch refs, in the same transaction as the project merge.
             // The edges are merged for the whole graph by the caller (see WorkspaceGitService.PersistVersionsAsync).
             await workspaceProjectRepository.ReconcileProjectSnapshotAsync(
@@ -732,7 +801,18 @@ public sealed class WorkspaceRepositoryStateWriter(
         }
         else
         {
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await SaveStagedAsync(firstRows, StageAgainOnStoredRow, cancellationToken);
+        }
+
+        foreach (var pass in passes)
+        {
+            var changed = pass.Changed;
+            if (pass.BranchesChanged)
+                changed |= RepositoryFactGroups.Branches;
+            if (pass.Snapshot.ProjectsProbed)
+                changed |= RepositoryFactGroups.Projects;
+            results[pass.RepositoryId] = new RepositoryStateWriteResult(true, RepositoryStateFreshness.ProbedGroups(pass.Snapshot), changed);
+            staged.Add((pass.Wr, stateByWrl[pass.Wr.WorkspaceRepositoryId], pass.PreviousBranch));
         }
 
         if (freshness is not null)
@@ -808,6 +888,111 @@ public sealed class WorkspaceRepositoryStateWriter(
             .Select(row => row.WorkspaceRepositoryId)
             .ToListAsync(cancellationToken))
         .ToHashSet();
+
+    /// <summary>One item of a batch: what was asked for, and what staging it found.</summary>
+    private sealed class BatchPass(
+        int repositoryId,
+        RepositoryStateSnapshot snapshot,
+        WorkspaceRepositoryLink wr,
+        IReadOnlyList<SyncProjectInfo>? projects)
+    {
+        public int RepositoryId { get; } = repositoryId;
+        public RepositoryStateSnapshot Snapshot { get; } = snapshot;
+        public WorkspaceRepositoryLink Wr { get; } = wr;
+
+        /// <summary>The projects to store, or null when the item probed none or the Workspace keeps none.</summary>
+        public IReadOnlyList<SyncProjectInfo>? Projects { get; } = projects;
+
+        public string? PreviousBranch { get; set; }
+        public RepositoryFactGroups Changed { get; set; }
+        public bool BranchesChanged { get; set; }
+    }
+
+    /// <summary>
+    /// The pending changes of a link before a write staged its mirror for a new state row. When that row loses the
+    /// race, the write is staged again on the stored row, and what the first staging put on the link must not stay
+    /// behind where the second one does not write it (commit counts staged for a row that turns out to be on a tag).
+    /// Changes the caller left pending on the link are kept.
+    /// </summary>
+    private sealed class LinkBeforeStaging(IReadOnlyDictionary<string, object?> pendingValues)
+    {
+        public static LinkBeforeStaging Capture(EntityEntry<WorkspaceRepositoryLink> link) => new(
+            link.Properties
+                .Where(p => p.IsModified)
+                .ToDictionary(p => p.Metadata.Name, p => p.CurrentValue));
+
+        public void Restore(EntityEntry<WorkspaceRepositoryLink> link)
+        {
+            foreach (var property in link.Properties)
+            {
+                if (property.Metadata.IsPrimaryKey())
+                    continue;
+
+                if (pendingValues.TryGetValue(property.Metadata.Name, out var pending))
+                {
+                    property.CurrentValue = pending;
+                    property.IsModified = true;
+                }
+                else
+                {
+                    property.CurrentValue = property.OriginalValue;
+                    property.IsModified = false;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Saves what is staged on this writer's context. <paramref name="firstRows"/> are the state rows this write
+    /// added because it read that the context had none for their link.
+    /// </summary>
+    /// <remarks>
+    /// Writers on other scopes (the hook sync queue, a sync, a pull, the single-repository refresh) add the first
+    /// row of the same link at the same time, each after reading that there is none, and the unique index on
+    /// (context, link) lets one insert through. The save that comes second fails as a whole and stores nothing.
+    /// It is not an error of the write: the unsaved row is given up, the row the other writer stored is loaded, and
+    /// <paramref name="stageAgainOnStoredRow"/> stages the write on it as on any existing row, so the groups this
+    /// write did not probe keep what the other writer stored and the changed groups are compared with that row.
+    /// Then the same context is saved again: everything else that was staged with the row (the link mirror, branch
+    /// rows, changes the caller left pending) is still pending and goes with it. The method is not run again and the
+    /// tracker is not cleared for this, because callers hold entities of this context that they write afterwards.
+    /// A unique violation that is not a first row stored meanwhile surfaces.
+    /// </remarks>
+    private async Task SaveStagedAsync(
+        IReadOnlyCollection<WorkspaceRepositoryContextState> firstRows,
+        Action<WorkspaceRepositoryContextState> stageAgainOnStoredRow,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateException ex) when (attempt < DbWriteConflict.MaxAttempts && DbWriteConflict.IsUniqueViolation(ex))
+            {
+                var unsaved = firstRows.Where(s => dbContext.Entry(s).State == EntityState.Added).ToList();
+                if (unsaved.Count == 0)
+                    throw;
+
+                var contextId = unsaved[0].WorkspaceFeatureContextId;
+                var linkIds = unsaved.Select(s => s.WorkspaceRepositoryId).ToList();
+                var storedMeanwhile = await dbContext.WorkspaceRepositoryContextStates
+                    .Where(s => s.WorkspaceFeatureContextId == contextId && linkIds.Contains(s.WorkspaceRepositoryId))
+                    .ToListAsync(cancellationToken);
+                if (storedMeanwhile.Count == 0)
+                    throw;
+
+                foreach (var stored in storedMeanwhile)
+                {
+                    var lost = unsaved.First(s => s.WorkspaceRepositoryId == stored.WorkspaceRepositoryId);
+                    dbContext.Entry(lost).State = EntityState.Detached;
+                    stageAgainOnStoredRow(stored);
+                }
+            }
+        }
+    }
 
     /// <summary>Mutates the tracked context state and, for the special Workspace, the link. Does not save.</summary>
     private static string? StageTracked(

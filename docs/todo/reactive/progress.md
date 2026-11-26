@@ -358,3 +358,50 @@ dotnet test src/GrayMoon.App.Tests/GrayMoon.App.Tests.csproj --no-build --filter
 - **Inventory:** 77 rows, every one with a decision: 54 retained, 9 extended, 7 narrowed, 4 replaced, 1 reduced, 1 background, 1 deferred.
 - **Not possible in this run:** VDI measurements and any check in a running App or browser. Both are listed for the owner in the verification report, section 5.
 - **Open points:** none. Everything stays uncommitted; no file is staged in any repository.
+
+## After the run - defect found by the owner's manual test (2026-11-26)
+
+- **Report:** Prepare Workspace, then Return to Default on Workspace 14, ended with an error at 21:33:54.
+- **Log (`%LocalAppData%\GrayMoon\Logs\desktop-20261126.log`):** `Workspace repositories page job failed for workspace 14`, `DbUpdateConcurrencyException: expected to affect 1 row(s), but actually affected 0`, thrown from `RepositoryBranchWriter.PersistAsync` -> `AppDbContext.SaveDroppingStoredBranchRowsAsync` inside `WorkspaceGitService.ReturnToDefaultDirectAsync`. 27 of 30 `ReturnToDefaultBranch` Worker commands had completed. In the three seconds before it the sync queue stored branch lists for the same repositories (the `reference-transaction` hook of the deleted branches).
+- **Cause:** two writers removed the same `RepositoryBranches` row. The context's save handled a row that another writer inserted first, but not one that another writer removed first.
+- **Was it this run?** Not shown either way. Both writers and the unhandled case are in the code before the run, and nothing the run changed touches when either writes. The logs of 2026-11-20 to 2026-11-25 do not have the exception, but they are from older builds and do not show whether Return to Default ran with the hook in place. Recorded as found during manual testing of this branch.
+- **Fix:** `Data/AppDbContext.BranchRows.cs`: a `DbUpdateConcurrencyException` whose rows are all branch rows is settled (a removal that is already done is dropped; a row this writer still lists is stored again) and the save is repeated, at most three times. Any other conflict is rethrown.
+- **Tests:** `BranchRowSaveRaceTests`, three new: removed by both, removed by one and still listed by the other, and a conflict on another kind of row still fails. The first two failed with the logged exception before the fix.
+- **Documents:** `docs/architecture/03` (branch rows), `GrayMoon.Desktop/README.md` (new top bullet).
+- **State after the failed run:** the checkouts were switched; the stored state of the repositories whose write was cut off can be behind. The drift check repairs commit and branch for an open Workspace; a Sync of the Workspace repairs everything at once.
+
+## After the run - the same defect in other writers (2026-11-26)
+
+- **Request:** rescan for the branch row defect elsewhere, then fix all of it, with independent agents that confirm each case before they fix it. This lifts the "serial, no agents" limit of the run for this task, by the owner's instruction.
+- **Scan:** every table with rows written by more than one unserialized path, where a writer reads, decides and saves. Found: pull request rows, CI status rows, the first state row of a link in a context (three writers), the special Workspace context, the selected-context row, settings, and project / dependency rows written outside the projection gate.
+- **Method:** a shared helper first (`Data/DbWriteConflict.cs`, 4 tests). Then five agents, one area each, on separate files and separate build output folders. Each had to reproduce its case with a failing test before changing code, and to report "not reachable" instead of changing code otherwise. All five reported reachable and confirmed.
+
+| Area | Failing tests before the fix | Fix |
+|---|---|---|
+| Pull request rows (`WorkspacePullRequestRepository`, six Upserts) | 15 cases: remove / remove and remove / update (`DbUpdateConcurrencyException`), add / add (unique violation) | `DbWriteConflict.RetryAsync`, factory context per attempt |
+| CI status rows (`WorkspaceActionRepository`, two Upserts) | 4: add / add, update of a removed row | The same |
+| First state row (`WorkspaceRepositoryStateWriter`: `ApplyAsync`, `ApplyTagRefreshAsync`, `ApplyBatchAsync`) | 5: unique violation on (context, link) | The loser stages its write again on the stored row and saves the same context again (`SaveStagedAsync`); the tracker is not cleared |
+| First state row, the two other creators (dependency stats, file-version counters), found by the agent above and fixed afterwards in the main session | 2: the same unique violation | `ContextStateRowSave.SaveAdoptingStoredStateRowsAsync` |
+| One-time creations (special context, selected-context row, settings) | 7 | `RetryAsync` for the first two; settings detach only the collided row, because they use the scope's context |
+| Project rows outside the gate (`SyncGeneratedPackageDependenciesAsync`, `SetPackagesMatchedConnectorsAsync`) | 4 | The projection gate (special Workspace first, then the Feature); the registry mapping is a set-based update |
+
+- **Tests (2026-11-26, whole suites after everything, no filter):** build 0 errors. Common Failed 0, Passed 480. Worker Failed 0, Passed 1239. App Failed 0, Passed 5731.
+- **Changed files (product):** `Data/DbWriteConflict.cs` (new), `Data/ContextStateRowSave.cs` (new), `Repositories/WorkspacePullRequestRepository.cs`, `WorkspaceActionRepository.cs`, `AppSettingRepository.cs`, `WorkspaceProjectRepository.cs`, `WorkspaceProjectRepository.GeneratedPackages.cs`, `WorkspaceProjectRepository.DependencyStats.cs`, `Services/Workspaces/WorkspaceRepositoryStateWriter.cs`, `WorkspaceFileVersionService.cs`, `Services/Features/WorkspaceFeatureContextResolver.cs`, `WorkspaceSelectedFeatureContextService.cs`.
+- **New test files:** `DbWriteConflictTests`, `PullRequestRowSaveRaceTests`, `ActionRowSaveRaceTests`, `ContextStateRowCreationRaceTests`, `DerivedStateRowCreationRaceTests`, `OneTimeRowCreationRaceTests`, `ProjectRowWriterGateTests`.
+- **Documents:** `AGENTS.md` ("Read, decide, save"), `docs/architecture/03` ("Two writers of one row"), `06` (projection gate order); `GrayMoon.Desktop/README.md` (new top bullet).
+- **One behavior change besides the fixes:** a batch state write that creates a first state row and also carries projects now saves the rows before the project reconcile instead of inside it (two saves). Batches without a new row or without projects save once as before.
+- **Left open, with the reason:**
+  - (Closed afterwards, see below.) The generated-package sync of the special Workspace could touch a Feature's rows without that Feature's gate.
+  - A pull request Upsert told "no pull request" that finds no row returns without a save; a row another writer adds in that moment stays until the next refresh. No exception, so nothing to retry; closing it needs an unconditional delete.
+  - `WorkspaceActionService` decides "a fetch is already in flight" in two steps, so two tabs can both fetch. The database part is covered now; the duplicate GitHub call is not.
+  - A write to the state row of a Feature whose removal deletes it meanwhile is still an exception that the hook sync and the version stage log.
+
+## After the run - the Workspace's generated-package sync and the Features' gates (2026-11-26)
+
+- **Request:** close the gap left open above.
+- **Confirmed first:** `ProjectRowWriterGateTests.A_Features_merge_cannot_remove_the_consumer_the_Workspaces_sync_adds_an_edge_for` failed on the code before the fix with `DbUpdateException` / `SQLite Error 19: 'FOREIGN KEY constraint failed'`: the special Workspace's sync read a Feature's consumer project, the Feature's merge removed it under the Feature's gate, and the sync inserted an edge to a row that was gone.
+- **Fix:** `WorkspaceProjectRepository.GeneratedPackages.cs`: the special Workspace's sync takes the gate of every Feature of the Workspace after its own (`AcquireFeatureProjectionGatesAsync`), by ascending context id, and reads the Features again after taking them, so a Feature created while it waited is covered (`A_Feature_created_while_the_Workspaces_sync_waited_for_a_gate_is_covered_too`). A Feature's sync is unchanged: the special gate, then its own.
+- **Why it cannot deadlock:** every path takes gates in one order (special first, then Features ascending). No path takes the special gate while it holds a Feature's: Feature merges and the Feature seed hold only their own gate and call nothing that is gated.
+- **Cost:** the special Workspace's file-version check now waits for a Feature seed or merge that is running; both are short.
+- **Tests (whole suites, no filter):** build 0 errors. Common Failed 0, Passed 480. Worker Failed 0, Passed 1239. App Failed 0, Passed 5733.
+- **Documents:** `docs/architecture/03` ("Two writers of one row"), `06` (gate order). No README bullet: the previous one ("Two things saving the same entry at once") covers it.

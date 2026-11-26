@@ -1192,7 +1192,17 @@ public sealed class WorkspaceFileVersionService(
             state.HasSelfFileVersionToken = hasSelf;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        // A state row added above can have been stored by the state writer meanwhile: the counters then go onto that row.
+        await dbContext.SaveAdoptingStoredStateRowsAsync(
+            (lost, stored) =>
+            {
+                stored.OutOfDateFileRepos = lost.OutOfDateFileRepos;
+                stored.OutOfDateFileLines = lost.OutOfDateFileLines;
+                stored.TotalFileLines = lost.TotalFileLines;
+                stored.TotalFileConfigRepos = lost.TotalFileConfigRepos;
+                stored.HasSelfFileVersionToken = lost.HasSelfFileVersionToken;
+            },
+            cancellationToken);
     }
 
     private static Dictionary<int, HashSet<string>> BuildTotalFileConfigReposByDependentRepo(

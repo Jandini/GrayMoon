@@ -622,7 +622,7 @@ A Workspace repository can be checked out in several contexts at once (the speci
 4. include the context id in any lookup key that is not globally unique across contexts;
 5. resolve repository paths through `IWorkspaceContextPathResolver`, and attribute Worker notifications through `IWorkspaceHookContextAttributor`; never derive a context from the UI selection inside an operation;
 6. structural changes (membership, Feature create/repair/rollback, external worktree removal, Workspace refresh) use `TryStartStructural`; per-context mutations use `TryStartContext` with a context job key (`WorkspaceJobKeys.ContextOverlayKey`); Remove Feature is lockless and queued (section 14);
-7. Feature-scoped writers of `WorkspaceProjects` / `ProjectDependencies` take `FeatureFinalizationCoordinator.AcquireProjectionAsync(contextId)`, so the unique (context, repository, name) index is never raced.
+7. Feature-scoped writers of `WorkspaceProjects` / `ProjectDependencies` take `FeatureFinalizationCoordinator.AcquireProjectionAsync(contextId)`, so the unique (context, repository, name) index is never raced. Gates are taken in one order only: the special context's first, then Feature contexts by ascending id. A Feature writer that also reads special-Workspace rows takes the special gate and then its own; the special Workspace's generated-package sync, which writes to every Feature's rows, takes all of them (`SyncGeneratedPackageDependenciesAsync`). Never take the special gate while holding a Feature's; the gate is not reentrant, so nothing called under it may take it again.
 
 When adding a context-aware overload, update every call site that already has a context in scope.
 

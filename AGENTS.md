@@ -64,6 +64,29 @@ DI scope. That means:
    a service that is never fanned out is fine and does not need to change - do not
    rewrite working call sites that do not match rule 2 or 3 just to be thorough.
 
+### Read, decide, save: another writer may be first
+
+A second defect of the same family (2026-11-26, Return to Default failed with
+`DbUpdateConcurrencyException`): a method reads a row, decides from it (add,
+update, remove) and saves, while another scope does the same to the same row.
+The hook sync queue, operations and the polling of every open tab all write at
+once, and each has its own context.
+
+- A new "read, then add if missing / update / remove" on a table that more
+  than one path writes handles the lost race: wrap the whole read-decide-save
+  in `DbWriteConflict.RetryAsync` with a factory context created inside the
+  delegate.
+- On the scope's `AppDbContext` never clear the tracker to retry: settle only
+  the row that collided (detach it, read the stored row, apply your values).
+  See `AppSettingRepository.SetValueAsync` and `ContextStateRowSave`.
+- Never catch `DbUpdateException` without checking `DbWriteConflict.IsLostRace`
+  and never swallow it without repeating the write.
+- A failing test stages the race with a second context that writes between the
+  read and the save (a `SaveChangesInterceptor`), without sleeps.
+
+The table of writers and how each is covered is in
+`docs/architecture/03-data-model-and-persistence.md`, "Two writers of one row".
+
 ### Before merging a change that touches `AppDbContext` usage
 
 - Grep the class for every `Task.WhenAll`, `SemaphoreSlim`, or
