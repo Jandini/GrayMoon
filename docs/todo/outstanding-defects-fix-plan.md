@@ -15,6 +15,7 @@ Last checked 2026-11-21. Covers every note in `docs/todo/defects/`. The items fi
 | "Pull" also pushes; Sync Commits may publish a never-pushed branch (unintended publish, same harm as the fixed Undo Push Commits bug of 2026-11-21) | [implicit-fallback-actions](defects/implicit-fallback-actions.md) (items 1, 2) | Should (high priority, validate first) | M |
 | Interpolated git command lines in `GitService` (`CheckoutBranchAsync`, `DeleteBranchAsync`) | [implicit-fallback-actions](defects/implicit-fallback-actions.md) (item 6) | Optional | S |
 | Signing secrets still at repository level; release workflow never run | [release-signing-secrets-and-workflow-run](defects/release-signing-secrets-and-workflow-run.md) | Must (owner action) | S |
+| Unused GitHub secrets and app write access to GrayMoon.Desktop, left from the deleted Desktop notification | [remove-desktop-dispatch-github-access](defects/remove-desktop-dispatch-github-access.md) | Should (owner action) | S |
 | Missing test: context flip in the tooltip load | [review-fix-test-gaps](defects/review-fix-test-gaps.md) | Optional | M |
 | Convention scans narrower than the rules: page-state scan, context-read scan, App folders the catch scan does not reach; five silent Worker catches listed as `OPEN` | [convention-test-coverage](defects/convention-test-coverage.md) | Optional | M |
 | Worker commit hardening C, E, F | [commit-all-partial-commit-race](defects/commit-all-partial-commit-race.md) (Phase 3) | Optional (needs repro) | L |
