@@ -134,6 +134,8 @@ public sealed class CommandJobFactory
                 ?? throw new ArgumentException("Invalid CleanupFeatureFolder args"),
             WorkerHubMethods.SweepPendingFeatureFolders => JsonSerializer.Deserialize<SweepPendingFeatureFoldersRequest>(json, options)
                 ?? throw new ArgumentException("Invalid SweepPendingFeatureFolders args"),
+            WorkerHubMethods.HoldWorktreeHookSyncs => JsonSerializer.Deserialize<HoldWorktreeHookSyncsRequest>(json, options)
+                ?? throw new ArgumentException("Invalid HoldWorktreeHookSyncs args"),
             WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize<AttachWorkspaceRepositoryRequest>(json, options)
                 ?? throw new ArgumentException("Invalid AttachWorkspaceRepository args"),
             WorkerHubMethods.DiscardWorkspaceRoot => JsonSerializer.Deserialize<DiscardWorkspaceRootRequest>(json, options)

@@ -28,7 +28,13 @@ internal readonly record struct WorktreeDiskStatus(
     int? FeatureBranchAheadOfDefault = null,
     bool? FeatureBranchHasUpstream = null,
     int? FeatureBranchAheadOfUpstream = null,
-    string? FeatureBranchSha = null)
+    string? FeatureBranchSha = null,
+    string? HeadSha = null,
+    int? StagedCount = null,
+    int? UnstagedCount = null,
+    int? UntrackedCount = null,
+    int? ConflictCount = null,
+    bool? HasOperationInProgress = null)
 {
     public static WorktreeDiskStatus Unknown(string reason) => new(true, false, null, null, null, null, reason);
 
@@ -37,8 +43,10 @@ internal readonly record struct WorktreeDiskStatus(
         bool isLocked = false, string? lockReason = null, string? branch = null,
         bool? featureBranchExists = null, int? featureBranchAheadOfDefault = null,
         bool? featureBranchHasUpstream = null, int? featureBranchAheadOfUpstream = null,
-        string? featureBranchSha = null) =>
+        string? featureBranchSha = null,
+        string? headSha = null, int? stagedCount = null, int? unstagedCount = null, int? untrackedCount = null,
+        int? conflictCount = null, bool? hasOperationInProgress = null) =>
         new(false, exists, isDirty, hasUpstream, aheadOfUpstream, aheadOfDefault, null, isLocked, lockReason,
             branch, featureBranchExists, featureBranchAheadOfDefault, featureBranchHasUpstream, featureBranchAheadOfUpstream,
-            featureBranchSha);
+            featureBranchSha, headSha, stagedCount, unstagedCount, untrackedCount, conflictCount, hasOperationInProgress);
 }

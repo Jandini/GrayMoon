@@ -337,6 +337,10 @@ public sealed class WorkspaceFeatureOperations(
         using var monitoringPause = gitChangesMonitoringPause.Pause(contextId.Value);
         try
         {
+            // The Worker keeps the Checkout sync of each new worktree back while worktrees are created and released
+            // them 500 ms after the last one: 40 GitVersion runs beside the 40 of the version step below (53 to
+            // 59 s, logs of 2026-11-25). Held until that step has ended; released in the finally on every way out.
+            await SetWorktreeHookSyncHoldAsync(contextId, hold: true, cancellationToken);
             var anyFailure = 0;
             var createCompleted = 0;
             var createTotal = pendingRows.Count;
@@ -479,6 +483,7 @@ public sealed class WorkspaceFeatureOperations(
             progress?.Report(new OperationProgress("Verifying published packages..."));
             await ResolveInitialEffectiveVersionsAsync(workspaceId, contextId, name, progress, cancellationToken);
             stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "EffectiveVersions", stageStart);
+            await SetWorktreeHookSyncHoldAsync(contextId, hold: false, CancellationToken.None);
 
             await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
             if (createCodeGraphIndex)
@@ -512,6 +517,35 @@ public sealed class WorkspaceFeatureOperations(
                 ContextId = contextId,
                 WorkspaceFeatureId = feature.WorkspaceFeatureId
             };
+        }
+        finally
+        {
+            await SetWorktreeHookSyncHoldAsync(contextId, hold: false, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Sets or releases this Feature's hold on the Worker's deferred Checkout syncs. Never fails Create: the hold only
+    /// decides when those syncs run. A release that does not reach the Worker is logged, and the Worker ends the hold
+    /// by itself after ten minutes.
+    /// </summary>
+    private async Task SetWorktreeHookSyncHoldAsync(WorkspaceFeatureContextId contextId, bool hold, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await workerBridge.SendCommandAsync(
+                WorkerHubMethods.HoldWorktreeHookSyncs,
+                new { key = $"create-feature-{contextId.Value}", hold },
+                cancellationToken);
+            if (!response.Success)
+                logger.LogWarning(
+                    "Worker did not {Action} the hold on Checkout syncs for context {ContextId}: {Error}",
+                    hold ? "set" : "release", contextId.Value, response.Error);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "Could not {Action} the hold on Checkout syncs for context {ContextId}.", hold ? "set" : "release", contextId.Value);
         }
     }
 
@@ -577,16 +611,8 @@ public sealed class WorkspaceFeatureOperations(
                 r => states.FirstOrDefault(s => s.WorkspaceRepositoryId == r.WorkspaceRepositoryId)?.BranchName
                     ?? (r.IsDetached ? null : info.FeatureName));
 
-        // PR refresh (GitHub) and Feature workspace path resolution are independent; run together
-        // so the Checking overlay does not wait for them sequentially.
-        var pullRequestRefreshTask = RefreshPullRequestsForRemoveAnalysisAsync(
+        var (pullRequestStatusUnknown, mergedHeadShaByRepositoryId) = await RefreshPullRequestsForRemoveAnalysisAsync(
             info.WorkspaceId, featureContextId.Value, branchByRepositoryId, cancellationToken);
-        var pathArgsTask = ResolveFeatureWorkspaceArgsForRemoveAnalysisAsync(
-            featureContextId, cancellationToken);
-        await Task.WhenAll(pullRequestRefreshTask, pathArgsTask);
-
-        var (pullRequestStatusUnknown, mergedHeadShaByRepositoryId) = await pullRequestRefreshTask;
-        var (featureWorkspaceRoot, featureWorkspaceFolder, featureWorkspaceRepositoryName) = await pathArgsTask;
 
         var prs = await db.WorkspaceRepositoryContextPullRequests
             .AsNoTracking()
@@ -613,14 +639,9 @@ public sealed class WorkspaceFeatureOperations(
                     var featureBranchName = row.IsDetached ? null : info.FeatureName;
                     var disk = await InspectWorktreeDiskStatusAsync(
                         mainPath, row.WorktreePath, row.WorkspaceRepository?.DefaultBranchName, featureBranchName, cancellationToken);
-                    var live = await ProbeFeatureWorktreeLiveStatusAsync(
-                        featureWorkspaceRoot,
-                        featureWorkspaceFolder,
-                        featureWorkspaceRepositoryName,
-                        info.WorkspaceId,
-                        row,
-                        disk.Exists,
-                        cancellationToken);
+                    // The changes come from the same inspection. A separate GetGitChangeStatus per repository ran
+                    // git status a second time, on a machine where a git process costs over a second.
+                    var live = FeatureWorktreeLiveStatus.From(disk);
 
                     // The live current branch, from the Worker; null when detached or when disk status
                     // is itself Unknown (09 SB-2). Drift is judged against this, never against the
@@ -717,22 +738,6 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
-    private async Task<(string? Root, string? Folder, string? WorkspaceRepositoryName)> ResolveFeatureWorkspaceArgsForRemoveAnalysisAsync(
-        WorkspaceFeatureContextId featureContextId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var featureArgs = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
-            return (featureArgs.WorkspaceRoot, featureArgs.WorkspaceFolderName, featureArgs.WorkspaceRepositoryName);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not resolve Feature workspace paths for remove analysis.");
-            return (null, null, null);
-        }
-    }
-
     public async Task<OperationResult> RemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
         RemoveFeatureOptions options,
@@ -821,6 +826,9 @@ public sealed class WorkspaceFeatureOperations(
 
     /// <summary>Shown for a repository that was clean in the Remove analysis and has uncommitted work when the removal runs.</summary>
     internal const string ChangedSinceCheckMessage = "changed since the check, run Remove again.";
+
+    /// <summary>The Worker's <c>failureKind</c> for a worktree git refused to remove because it has modified or untracked files.</summary>
+    internal const string UncommittedChangesFailureKind = "UncommittedChanges";
 
     /// <summary>
     /// True when the analysed plan showed uncommitted, staged or conflicted work in this repository, so the user's
@@ -936,24 +944,11 @@ public sealed class WorkspaceFeatureOperations(
                     // AllowForceDeleteLocalBranches does not imply discard permission.
                     var force = options.AllowDiscardUncommitted
                         && RemovePlanShowedUncommittedWork(driftByWrId.GetValueOrDefault(row.WorkspaceRepositoryId));
-                    if (!force)
-                    {
-                        // The removal is queued and runs unattended, so re-check now: a repository that was
-                        // clean at analysis and is dirty at execution is skipped, never force-removed. An
-                        // Unknown probe falls through to the non-force remove, which git itself refuses on a
-                        // dirty worktree.
-                        var current = await InspectWorktreeDiskStatusAsync(mainPath, row.WorktreePath, null, null, cancellationToken);
-                        if (!current.StatusUnknown && current.IsDirty == true)
-                        {
-                            var changed = string.IsNullOrWhiteSpace(repoName)
-                                ? ChangedSinceCheckMessage
-                                : $"{repoName}: {ChangedSinceCheckMessage}";
-                            logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, changed);
-                            errorsByWrId[row.WorkspaceRepositoryId] = changed;
-                            return;
-                        }
-                    }
 
+                    // The removal is queued and runs unattended. A repository that was clean at analysis and is dirty
+                    // now is never force-removed: without force, git worktree remove itself refuses a worktree with
+                    // modified or untracked files, and the Worker reports that as UncommittedChanges. A full
+                    // inspection before every removal answered the same question with about ten git processes.
                     var response = await workerBridge.SendCommandAsync(
                         WorkerHubMethods.RemoveGitWorktree,
                         new
@@ -969,6 +964,17 @@ public sealed class WorkspaceFeatureOperations(
                         cancellationToken);
                     if (!response.Success)
                     {
+                        var refusal = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
+                        if (!force && string.Equals(refusal?.FailureKind, UncommittedChangesFailureKind, StringComparison.Ordinal))
+                        {
+                            var changed = string.IsNullOrWhiteSpace(repoName)
+                                ? ChangedSinceCheckMessage
+                                : $"{repoName}: {ChangedSinceCheckMessage}";
+                            logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, changed);
+                            errorsByWrId[row.WorkspaceRepositoryId] = changed;
+                            return;
+                        }
+
                         logger.LogWarning(
                             "RemoveGitWorktree failed for {Path}: {Error}. Repository={Repository} FeatureName={FeatureName}",
                             row.WorktreePath, FeatureOperationLog.Redact(response.Error), repoName, info.FeatureName);
@@ -1579,86 +1585,6 @@ public sealed class WorkspaceFeatureOperations(
             .ExecuteDeleteAsync(cancellationToken);
     }
 
-    private async Task<FeatureWorktreeLiveStatus> ProbeFeatureWorktreeLiveStatusAsync(
-        string? featureWorkspaceRoot,
-        string? featureWorkspaceFolder,
-        string? workspaceRepositoryName,
-        int workspaceId,
-        WorkspaceFeatureRepository row,
-        bool worktreeExists,
-        CancellationToken cancellationToken)
-    {
-        if (!worktreeExists)
-            return FeatureWorktreeLiveStatus.Unavailable;
-
-        var repoName = row.WorkspaceRepository?.Repository?.RepositoryName;
-        var repositoryId = row.WorkspaceRepository?.RepositoryId;
-        if (string.IsNullOrWhiteSpace(featureWorkspaceRoot)
-            || string.IsNullOrWhiteSpace(featureWorkspaceFolder)
-            || string.IsNullOrWhiteSpace(repoName)
-            || repositoryId is null
-            || !workerBridge.IsWorkerConnected)
-        {
-            return FeatureWorktreeLiveStatus.Unavailable;
-        }
-
-        try
-        {
-            var capabilities = await capabilitiesResolver.GetAsync(workspaceId, cancellationToken);
-            var response = await workerBridge.SendCommandAsync(
-                "GetGitChangeStatus",
-                new
-                {
-                    workspaceRoot = featureWorkspaceRoot,
-                    workspaceName = featureWorkspaceFolder,
-                    repositoryName = repoName,
-                    workspaceRepositoryName,
-                    workspaceId,
-                    repositoryId = repositoryId.Value,
-                    includeLineStats = false,
-                    capabilities = capabilities.ToRepositoryOperationCapabilities()
-                },
-                cancellationToken);
-
-            var status = WorkerResponseJson.DeserializeWorkerResponse<GitChangesStatusResult>(response.Data);
-            if (status is { Success: false, ErrorCode: "PathUnderRemoval" })
-            {
-                // Expected: the Worker is removing this folder and refuses to start work in it. Not a failure.
-                logger.LogDebug("GetGitChangeStatus skipped for Feature worktree {Path}: it is being removed", row.WorktreePath);
-                return FeatureWorktreeLiveStatus.Unavailable;
-            }
-
-            if (status is null || !status.Success || status.Snapshot is null)
-            {
-                logger.LogWarning(
-                    "GetGitChangeStatus failed for Feature worktree {Path}: {Error}",
-                    row.WorktreePath,
-                    status?.ErrorMessage ?? response.Error ?? "unknown");
-                return FeatureWorktreeLiveStatus.Unavailable;
-            }
-
-            var snapshot = status.Snapshot;
-            var hasUncommitted = snapshot.Changes.Any(c => c.IsChanged || c.WorktreeChange == GitChangeKind.Untracked);
-            var hasStaged = snapshot.Changes.Any(c => c.IsStaged);
-            var hasConflicts = snapshot.Changes.Any(c => c.IsConflicted)
-                               || snapshot.IsMerging
-                               || snapshot.IsRebasing
-                               || snapshot.IsCherryPicking;
-
-            return new FeatureWorktreeLiveStatus(
-                LiveStatusEstablished: true,
-                HasUncommittedChanges: hasUncommitted,
-                HasStagedChanges: hasStaged,
-                HasConflicts: hasConflicts,
-                HeadCommit: snapshot.HeadCommit);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Live Feature worktree status probe failed for {Path}", row.WorktreePath);
-            return FeatureWorktreeLiveStatus.Unavailable;
-        }
-    }
-
     private static string? ComposeRemoveWarning(WorkspaceFeatureRepository row, FeatureWorktreeLiveStatus live, WorktreeDiskStatus disk)
     {
         if (row.State == WorkspaceFeatureRepositoryState.NeedsRepair && !string.IsNullOrWhiteSpace(row.LastError))
@@ -1752,7 +1678,9 @@ public sealed class WorkspaceFeatureOperations(
                 payload.IsLocked, payload.LockReason, payload.Branch,
                 payload.FeatureBranchExists, payload.FeatureBranchAheadOfDefault,
                 payload.FeatureBranchHasUpstream, payload.FeatureBranchAheadOfUpstream,
-                payload.FeatureBranchSha);
+                payload.FeatureBranchSha,
+                payload.HeadSha, payload.StagedCount, payload.UnstagedCount, payload.UntrackedCount,
+                payload.ConflictCount, payload.HasOperationInProgress);
         }
         catch (Exception ex)
         {
@@ -1769,6 +1697,29 @@ public sealed class WorkspaceFeatureOperations(
         string? HeadCommit)
     {
         public static FeatureWorktreeLiveStatus Unavailable { get; } = new(false, false, false, false, null);
+
+        /// <summary>
+        /// The changes of a worktree as its inspection read them. Established only when the Worker could read the
+        /// status. A conflicted file counts as changed and as staged too, and an unfinished merge, rebase or
+        /// cherry-pick counts as a conflict even with a clean working tree. Without the counts (only "dirty" is
+        /// known) the work is reported as uncommitted.
+        /// </summary>
+        public static FeatureWorktreeLiveStatus From(WorktreeDiskStatus disk)
+        {
+            if (disk.StatusUnknown || !disk.Exists || disk.IsDirty is not { } isDirty)
+                return Unavailable;
+
+            var conflicts = disk.ConflictCount ?? 0;
+            var countsKnown = disk.StagedCount is not null && disk.UnstagedCount is not null && disk.UntrackedCount is not null;
+            return new FeatureWorktreeLiveStatus(
+                LiveStatusEstablished: true,
+                HasUncommittedChanges: countsKnown
+                    ? disk.UnstagedCount + disk.UntrackedCount + conflicts > 0
+                    : isDirty,
+                HasStagedChanges: (disk.StagedCount ?? 0) + conflicts > 0,
+                HasConflicts: conflicts > 0 || disk.HasOperationInProgress == true,
+                HeadCommit: disk.HeadSha);
+        }
     }
 
     public async Task<IReadOnlyList<WorkspaceFeatureContextInfo>> ListFeaturesAsync(

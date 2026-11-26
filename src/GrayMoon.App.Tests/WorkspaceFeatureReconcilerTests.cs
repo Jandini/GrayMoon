@@ -89,6 +89,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         using var queue = new FeatureRemovalQueue(
             ctx.Resolve<IServiceScopeFactory>(),
             new NoFolderCleanup(),
+            new RecordingRefresh(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
         await queue.StartAsync(CancellationToken.None);
         try
@@ -122,6 +123,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         using var queue = new FeatureRemovalQueue(
             ctx.Resolve<IServiceScopeFactory>(),
             new NoFolderCleanup(),
+            new RecordingRefresh(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
 
         Assert.Equal(0, await queue.RecoverInterruptedRemovalsAsync(CancellationToken.None));
@@ -171,6 +173,7 @@ public sealed class WorkspaceFeatureReconcilerTests
         using var queue = new FeatureRemovalQueue(
             ctx.Resolve<IServiceScopeFactory>(),
             new NoFolderCleanup(),
+            new RecordingRefresh(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
         await queue.StartAsync(CancellationToken.None);
         Assert.True(await queue.TryEnqueueAsync(
@@ -185,6 +188,105 @@ public sealed class WorkspaceFeatureReconcilerTests
         Assert.Equal(WorkspaceFeatureLifecycleState.NeedsRepair, feature.LifecycleState);
         Assert.Equal(WorkspaceFeatureReconciler.InterruptedRemoving, feature.LastError);
         Assert.False(queue.IsPending(new WorkspaceFeatureContextId(featureContextId)));
+    }
+
+    /// <summary>
+    /// The Workspace status refresh used to start when the user confirmed Remove, and ran beside the removal: both
+    /// start git processes for every repository, and the removal took 160 to 225 s against 93 s alone (logs of
+    /// 2026-11-25). The queue runs the refresh first, so the Workspace is current when the user creates the next
+    /// Feature, and removes nothing until the refresh has ended.
+    /// </summary>
+    [Fact]
+    public async Task Queue_refreshes_the_Workspace_first_and_removes_nothing_until_the_refresh_has_ended()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await SeedFeatureAsync(ctx, WorkspaceFeatureLifecycleState.Ready, WorkspaceFeatureRepositoryState.Ready);
+        int featureContextId;
+        int specialContextId;
+        await using (var scope = ctx.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            featureContextId = await db.WorkspaceFeatureContexts
+                .Where(c => c.Kind == WorkspaceFeatureContextKind.Feature)
+                .Select(c => c.WorkspaceFeatureContextId)
+                .SingleAsync();
+            specialContextId = (await scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>()
+                .GetOrCreateSpecialWorkspaceContextIdAsync(ctx.WorkspaceId)).Value;
+        }
+
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, new
+        {
+            exists = true,
+            isDirty = false,
+            hasUpstream = true,
+            aheadOfUpstream = 0,
+            aheadOfDefault = 0,
+            branch = FeatureName,
+            featureBranchExists = true,
+            featureBranchAheadOfDefault = 0,
+            featureBranchHasUpstream = true,
+            featureBranchAheadOfUpstream = 0,
+        });
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+
+        var refresh = new RecordingRefresh { LetRunFinish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        using var queue = new FeatureRemovalQueue(
+            ctx.Resolve<IServiceScopeFactory>(),
+            new NoFolderCleanup(),
+            refresh,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
+        var completed = new TaskCompletionSource<FeatureRemovalCompleted>(TaskCreationOptions.RunContinuationsAsynchronously);
+        queue.Completed += c => completed.TrySetResult(c);
+        await queue.StartAsync(CancellationToken.None);
+        try
+        {
+            Assert.True(await queue.TryEnqueueAsync(
+                new WorkspaceFeatureContextId(featureContextId),
+                new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true }));
+            await refresh.RunStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Empty(ctx.WorkerBridge.Calls);
+            Assert.False(completed.Task.IsCompleted);
+
+            refresh.LetRunFinish.SetResult();
+            var outcome = await completed.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            Assert.True(outcome.Result.Success, outcome.Result.Error);
+            Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+            Assert.Equal([(ctx.WorkspaceId, specialContextId)], refresh.Ran);
+            Assert.Empty(refresh.Started);
+        }
+        finally
+        {
+            await queue.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private sealed class RecordingRefresh : IWorkspaceCheckoutRefresh
+    {
+        public List<(int WorkspaceId, int ContextId)> Started { get; } = [];
+
+        public void Start(int workspaceId, WorkspaceFeatureContextId contextId)
+        {
+            lock (Started)
+                Started.Add((workspaceId, contextId.Value));
+        }
+
+        public List<(int WorkspaceId, int ContextId)> Ran { get; } = [];
+
+        public TaskCompletionSource RunStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>When set, RunAsync ends only when this does.</summary>
+        public TaskCompletionSource? LetRunFinish { get; init; }
+
+        public async Task RunAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default)
+        {
+            lock (Ran)
+                Ran.Add((workspaceId, contextId.Value));
+            RunStarted.TrySetResult();
+            if (LetRunFinish != null)
+                await LetRunFinish.Task.WaitAsync(cancellationToken);
+        }
     }
 
     private sealed class NoFolderCleanup : IFeatureFolderCleanupService

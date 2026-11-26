@@ -74,6 +74,41 @@ public static class GitPorcelainV2Parser
         };
     }
 
+    /// <summary>
+    /// The upstream of the current branch from the <c># branch.upstream</c> and <c># branch.ab</c> headers of a
+    /// <c>--branch</c> scan. Git prints <c>branch.ab</c> only when the upstream ref exists, so counts that are null
+    /// with a name that is set mean the configured upstream is gone.
+    /// </summary>
+    public static GitPorcelainV2Upstream ParseUpstream(string? output)
+    {
+        string? upstream = null;
+        int? ahead = null;
+        int? behind = null;
+        if (string.IsNullOrEmpty(output))
+            return new GitPorcelainV2Upstream(upstream, ahead, behind);
+
+        foreach (var record in SplitRecords(output))
+        {
+            if (record.StartsWith("# branch.upstream ", StringComparison.Ordinal))
+            {
+                upstream = record["# branch.upstream ".Length..].Trim();
+            }
+            else if (record.StartsWith("# branch.ab ", StringComparison.Ordinal))
+            {
+                var parts = record["# branch.ab ".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2
+                    && parts[0].StartsWith('+') && int.TryParse(parts[0][1..], out var a)
+                    && parts[1].StartsWith('-') && int.TryParse(parts[1][1..], out var b))
+                {
+                    ahead = a;
+                    behind = b;
+                }
+            }
+        }
+
+        return new GitPorcelainV2Upstream(string.IsNullOrEmpty(upstream) ? null : upstream, ahead, behind);
+    }
+
     private static List<string> SplitRecords(string output)
     {
         var raw = output.Split('\0');
@@ -216,6 +251,13 @@ public static class GitPorcelainV2Parser
         'U' => GitChangeKind.Unmerged,
         _ => GitChangeKind.None,
     };
+}
+
+/// <summary>Upstream of the current branch as a porcelain v2 <c>--branch</c> scan reports it.</summary>
+public sealed record GitPorcelainV2Upstream(string? Upstream, int? Ahead, int? Behind)
+{
+    /// <summary>True when the upstream is configured and its ref exists.</summary>
+    public bool Exists => Upstream != null && Ahead != null;
 }
 
 /// <summary>Result of parsing one porcelain v2 status scan - branch/head state plus the flat change list.</summary>

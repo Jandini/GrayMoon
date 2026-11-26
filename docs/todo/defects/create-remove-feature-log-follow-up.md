@@ -203,10 +203,58 @@ Tester: no more reload, everything works.
 
 `CheckFileVersions` and `ResolveGeneratedPackageReferences` run in the diff pool (4 workers; besides them only `GetGitFileDiff`), where no status scan, worktree inspection or GitVersion run is ahead of them. Test: `WorkerCommandPoolRouterTests`.
 
-Create Feature pauses Git Changes monitoring of the new context (`IWorkspaceGitChangesMonitoringPause`) from the stored context until the last worktree exists, then requests one audit (`GitChangesAuditReason.FeatureCreated`). Before, the keeper and the audit reached the context mid-checkout: the watchers overflowed and git status scanned half-written trees. How much that slowed the checkout was not measured. Repair Feature does not pause. Test: `CreateFeatureMonitoringPauseTests`.
+Create Feature pauses Git Changes monitoring of the new context (`IWorkspaceGitChangesMonitoringPause`) from the stored context until the last worktree exists, then requests one audit (`GitChangesAuditReason.FeatureCreated`). Before, the keeper and the audit reached the context mid-checkout: the watchers overflowed and git status scanned half-written trees. Round 4 measured no effect on the checkout time (61.9 s without the pause, 66.0 s with it); the scans were wasted work, not the cause. Repair Feature does not pause. Test: `CreateFeatureMonitoringPauseTests`.
 
 ### Round 4: what to read
 
 "CheckAndPersist completed" near 1 s also while a removal runs; `queued` of `ResolveGeneratedPackageReferences` in the Worker log near 0; the `trigger=refresh` grid load within seconds of "fan-out settled". During Create: no "watcher overflow" and no "TooManyChanges" for the new Feature folder before `Stage=SourceWorktrees`, then one "audit start ... reason=FeatureCreated"; compare `Stage=SourceWorktrees` with the 73.7 s of round 3.
 
 Still open: Remove Feature beside a Sync (over 200 s), `EffectiveVersions`, the cancelled `InspectWorktree` logged as failed, C, and the six other context pages.
+
+## Round 4 (2026-11-25, 19:42 to 21:05, builds 0.2.1-optimization-followup.50 and .51)
+
+Tester: no more reload, everything works. Build .50 has the pool change, build .51 also the monitoring pause.
+
+| Point | Result |
+|---|---|
+| "CheckAndPersist completed" | 0.1 to 0.3 s, once 3.3 s, also while a removal ran (44 to 66 s in round 3). `queued` 0 ms on all 62 file-read calls. |
+| Scans during checkout | .50: 2 "watcher overflow" warnings. .51: none, and one "audit start ... reason=FeatureCreated" in the millisecond the checkout ended. |
+| HeadSnapshot | 11.6 s and 16.3 s with nothing else running. |
+| `Stage=SourceWorktrees` | 61.9 s (.50) and 66.0 s (.51). |
+| `Stage=EffectiveVersions` | 59.1 s and 52.6 s. |
+| Feature Create in total | 147 s and 151 s. |
+| Remove Feature | 159.6 s beside the Workspace refresh; `InspectWorktree` ran up to 41.8 s and waited up to 44.8 s. |
+| `RepositoryBranches` unique error, "InspectWorktree failed" | Neither occurred. |
+
+### Built after round 4
+
+A git process costs about 1.5 s on that machine, and both operations started far more of them than needed. Counted in the code: Remove Feature about 17 per repository (680 for 40 repositories), one inspection 13 to 14.
+
+- Remove Feature sends no `InspectWorktree` before each removal. Git's own refusal of a dirty worktree without `--force` is the re-check, reported as `failureKind` = `UncommittedChanges` and shown as "changed since the check". Test: `RemoveFeatureReportTests`.
+- `RemoveWorktreeAsync` lists the worktrees again only after a non-zero exit. `DeleteBranchAsync` reads "exists" and "is checked out here" with one `for-each-ref`. Test: `FeatureWorktreeGitProcessCountTests`.
+- `InspectWorktreeAsync` reads HEAD, branch, upstream, counts and changes from one `git status --porcelain=v2 --branch` and reuses them for the Feature branch when the worktree is on it: 5 processes instead of 13 to 14. It also reports an unfinished merge, rebase or cherry-pick. Test: `FeatureWorktreeGitProcessCountTests`.
+- The Remove analysis no longer sends `GetGitChangeStatus` per repository; the changes come from the inspection. Test: `RemoveFeatureWorkspaceRefreshTests`.
+- The Workspace refresh and the removal no longer run beside each other. First built as "refresh when the last removal has ended"; changed after round 5 to "refresh first, then remove" (see Round 5). Test: `WorkspaceFeatureReconcilerTests`.
+- `GetGitVersionAtBranchPoint` runs one git process before GitVersion instead of two.
+- Create Feature holds the deferred Checkout syncs (`HoldWorktreeHookSyncs`) until its version step has ended. Tests: `WorktreeCreateHookDeferralTests`, `CreateFeatureHookSyncHoldTests`.
+
+Not built: taking the parent version of a new Feature from the version the Workspace already stores, which would skip the GitVersion runs of the version step. Both GitVersion invocations returned the same version on three branches of the GrayMoon repository (GitVersion 5.12), which is one configuration. The stored Workspace version is also only as fresh as its last sync: a tag that arrived since would be missed, and this version is the one dependents are pinned to.
+
+## Round 5 (2026-11-26, 10:35 to 12:09)
+
+| Point | Round 4 | Round 5 |
+|---|---|---|
+| Feature Remove | 93 s alone, 160 s beside the refresh | 53.3, 54.5, 59.3 and 49.8 s (the middle two beside a Create Feature) |
+| `InspectWorktree` during "Checking" | 16 to 26 s | 5.4 to 7.3 s |
+| `Stage=EffectiveVersions` | 53 to 59 s | 21.0, 22.4, 22.0 and 19.8 s |
+| `Stage=SourceWorktrees` | 62 to 66 s | 62.5 to 67.4 s (not changed) |
+| `Stage=HeadSnapshot` | 12 to 16 s | 15.6 s alone; 53.8 s on the first Create after start; 45.6 and 36.6 s beside a removal |
+| Feature Create in total | 147 to 151 s | 105 s alone; 129 to 147 s otherwise |
+
+"Releasing 40 Checkout sync(s)" came 0.5 s after the version step in all four creates. The `RepositoryBranches` unique error occurred once (10:36:45, during the checkout of the first Create); the Create succeeded. It was the handled race of two writers adding the same branch row: the save recovered ("kept the existing row") and nothing was lost, but the failed insert was logged as two errors. Built after that: a save that adds branch rows checks for stored rows under the database write lock, so the failing insert is no longer sent (`AppDbContext.BranchRows.cs`). Test: `RepositoryBranchWriterRaceTests`.
+
+Tester: with the refresh at the end of the removal, a Feature could be created before the Workspace was refreshed (11:31:22 and 12:03:17, 13 and 24 s after Remove was confirmed). Built after that: the queue runs the refresh to its end first and removes the Feature afterwards, so the Workspace is busy with "Refreshing workspace state..." right after the confirm and the removal starts when it has ended.
+
+### Round 5: what to read (kept for reference)
+
+Feature Remove `DurationMs` against 93 s alone and 160 s beside the refresh; no `InspectWorktree` between "Feature Remove started" and "Feature Remove finished"; "Refreshing Workspace repository status" only after "Feature Remove finished". `InspectWorktree` duration in the Worker log during "Checking" against 16 to 26 s. `Stage=EffectiveVersions` against 53 to 59 s; "Releasing n Checkout sync(s)" after that stage, not before.

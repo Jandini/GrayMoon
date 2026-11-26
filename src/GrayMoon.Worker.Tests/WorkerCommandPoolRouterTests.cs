@@ -13,6 +13,7 @@ public sealed class WorkerCommandPoolRouterTests
     [InlineData("ListGitWorktrees", WorkerCommandPool.Read)]
     [InlineData("InspectWorktree", WorkerCommandPool.Read)]
     [InlineData("CheckFileVersions", WorkerCommandPool.Diff)]
+    [InlineData("HoldWorktreeHookSyncs", WorkerCommandPool.Diff)]
     [InlineData("ResolveGeneratedPackageReferences", WorkerCommandPool.Diff)]
     [InlineData("GetGitFileDiff", WorkerCommandPool.Diff)]
     [InlineData("SyncRepository", WorkerCommandPool.Main)]

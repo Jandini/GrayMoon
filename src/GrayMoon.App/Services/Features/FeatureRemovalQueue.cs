@@ -18,6 +18,7 @@ namespace GrayMoon.App.Services.Features;
 public sealed class FeatureRemovalQueue(
     IServiceScopeFactory scopeFactory,
     IFeatureFolderCleanupService folderCleanup,
+    IWorkspaceCheckoutRefresh checkoutRefresh,
     ILogger<FeatureRemovalQueue> logger,
     TimeProvider? timeProvider = null)
     : BackgroundService, IFeatureRemovalQueue
@@ -25,7 +26,8 @@ public sealed class FeatureRemovalQueue(
     private static readonly TimeSpan ShutdownMarkTimeout = TimeSpan.FromSeconds(5);
 
     private readonly Channel<QueuedRemoval> _channel = Channel.CreateUnbounded<QueuedRemoval>();
-    private readonly ConcurrentDictionary<int, byte> _pending = new();
+    // Feature context id -> its Workspace id, for every removal that is queued or running.
+    private readonly ConcurrentDictionary<int, int> _pending = new();
 
     public event Action<FeatureRemovalCompleted>? Completed;
 
@@ -46,7 +48,7 @@ public sealed class FeatureRemovalQueue(
         if (info.IsSpecialWorkspace)
             throw new InvalidOperationException("Cannot remove the special Workspace context.");
 
-        if (!_pending.TryAdd(featureContextId.Value, 0))
+        if (!_pending.TryAdd(featureContextId.Value, info.WorkspaceId))
             return false;
 
         var queued = new QueuedRemoval(info.WorkspaceId, featureContextId, info.FeatureName ?? "", options);
@@ -184,6 +186,7 @@ public sealed class FeatureRemovalQueue(
         OperationResult result;
         try
         {
+            await RefreshWorkspaceFirstAsync(removal, stoppingToken);
             await using var scope = scopeFactory.CreateAsyncScope();
             var operations = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
             result = await operations.RemoveFeatureAsync(
@@ -209,6 +212,34 @@ public sealed class FeatureRemovalQueue(
             folderCleanup.ArmRetry(removal.WorkspaceId);
 
         Announce(removal, result);
+    }
+
+    /// <summary>
+    /// Runs the Workspace status refresh to its end before anything of the Feature is removed. The user has just
+    /// left the Feature for the Workspace and may create the next Feature right away, so the Workspace state must
+    /// be current first; and the refresh must not run beside the removal, because both start git processes for
+    /// every repository. Removals of one Workspace that arrive together share one refresh. A refresh that fails
+    /// is logged and the removal goes on: the user confirmed it, and a later Sync brings the status up to date.
+    /// </summary>
+    private async Task RefreshWorkspaceFirstAsync(QueuedRemoval removal, CancellationToken stoppingToken)
+    {
+        try
+        {
+            WorkspaceFeatureContextId specialId;
+            await using (var scope = scopeFactory.CreateAsyncScope())
+            {
+                var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+                specialId = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(removal.WorkspaceId, stoppingToken);
+            }
+
+            await checkoutRefresh.RunAsync(removal.WorkspaceId, specialId, stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                ex, "Workspace status refresh before the Feature removal failed; removing anyway. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                removal.WorkspaceId, removal.FeatureName);
+        }
     }
 
     private void Announce(QueuedRemoval removal, OperationResult result)

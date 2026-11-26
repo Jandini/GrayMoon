@@ -103,4 +103,8 @@ public sealed class InspectWorktreeResponse
     /// </summary>
     [JsonPropertyName("headOnRemote")]
     public bool? HeadOnRemote { get; set; }
+
+    /// <summary>True while a merge, rebase or cherry-pick is unfinished in the worktree; null when it could not be read.</summary>
+    [JsonPropertyName("hasOperationInProgress")]
+    public bool? HasOperationInProgress { get; set; }
 }

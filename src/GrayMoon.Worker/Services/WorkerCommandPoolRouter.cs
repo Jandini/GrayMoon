@@ -27,7 +27,9 @@ public static class WorkerCommandPoolRouter
     /// to 7.5 s on the main pool behind a GitVersion run and up to 45 s on the read pool behind status scans and
     /// worktree inspections of 16 to 26 s each (logs of 2026-11-25, rounds 2 and 3).</summary>
     private static readonly HashSet<string> DiffCommands =
-        ["GetGitFileDiff", WorkerHubMethods.CheckFileVersions, WorkerHubMethods.ResolveGeneratedPackageReferences];
+        ["GetGitFileDiff", WorkerHubMethods.CheckFileVersions, WorkerHubMethods.ResolveGeneratedPackageReferences,
+         // Changes a flag in memory. On the main pool a release would wait behind the very work it is meant to follow.
+         WorkerHubMethods.HoldWorktreeHookSyncs];
 
     /// <summary>AI commands: bounded read-only Git evidence and one provider CLI process per generation. They get
     /// their own pool so a long CLI run never holds a main-pool slot (Sync, push, Update, hook syncs) or a read-pool

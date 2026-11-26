@@ -1,5 +1,4 @@
 using GrayMoon.App.Models;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace GrayMoon.App.Data;
@@ -7,15 +6,18 @@ namespace GrayMoon.App.Data;
 /// <summary>
 /// Branch rows are written by several parallel writers (push, checkout, hook sync, fetch, workspace
 /// restore). Each decides "this ref has no row yet" from an earlier read, so two of them can insert the
-/// same <c>(WorkspaceRepositoryId, BranchName, IsRemote)</c>. The unique index rejects the later insert.
+/// same <c>(WorkspaceRepositoryId, BranchName, IsRemote)</c>, and the unique index would reject the later insert.
 /// That row is already stored, so every save of this context drops it instead of failing the caller:
 /// a lost race must never abort an unrelated operation such as a multi-level push.
+/// <para>
+/// A save that adds branch rows takes the database write lock first (a transaction EF Core opens on SQLite is
+/// <c>BEGIN IMMEDIATE</c>), then reads which of its added rows are stored, drops those, and inserts the rest
+/// before it commits. No other writer can commit between that read and the insert, so the insert of a row that
+/// is already stored is never sent. A unique violation that still occurs is a real conflict and surfaces.
+/// </para>
 /// </summary>
 public partial class AppDbContext
 {
-    /// <summary>Bounds the retry loop so a writer that keeps colliding cannot spin forever.</summary>
-    private const int MaxBranchRowSaveAttempts = 3;
-
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         var (saved, _) = await SaveDroppingStoredBranchRowsAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -35,29 +37,28 @@ public partial class AppDbContext
     private async Task<(int Saved, int Dropped)> SaveDroppingStoredBranchRowsAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
         KeepWorkspaceRepositoryWritable();
-        // Checked right before the insert: the caller decided "no row yet" from an earlier read, often many
-        // milliseconds ago. Dropping the rows stored since then here means the insert is not sent and fails only
-        // when another writer commits in the moment between this read and the save. Each failed insert is logged
-        // by EF Core as two errors with a stack trace, for a case that is expected (logs of 2026-11-25).
-        var dropped = await DetachAddedBranchRowsAlreadyStoredAsync(cancellationToken);
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                return (await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken), dropped);
-            }
-            catch (DbUpdateException ex) when (attempt < MaxBranchRowSaveAttempts && IsUniqueConstraintViolation(ex))
-            {
-                // A failed save leaves every entity pending, so dropping the rows that are already stored
-                // and saving again writes the rest unchanged. Nothing else is swallowed: a violation with
-                // no stored branch row behind it is a real conflict and surfaces.
-                var detached = await DetachAddedBranchRowsAlreadyStoredAsync(cancellationToken);
-                if (detached == 0)
-                    throw;
+        if (!ChangeTracker.Entries<RepositoryBranch>().Any(entry => entry.State == EntityState.Added))
+            return (await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken), 0);
 
-                dropped += detached;
-            }
+        // The caller decided "no row yet" from an earlier read. The check is repeated here under the write lock.
+        // Without the lock another writer could commit the same row between the check and the insert; the insert
+        // then failed, EF Core logged it as two errors with a stack trace, and the save was repeated
+        // (App logs of 2026-11-25 and 2026-11-26).
+        if (Database.CurrentTransaction != null)
+        {
+            // The caller's transaction already holds the write lock.
+            var droppedInCallerTransaction = await DetachAddedBranchRowsAlreadyStoredAsync(cancellationToken);
+            return (await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken), droppedInCallerTransaction);
         }
+
+        await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+        var dropped = await DetachAddedBranchRowsAlreadyStoredAsync(cancellationToken);
+        // Accepted only after the commit, so a commit that fails leaves every change pending.
+        var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess: false, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        if (acceptAllChangesOnSuccess)
+            ChangeTracker.AcceptAllChanges();
+        return (saved, dropped);
     }
 
     /// <summary>Detaches added branch rows whose unique key is already committed. Returns how many were detached.</summary>
@@ -91,19 +92,5 @@ public partial class AppDbContext
         }
 
         return detached;
-    }
-
-    /// <summary>SQLite extended result SQLITE_CONSTRAINT_UNIQUE (2067), or the message EF surfaces when the numeric code is absent.</summary>
-    private static bool IsUniqueConstraintViolation(Exception exception)
-    {
-        for (var current = exception; current != null; current = current.InnerException)
-        {
-            if (current is SqliteException sqlite
-                && (sqlite.SqliteExtendedErrorCode == 2067
-                    || sqlite.Message.Contains("UNIQUE constraint failed", StringComparison.Ordinal)))
-                return true;
-        }
-
-        return false;
     }
 }

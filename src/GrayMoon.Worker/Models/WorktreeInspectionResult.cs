@@ -50,4 +50,7 @@ public sealed record WorktreeInspectionResult(
     int? FeatureBranchAheadOfUpstream = null,
     // True when HEAD is contained in a remote-tracking branch. Probed only when the current branch has no upstream or
     // HEAD is detached; null otherwise, and when git could not say.
-    bool? HeadOnRemote = null);
+    bool? HeadOnRemote = null,
+    // True while a merge, rebase or cherry-pick is unfinished in this worktree; null when its git directory could not
+    // be found. A rebase can be in progress with a clean working tree, so IsDirty alone does not show it.
+    bool? HasOperationInProgress = null);

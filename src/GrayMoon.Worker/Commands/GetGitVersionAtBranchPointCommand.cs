@@ -39,13 +39,11 @@ public sealed class GetGitVersionAtBranchPointCommand(
         if (!Directory.Exists(repoPath))
             return Fail("Repository not found.");
 
-        var (typeExit, typeOut, _) = await runner.RunAsync("git", ["cat-file", "-t", commitSha!], repoPath, null, cancellationToken, GitLockIntent.Read);
-        if (typeExit != 0 || !string.Equals((typeOut ?? "").Trim(), "commit", StringComparison.Ordinal))
-            return Fail($"{commitSha} is not a commit of this repository.");
-
         // Exit 0: an ancestor; exit 1: not an ancestor; anything else (no origin/<parent>, bad object) is not an answer.
+        // "^{commit}" makes git itself refuse a SHA that is not a commit of this repository, which used to be a
+        // git cat-file of its own before this call: one process less for every repository of a new Feature.
         var (ancestorExit, ancestorOut, ancestorErr) = await runner.RunAsync(
-            "git", ["merge-base", "--is-ancestor", commitSha!, "refs/remotes/origin/" + parentBranch], repoPath, null, cancellationToken, GitLockIntent.Read);
+            "git", ["merge-base", "--is-ancestor", commitSha + "^{commit}", "refs/remotes/origin/" + parentBranch], repoPath, null, cancellationToken, GitLockIntent.Read);
         if (ancestorExit is not (0 or 1))
         {
             logger.LogInformation(

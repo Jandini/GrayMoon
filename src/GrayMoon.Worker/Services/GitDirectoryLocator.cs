@@ -13,6 +13,16 @@ internal static class GitDirectoryLocator
     /// </summary>
     internal static async Task<string?> ResolveDivergenceBaseFilePathAsync(GitProcessRunner runner, string repoPath, CancellationToken ct)
     {
+        var fullGitDir = await ResolveGitDirAsync(runner, repoPath, ct);
+        return fullGitDir is null ? null : Path.Combine(fullGitDir, "graymoon-divergence-base");
+    }
+
+    /// <summary>
+    /// The git directory of the working tree at <paramref name="repoPath"/> as a full path: the worktree's own
+    /// directory for a linked worktree, never the common one. Null when the folder is missing or git cannot say.
+    /// </summary>
+    internal static async Task<string?> ResolveGitDirAsync(GitProcessRunner runner, string repoPath, CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath))
             return null;
 
@@ -39,7 +49,7 @@ internal static class GitDirectoryLocator
                 : Path.GetFullPath(Path.Combine(repoPath, gitDir));
         }
 
-        return Path.Combine(fullGitDir, "graymoon-divergence-base");
+        return fullGitDir;
     }
 
     /// <summary>

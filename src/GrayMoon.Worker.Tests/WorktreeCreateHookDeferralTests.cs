@@ -31,6 +31,68 @@ public sealed class WorktreeCreateHookDeferralTests
     private static WorktreeCreateHookDeferral Create(RecordingQueue queue) =>
         new(queue, NullLogger<WorktreeCreateHookDeferral>.Instance, TimeSpan.FromMilliseconds(50));
 
+    /// <summary>
+    /// Create Feature holds the syncs past the last create, until its version step has ended: released 500 ms after
+    /// the last worktree, their GitVersion runs competed with that step (53 to 59 s for 40 repositories, 2026-11-25).
+    /// </summary>
+    [Fact]
+    public async Task Held_checkout_stays_back_after_the_create_ends_until_the_hold_is_released()
+    {
+        var queue = new RecordingQueue();
+        using var sut = Create(queue);
+        sut.Hold("context-7");
+        var scope = sut.BeginCreate(Path1);
+        Assert.True(sut.TryDefer(Job(Path1, NotifyHookKind.Checkout)));
+
+        scope.Dispose();
+        await Task.Delay(400);
+        Assert.Equal(0, queue.Count);
+
+        sut.Release("context-7");
+        for (var i = 0; i < 100 && queue.Count == 0; i++)
+            await Task.Delay(20);
+
+        Assert.Equal(1, queue.Count);
+    }
+
+    [Fact]
+    public async Task A_hold_that_is_never_released_ends_by_itself_and_the_checkout_still_runs()
+    {
+        var queue = new RecordingQueue();
+        using var sut = new WorktreeCreateHookDeferral(
+            queue, NullLogger<WorktreeCreateHookDeferral>.Instance, TimeSpan.FromMilliseconds(50), maxHold: TimeSpan.FromMilliseconds(300));
+        sut.Hold("context-7");
+        var scope = sut.BeginCreate(Path1);
+        Assert.True(sut.TryDefer(Job(Path1, NotifyHookKind.Checkout)));
+        scope.Dispose();
+
+        for (var i = 0; i < 200 && queue.Count == 0; i++)
+            await Task.Delay(20);
+
+        Assert.Equal(1, queue.Count);
+    }
+
+    [Fact]
+    public async Task Releasing_one_hold_does_not_release_while_another_is_set()
+    {
+        var queue = new RecordingQueue();
+        using var sut = Create(queue);
+        sut.Hold("context-7");
+        sut.Hold("context-8");
+        var scope = sut.BeginCreate(Path1);
+        Assert.True(sut.TryDefer(Job(Path1, NotifyHookKind.Checkout)));
+        scope.Dispose();
+
+        sut.Release("context-7");
+        await Task.Delay(400);
+        Assert.Equal(0, queue.Count);
+
+        sut.Release("context-8");
+        for (var i = 0; i < 100 && queue.Count == 0; i++)
+            await Task.Delay(20);
+        Assert.Equal(1, queue.Count);
+    }
+
     [Fact]
     public void Checkout_for_a_worktree_not_being_created_is_not_deferred()
     {

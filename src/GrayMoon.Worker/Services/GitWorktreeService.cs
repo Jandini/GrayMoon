@@ -439,30 +439,27 @@ public sealed class GitWorktreeService(
         var (exitCode, stdout, stderr) = await runner.RunAsync("git", args, mainRepositoryPath, null, ct);
         var gitError = exitCode != 0 ? CombineOutput(stdout, stderr) ?? "git worktree remove failed" : null;
 
-        var (verifyOk, after, verifyCode, verifyError) = await ListWorktreesAsync(mainRepositoryPath, ct);
-        if (!verifyOk)
-        {
-            if (gitError != null)
-                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
-            return (false, false, verifyCode, verifyError, WorktreeResidueResult.None);
-        }
-
-        if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
-        {
-            // Still registered: git genuinely refused (for example dirty without force).
-            logger.LogError(
-                "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
-                mainRepositoryPath, canonicalWorktreePath, force, exitCode);
-            return gitError != null
-                ? (false, false, "GitFailed", gitError, WorktreeResidueResult.None)
-                : (false, false, "VerifyFailed", "Worktree remove reported success but path is still listed.", WorktreeResidueResult.None);
-        }
-
-        // Git unregistered the worktree either way. On Windows, deleting the directory itself can fail
-        // (for example a file still open elsewhere) even though git already removed its own bookkeeping;
-        // residue cleanup below retries the folder and reports the truth instead of a bare git error.
+        // Exit 0 means git unregistered the worktree and deleted its folder: the inventory is not read again (one git
+        // process per repository of a Feature, on machines where a process costs over a second). After a failure it
+        // is read, because git can fail after it has already unregistered the worktree.
         if (gitError != null)
         {
+            var (verifyOk, after, _, _) = await ListWorktreesAsync(mainRepositoryPath, ct);
+            if (!verifyOk)
+                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
+
+            if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
+            {
+                // Still registered: git genuinely refused (for example dirty without force).
+                logger.LogError(
+                    "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
+                    mainRepositoryPath, canonicalWorktreePath, force, exitCode);
+                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
+            }
+
+            // Git unregistered the worktree all the same. On Windows, deleting the directory itself can fail
+            // (for example a file still open elsewhere) even though git already removed its own bookkeeping;
+            // residue cleanup below retries the folder and reports the truth instead of a bare git error.
             logger.LogWarning(
                 "Git worktree remove exited {ExitCode} for {WorktreePath} but the worktree is unregistered; checking for leftover files. {Error}",
                 exitCode, canonicalWorktreePath, gitError);
@@ -794,10 +791,15 @@ public sealed class GitWorktreeService(
             return new WorktreeInspectionResult(isRegistered, false, isLocked, lockReason, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
-        var headSha = await reader.GetHeadCommitAsync(canonicalWorktreePath, ct);
-        var branch = await reader.GetCurrentBranchNameAsync(canonicalWorktreePath, ct);
-
-        var (statusOk, staged, unstaged, untracked, conflicts, statusError) = await ProbeWorktreeStatusAsync(canonicalWorktreePath, ct);
+        // One status process answers HEAD, the branch, its upstream with the ahead and behind counts, and the changes.
+        // They were six processes; a process costs over a second on some machines, and Remove Feature inspects every
+        // repository of the Feature (logs of 2026-11-25: 16 to 26 s per inspection).
+        var status = await ProbeWorktreeStatusAsync(canonicalWorktreePath, ct);
+        var statusOk = status.Success;
+        var statusError = status.Error;
+        var (staged, unstaged, untracked, conflicts) = (status.Staged, status.Unstaged, status.Untracked, status.Conflicts);
+        var headSha = status.HeadSha;
+        var branch = status.Branch;
         bool? isDirty = statusOk ? staged + unstaged + untracked + conflicts > 0 : null;
 
         bool? hasUpstream = null;
@@ -805,10 +807,9 @@ public sealed class GitWorktreeService(
         int? behindUpstream = null;
         if (!string.IsNullOrWhiteSpace(branch))
         {
-            var (upstreamKnown, ahead, behind) = await ProbeUpstreamCountsAsync(canonicalWorktreePath, branch, ct);
-            hasUpstream = upstreamKnown;
-            aheadOfUpstream = ahead;
-            behindUpstream = behind;
+            hasUpstream = status.HasUpstream;
+            aheadOfUpstream = status.AheadOfUpstream;
+            behindUpstream = status.BehindUpstream;
         }
 
         // A Feature worktree carries its own persisted "divergence base" (the branch it was actually
@@ -819,23 +820,36 @@ public sealed class GitWorktreeService(
         // even though those commits stay reachable from the parent branch and are never actually
         // lost. Falls back to the repository's true default branch when no divergence base was
         // recorded, or it no longer resolves to an existing ref.
-        var aheadOfDefaultCompareRef = await ResolveAheadOfDefaultCompareRefAsync(canonicalWorktreePath, defaultBranch, ct);
+        var (aheadOfDefaultCompareRef, compareRefExists) = await ResolveAheadOfDefaultCompareRefAsync(canonicalWorktreePath, defaultBranch, ct);
 
-        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, aheadOfDefaultCompareRef, ct);
+        var aheadOfDefault = await ProbeAheadOfDefaultAsync(canonicalWorktreePath, aheadOfDefaultCompareRef, compareRefExists, ct);
 
         bool? featureBranchExists = null;
         string? featureBranchSha = null;
         int? featureBranchAheadOfDefault = null;
         bool? featureBranchHasUpstream = null;
         int? featureBranchAheadOfUpstream = null;
-        if (!string.IsNullOrWhiteSpace(featureBranch))
+        if (!string.IsNullOrWhiteSpace(featureBranch) && string.Equals(featureBranch, branch, StringComparison.Ordinal))
+        {
+            // The worktree is on its Feature branch, the normal case: the branch is HEAD, so its answers are the ones
+            // already read above and no further git process runs.
+            featureBranchSha = headSha;
+            featureBranchExists = headSha != null;
+            if (featureBranchExists == true)
+            {
+                featureBranchAheadOfDefault = aheadOfDefault;
+                featureBranchHasUpstream = hasUpstream == true;
+                featureBranchAheadOfUpstream = aheadOfUpstream;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(featureBranch))
         {
             featureBranchSha = await GetRevisionShaAsync(canonicalWorktreePath, $"refs/heads/{featureBranch}", ct);
             featureBranchExists = featureBranchSha != null;
             if (featureBranchExists == true)
             {
                 featureBranchAheadOfDefault = await ProbeAheadOfDefaultForRefAsync(
-                    canonicalWorktreePath, aheadOfDefaultCompareRef, $"refs/heads/{featureBranch}", ct);
+                    canonicalWorktreePath, aheadOfDefaultCompareRef, compareRefExists, $"refs/heads/{featureBranch}", ct);
                 var (featureUpstreamKnown, featureAhead) = await ProbeFeatureBranchUpstreamCountAsync(
                     canonicalWorktreePath, featureBranch, ct);
                 featureBranchHasUpstream = featureUpstreamKnown;
@@ -865,7 +879,24 @@ public sealed class GitWorktreeService(
             featureBranchAheadOfDefault,
             featureBranchHasUpstream,
             featureBranchAheadOfUpstream,
-            headSha != null && hasUpstream != true ? await ProbeHeadOnRemoteAsync(canonicalWorktreePath, ct) : null);
+            headSha != null && hasUpstream != true ? await ProbeHeadOnRemoteAsync(canonicalWorktreePath, ct) : null,
+            await ProbeOperationInProgressAsync(canonicalWorktreePath, ct));
+    }
+
+    /// <summary>
+    /// True while a merge, rebase or cherry-pick is unfinished in the worktree, read from the marker files of its git
+    /// directory; null when that directory could not be found.
+    /// </summary>
+    private async Task<bool?> ProbeOperationInProgressAsync(string worktreePath, CancellationToken ct)
+    {
+        var gitDir = await GitDirectoryLocator.ResolveGitDirAsync(runner, worktreePath, ct);
+        if (gitDir is null)
+            return null;
+
+        return File.Exists(Path.Combine(gitDir, "MERGE_HEAD"))
+            || File.Exists(Path.Combine(gitDir, "CHERRY_PICK_HEAD"))
+            || Directory.Exists(Path.Combine(gitDir, "rebase-merge"))
+            || Directory.Exists(Path.Combine(gitDir, "rebase-apply"));
     }
 
     /// <summary>
@@ -902,7 +933,8 @@ public sealed class GitWorktreeService(
     /// falling back to <see cref="OriginDefaultRef.ToOriginBranchRef"/> of <paramref name="defaultBranch"/> otherwise
     /// (same resolution order as <see cref="ResolveNoUpstreamCompareRefAsync"/>/GetCommitCountsCommand).
     /// </summary>
-    private async Task<string?> ResolveAheadOfDefaultCompareRefAsync(string repoPath, string? defaultBranch, CancellationToken ct)
+    /// <returns>The ref, and whether it was already found to exist here (the default-branch fallback is not checked).</returns>
+    private async Task<(string? Ref, bool Exists)> ResolveAheadOfDefaultCompareRefAsync(string repoPath, string? defaultBranch, CancellationToken ct)
     {
         var divergenceBase = await reader.GetDivergenceBaseBranchAsync(repoPath, ct);
         if (!string.IsNullOrWhiteSpace(divergenceBase))
@@ -911,23 +943,23 @@ public sealed class GitWorktreeService(
             if (local.StartsWith("origin/", StringComparison.OrdinalIgnoreCase))
                 local = local["origin/".Length..];
             if (await reader.RefExistsAsync(repoPath, local, ct))
-                return local;
+                return (local, true);
 
             var originRef = $"origin/{local}";
             if (await reader.RefExistsAsync(repoPath, originRef, ct))
-                return originRef;
+                return (originRef, true);
         }
 
-        return OriginDefaultRef.ToOriginBranchRef(defaultBranch);
+        return (OriginDefaultRef.ToOriginBranchRef(defaultBranch), false);
     }
 
     /// <summary>
     /// Like <see cref="ProbeAheadOfDefaultAsync"/> but against an arbitrary ref instead of always
     /// HEAD, so a Feature branch can be judged without checking it out (09 SB-2, plan unit I1).
     /// </summary>
-    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultRef, string compareRef, CancellationToken ct)
+    private async Task<int?> ProbeAheadOfDefaultForRefAsync(string repoPath, string? defaultRef, bool defaultRefExists, string compareRef, CancellationToken ct)
     {
-        if (defaultRef == null || !await reader.RefExistsAsync(repoPath, defaultRef, ct))
+        if (defaultRef == null || (!defaultRefExists && !await reader.RefExistsAsync(repoPath, defaultRef, ct)))
             return null;
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(
@@ -1001,44 +1033,57 @@ public sealed class GitWorktreeService(
         return string.IsNullOrWhiteSpace(sha) ? null : sha;
     }
 
-    private async Task<(bool Success, int Staged, int Unstaged, int Untracked, int Conflicts, string? Error)> ProbeWorktreeStatusAsync(
-        string repoPath,
-        CancellationToken ct)
+    /// <summary>
+    /// What one <c>git status --porcelain=v2 --branch</c> says about a worktree. The upstream is the branch's
+    /// configured one and nothing else: no upstream, or one whose ref is gone, is <see cref="HasUpstream"/> false with
+    /// null counts, never a count against the default branch or a Feature divergence base.
+    /// </summary>
+    private sealed record WorktreeStatusProbe(
+        bool Success,
+        string? HeadSha,
+        string? Branch,
+        int Staged,
+        int Unstaged,
+        int Untracked,
+        int Conflicts,
+        bool HasUpstream,
+        int? AheadOfUpstream,
+        int? BehindUpstream,
+        string? Error);
+
+    private async Task<WorktreeStatusProbe> ProbeWorktreeStatusAsync(string repoPath, CancellationToken ct)
     {
         var (exitCode, stdout, stderr) = await runner.RunAsync(
             "git",
-            "--no-optional-locks status --porcelain=v1",
+            ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--branch"],
             repoPath,
+            null,
             ct,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false,
-            intent: GitLockIntent.Read);
+            GitLockIntent.Read);
         if (exitCode != 0)
-            return (false, 0, 0, 0, 0, CombineOutput(stdout, stderr) ?? "git status failed");
+            return new WorktreeStatusProbe(false, null, null, 0, 0, 0, 0, false, null, null, CombineOutput(stdout, stderr) ?? "git status failed");
 
+        var parsed = GitPorcelainV2Parser.Parse(stdout);
+        var upstream = GitPorcelainV2Parser.ParseUpstream(stdout);
         var staged = 0;
         var unstaged = 0;
         var untracked = 0;
         var conflicts = 0;
-        foreach (var line in (stdout ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var change in parsed.Changes)
         {
-            if (line.Length < 2)
-                continue;
-            var x = line[0];
-            var y = line[1];
-            if (x == '?' && y == '?')
-            {
-                untracked++;
-                continue;
-            }
-            if (IsUnmergedStatusCode(x, y))
+            if (change.IsConflicted)
             {
                 conflicts++;
                 continue;
             }
-            if (x != ' ')
+            if (change.WorktreeChange == GitChangeKind.Untracked)
+            {
+                untracked++;
+                continue;
+            }
+            if (change.IsStaged)
                 staged++;
-            if (y != ' ')
+            if (change.IsChanged)
                 unstaged++;
         }
 
@@ -1046,58 +1091,23 @@ public sealed class GitWorktreeService(
         {
             // Remove Feature shows "Has uncommitted changes" from these counts. The log names the first files, because
             // without them nobody could tell afterwards what had changed a worktree (logs of 2026-11-24).
-            var entries = (stdout ?? "")
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(l => l.TrimEnd('\r'))
-                .Where(l => l.Length >= 2)
-                .Take(5);
             logger.LogInformation(
                 "Worktree {RepoPath} has uncommitted changes: staged={Staged}, unstaged={Unstaged}, untracked={Untracked}, conflicts={Conflicts}. First entries: {Entries}",
-                repoPath, staged, unstaged, untracked, conflicts, string.Join(" | ", entries));
+                repoPath, staged, unstaged, untracked, conflicts, string.Join(" | ", parsed.Changes.Take(5).Select(c => c.Path)));
         }
 
-        return (true, staged, unstaged, untracked, conflicts, null);
+        return new WorktreeStatusProbe(
+            true,
+            parsed.HeadCommit,
+            parsed.IsDetachedHead ? null : parsed.BranchName,
+            staged, unstaged, untracked, conflicts,
+            upstream.Exists, upstream.Exists ? upstream.Ahead : null, upstream.Exists ? upstream.Behind : null,
+            null);
     }
 
-    private static bool IsUnmergedStatusCode(char x, char y)
-        => x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D');
-
-    /// <summary>Ahead/behind strictly against the branch's configured upstream; no fallback to the default branch
-    /// or a Feature divergence base, unlike <see cref="ProbeCommitCountsAsync"/>, so the InspectWorktree caller
-    /// gets a clean null when there is no upstream instead of a value computed against something else.</summary>
-    private async Task<(bool HasUpstream, int? Ahead, int? Behind)> ProbeUpstreamCountsAsync(
-        string repoPath,
-        string branchName,
-        CancellationToken ct)
+    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultRef, bool defaultRefExists, CancellationToken ct)
     {
-        var upstreamRef = await reader.GetUpstreamRefAsync(repoPath, branchName, ct);
-        if (string.IsNullOrWhiteSpace(upstreamRef) || !await reader.RefExistsAsync(repoPath, upstreamRef, ct))
-            return (false, null, null);
-
-        var (exitCode, stdout, stderr) = await runner.RunAsync(
-            "git",
-            ["rev-list", "--left-right", "--count", "--end-of-options", $"{upstreamRef}...HEAD"],
-            repoPath,
-            null,
-            ct,
-            GitLockIntent.Read,
-            streamStderrAsStdout: true,
-            mirrorFailureOutputAsStderr: false);
-        if (exitCode != 0)
-        {
-            logger.LogWarning("Git rev-list --left-right (InspectWorktree upstream counts) failed for {RepoPath}. ExitCode={ExitCode}, Stdout={Stdout}, Stderr={Stderr}", repoPath, exitCode, stdout, stderr);
-            return (true, null, null);
-        }
-
-        var parts = (stdout ?? "").Trim().Split('\t', StringSplitOptions.RemoveEmptyEntries);
-        var behind = parts.Length >= 1 && int.TryParse(parts[0], out var b) ? b : (int?)null;
-        var ahead = parts.Length >= 2 && int.TryParse(parts[1], out var a) ? a : (int?)null;
-        return (true, ahead, behind);
-    }
-
-    private async Task<int?> ProbeAheadOfDefaultAsync(string repoPath, string? defaultRef, CancellationToken ct)
-    {
-        if (defaultRef == null || !await reader.RefExistsAsync(repoPath, defaultRef, ct))
+        if (defaultRef == null || (!defaultRefExists && !await reader.RefExistsAsync(repoPath, defaultRef, ct)))
             return null;
 
         var (exitCode, stdout, stderr) = await runner.RunAsync(

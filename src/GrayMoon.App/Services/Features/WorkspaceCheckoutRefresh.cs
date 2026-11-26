@@ -1,11 +1,15 @@
+using System.Collections.Concurrent;
 using GrayMoon.Application.Features;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Services.Features;
 
 /// <summary>
-/// Refreshes the special Workspace checkout. Independent of Feature removal: background removal
-/// must not start it, wait for it, or run it when the Feature is gone.
+/// Refreshes the special Workspace checkout. The Feature removal queue runs it to its end before it removes a
+/// Feature, so the Workspace is current when the user creates the next Feature. It does not run beside the removal
+/// it belongs to: a Sync of every Workspace repository and the removal of every worktree compete for git processes,
+/// and on a machine where one costs over a second the removal took 160 to 225 s beside the Sync against 93 s alone
+/// (logs of 2026-11-25).
 /// </summary>
 public interface IWorkspaceCheckoutRefresh
 {
@@ -15,7 +19,10 @@ public interface IWorkspaceCheckoutRefresh
     /// </summary>
     void Start(int workspaceId, WorkspaceFeatureContextId contextId);
 
-    /// <summary>Runs the refresh to completion, waiting until the Workspace lock is free.</summary>
+    /// <summary>
+    /// Runs the refresh to completion, waiting until the Workspace lock is free. A call that arrives while a
+    /// refresh of the same Workspace started by this method is waiting or running joins that one.
+    /// </summary>
     Task RunAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken = default);
 }
 
@@ -32,16 +39,36 @@ public sealed class WorkspaceCheckoutRefresh(
         _ = WaitAndStartAsync(workspaceId, contextId);
     }
 
-    public async Task RunAsync(
+    // Workspace id -> the refresh RunAsync is waiting to start or running.
+    private readonly ConcurrentDictionary<int, Lazy<Task>> _running = new();
+
+    public Task RunAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
-        IWorkspaceLockedOperation operation;
-        while (!TryStart(workspaceId, contextId, out operation))
-            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+        var run = _running.GetOrAdd(
+            workspaceId,
+            _ => new Lazy<Task>(() => RunSharedAsync(workspaceId, contextId, cancellationToken)));
+        return run.Value.WaitAsync(cancellationToken);
+    }
 
-        await operation.WhenCompleted.WaitAsync(cancellationToken);
+    private async Task RunSharedAsync(int workspaceId, WorkspaceFeatureContextId contextId, CancellationToken cancellationToken)
+    {
+        // Leave the caller before the first lock attempt, so the entry is in the dictionary before it can be removed.
+        await Task.Yield();
+        try
+        {
+            IWorkspaceLockedOperation operation;
+            while (!TryStart(workspaceId, contextId, out operation))
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+
+            await operation.WhenCompleted.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            _running.TryRemove(workspaceId, out _);
+        }
     }
 
     private async Task WaitAndStartAsync(int workspaceId, WorkspaceFeatureContextId contextId)

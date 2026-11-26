@@ -68,6 +68,12 @@ public static class WorkerHubMethods
     /// <summary>App → Worker: delete every Feature folder marked pending deletion under one Feature storage root (background cleanup).</summary>
     public const string SweepPendingFeatureFolders = "SweepPendingFeatureFolders";
 
+    /// <summary>
+    /// App → Worker: hold back (or release) the Checkout syncs of worktrees that were just created. Create Feature
+    /// holds them until its version step has ended, so their GitVersion runs do not compete with it.
+    /// </summary>
+    public const string HoldWorktreeHookSyncs = "HoldWorktreeHookSyncs";
+
     /// <summary>App → Worker: attach a remote repository to the Workspace root as its working tree (clone into an empty root, or init + fetch + checkout in a non-empty one).</summary>
     public const string AttachWorkspaceRepository = "AttachWorkspaceRepository";
 

@@ -595,5 +595,9 @@ public sealed class HookListenerHostedServiceTests : IAsyncLifetime
         public IDisposable BeginCreate(string worktreePath) => throw new NotSupportedException();
 
         public bool TryDefer(INotifyJob job) => false;
+
+        public void Hold(string key) => throw new NotSupportedException();
+
+        public void Release(string key) => throw new NotSupportedException();
     }
 }

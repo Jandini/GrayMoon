@@ -25,11 +25,25 @@ public interface IWorktreeCreateHookDeferral
     /// Returns false (nothing held) for any other job, which the caller enqueues as usual.
     /// </summary>
     bool TryDefer(INotifyJob job);
+
+    /// <summary>
+    /// Keeps every held sync back until <see cref="Release"/> is called with the same <paramref name="key"/>, also
+    /// after the last create has ended. The caller knows of work that follows the creates and must not compete with
+    /// the syncs (Create Feature: the version step). A hold that is never released ends by itself after
+    /// <see cref="WorktreeCreateHookDeferral.MaxHold"/>, so a sync is delayed at worst, never lost.
+    /// </summary>
+    void Hold(string key);
+
+    /// <summary>Ends the hold named <paramref name="key"/>; the held syncs are released when nothing else keeps them.</summary>
+    void Release(string key);
 }
 
-public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<WorktreeCreateHookDeferral> logger, TimeSpan? quietPeriod = null)
+public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<WorktreeCreateHookDeferral> logger, TimeSpan? quietPeriod = null, TimeSpan? maxHold = null)
     : IWorktreeCreateHookDeferral, IDisposable
 {
+    /// <summary>How long a hold lasts when its owner never releases it (the App stopped, or lost the Worker).</summary>
+    internal static readonly TimeSpan MaxHold = TimeSpan.FromMinutes(10);
+
     /// <summary>No create running for this long, and the held syncs are released.</summary>
     internal static readonly TimeSpan QuietPeriod = TimeSpan.FromMilliseconds(500);
 
@@ -37,6 +51,9 @@ public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<Workt
     private readonly Dictionary<string, int> _active = new(PathComparer);
     private readonly Dictionary<string, INotifyJob> _deferred = new(PathComparer);
     private readonly TimeSpan _quietPeriod = quietPeriod ?? QuietPeriod;
+    private readonly TimeSpan _maxHold = maxHold ?? MaxHold;
+    // Hold key -> the moment it ends by itself.
+    private readonly Dictionary<string, DateTime> _holds = new(StringComparer.Ordinal);
     private int _activeTotal;
     private bool _disposed;
     private Timer? _timer;
@@ -82,6 +99,56 @@ public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<Workt
         return true;
     }
 
+    public void Hold(string key)
+    {
+        lock (_gate)
+        {
+            _holds[key] = DateTime.UtcNow + _maxHold;
+        }
+    }
+
+    public void Release(string key)
+    {
+        lock (_gate)
+        {
+            if (_holds.Remove(key))
+                ArmFlushLocked();
+        }
+    }
+
+    /// <summary>
+    /// Schedules the release of the held syncs: after the quiet period, or when the earliest hold ends by itself.
+    /// Does nothing while a create runs (the last create to end calls this again) or when nothing is held.
+    /// </summary>
+    private void ArmFlushLocked()
+    {
+        if (_disposed || _activeTotal > 0 || _deferred.Count == 0)
+            return;
+
+        var due = _quietPeriod;
+        if (LiveHoldsLocked() is { } earliestEnd)
+        {
+            var untilEnd = earliestEnd - DateTime.UtcNow;
+            due = untilEnd > _quietPeriod ? untilEnd : _quietPeriod;
+        }
+
+        _timer ??= new Timer(_ => _ = FlushAsync());
+        _timer.Change(due, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>Drops the holds that have ended by themselves; returns when the earliest remaining one ends, or null without one.</summary>
+    private DateTime? LiveHoldsLocked()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var ended in _holds.Where(h => h.Value <= now).Select(h => h.Key).ToList())
+        {
+            _holds.Remove(ended);
+            logger.LogWarning("Hold {Key} on Checkout syncs was never released; it ended after {Minutes} minutes.", ended, _maxHold.TotalMinutes);
+        }
+
+        return _holds.Count == 0 ? null : _holds.Values.Min();
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -105,11 +172,7 @@ public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<Workt
             }
 
             _activeTotal = Math.Max(0, _activeTotal - 1);
-            if (_activeTotal == 0 && _deferred.Count > 0 && !_disposed)
-            {
-                _timer ??= new Timer(_ => _ = FlushAsync());
-                _timer.Change(_quietPeriod, Timeout.InfiniteTimeSpan);
-            }
+            ArmFlushLocked();
         }
     }
 
@@ -121,6 +184,13 @@ public sealed class WorktreeCreateHookDeferral(IJobQueue jobQueue, ILogger<Workt
             // A create started again during the quiet period: the last scope to close re-arms the timer.
             if (_disposed || _activeTotal > 0 || _deferred.Count == 0)
                 return;
+
+            // Still held: wait for the release, or for the hold to end by itself.
+            if (LiveHoldsLocked() is not null)
+            {
+                ArmFlushLocked();
+                return;
+            }
 
             released = _deferred.Values.ToList();
             _deferred.Clear();

@@ -285,9 +285,11 @@ public sealed class BranchRowSaveRaceTests
 
     /// <summary>
     /// On the first save that adds <paramref name="branchName"/>, commits that row from another context first,
-    /// the same order as the hook sync winning the race against the writer under test.
+    /// the same order as the hook sync winning the race against the writer under test. It does so when the save
+    /// is about to open its transaction: the writer has decided to add the row, and the save does not hold the
+    /// write lock yet. Once the save holds it no other writer can commit.
     /// </summary>
-    private sealed class StoreBranchRowFirst(string branchName) : SaveChangesInterceptor
+    private sealed class StoreBranchRowFirst(string branchName) : DbTransactionInterceptor
     {
         private IDbContextFactory<AppDbContext>? _factory;
         private int _fired;
@@ -296,9 +298,10 @@ public sealed class BranchRowSaveRaceTests
 
         public void Bind(IDbContextFactory<AppDbContext> factory) => _factory = factory;
 
-        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
-            InterceptionResult<int> result,
+        public override async ValueTask<InterceptionResult<System.Data.Common.DbTransaction>> TransactionStartingAsync(
+            System.Data.Common.DbConnection connection,
+            TransactionStartingEventData eventData,
+            InterceptionResult<System.Data.Common.DbTransaction> result,
             CancellationToken cancellationToken = default)
         {
             if (_factory != null && eventData.Context is AppDbContext db && Volatile.Read(ref _fired) == 0)
@@ -327,7 +330,7 @@ public sealed class BranchRowSaveRaceTests
                 }
             }
 
-            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+            return await base.TransactionStartingAsync(connection, eventData, result, cancellationToken);
         }
     }
 }
