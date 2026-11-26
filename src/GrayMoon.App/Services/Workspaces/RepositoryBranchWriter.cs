@@ -240,8 +240,8 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
     /// <summary>
     /// Saves pending branch changes. Returns how many added branch rows were already stored by another writer.
     /// A workspace checkout runs every repository at once, and each checkout's hook sync inserts the same local
-    /// branch this writer just decided to add. The unique index rejects the later insert, and
-    /// <see cref="AppDbContext"/> drops that already-stored row and writes the rest, so the checkouts stay parallel.
+    /// branch this writer just decided to add. <see cref="AppDbContext"/> checks under the database write lock
+    /// which added rows are stored, drops those and writes the rest, so the checkouts stay parallel.
     /// </summary>
     private async Task<int> SaveBranchChangesAsync(CancellationToken cancellationToken)
     {

@@ -251,7 +251,7 @@ Not built: taking the parent version of a new Feature from the version the Works
 | `Stage=HeadSnapshot` | 12 to 16 s | 15.6 s alone; 53.8 s on the first Create after start; 45.6 and 36.6 s beside a removal |
 | Feature Create in total | 147 to 151 s | 105 s alone; 129 to 147 s otherwise |
 
-"Releasing 40 Checkout sync(s)" came 0.5 s after the version step in all four creates. The `RepositoryBranches` unique error occurred once (10:36:45, during the checkout of the first Create); the Create succeeded.
+"Releasing 40 Checkout sync(s)" came 0.5 s after the version step in all four creates. The `RepositoryBranches` unique error occurred once (10:36:45, during the checkout of the first Create); the Create succeeded. It was the handled race of two writers adding the same branch row: the save recovered ("kept the existing row") and nothing was lost, but the failed insert was logged as two errors. Built after that: a save that adds branch rows checks for stored rows under the database write lock, so the failing insert is no longer sent (`AppDbContext.BranchRows.cs`). Test: `RepositoryBranchWriterRaceTests`.
 
 Tester: with the refresh at the end of the removal, a Feature could be created before the Workspace was refreshed (11:31:22 and 12:03:17, 13 and 24 s after Remove was confirmed). Built after that: the queue runs the refresh to its end first and removes the Feature afterwards, so the Workspace is busy with "Refreshing workspace state..." right after the confirm and the removal starts when it has ended.
 
