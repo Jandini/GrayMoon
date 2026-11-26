@@ -69,7 +69,7 @@ public sealed class FeatureBranchPersistenceTests
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
         ctx.WorkerBridge.Respond(
             "DeleteBranch",
-            data: null,
+            data: new { success = false, errorMessage = $"error: The branch '{FeatureName}' is not fully merged.", failureKind = "NotFullyMerged", branchSha = "1111111111111111111111111111111111111111" },
             success: false,
             error: $"error: The branch '{FeatureName}' is not fully merged.");
 
@@ -122,6 +122,7 @@ public sealed class FeatureBranchPersistenceTests
                 ["graymoon-api"] = "main",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
@@ -150,6 +151,7 @@ public sealed class FeatureBranchPersistenceTests
                 ["graymoon-api"] = "main",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = false, errorMessage = "boom" });
 
         await using var scope = ctx.CreateScope();

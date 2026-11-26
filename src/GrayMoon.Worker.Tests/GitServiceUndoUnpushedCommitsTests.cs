@@ -102,6 +102,48 @@ public sealed class GitServiceUndoUnpushedCommitsTests : IDisposable
         Assert.Equal(pushedSha, GitConfigTestSupport.Git(_origin, "rev-parse refs/heads/feature/x").Trim());
     }
 
+    /// <summary>
+    /// The branch name of an undo comes from stored state. When the branch was switched outside GrayMoon and that
+    /// is not stored yet, the reset used to move the branch that is checked out to the other branch's remote ref:
+    /// with "discard" its commits and files were gone.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_undo_named_for_a_branch_that_is_not_checked_out_changes_nothing(bool keepChanges)
+    {
+        Git("checkout -b feature/other");
+        CommitFile("other.md", "work on the other branch\n");
+        File.WriteAllText(Path.Combine(_repo, "uncommitted.txt"), "not committed\n");
+        var head = Head();
+
+        var (success, error) = await _git.ResetToRemoteAsync(_repo, "main", keepChanges, CancellationToken.None);
+
+        Assert.False(success);
+        Assert.Contains("feature/other", error);
+        Assert.Contains("Nothing was changed", error);
+        Assert.Equal(head, Head());
+        Assert.Equal("feature/other", Git("rev-parse --abbrev-ref HEAD").Trim());
+        Assert.Equal("work on the other branch\n", File.ReadAllText(Path.Combine(_repo, "other.md")));
+        Assert.Equal("?? uncommitted.txt", Git("status --porcelain").Trim());
+        Assert.Equal(_mainSha, Git("rev-parse refs/heads/main").Trim());
+    }
+
+    [Fact]
+    public async Task An_undo_on_a_detached_HEAD_changes_nothing()
+    {
+        CommitFile("local.txt", "local\n");
+        var head = Head();
+        Git($"checkout --detach {head}");
+
+        var (success, error) = await _git.ResetToRemoteAsync(_repo, "main", keepChanges: false, CancellationToken.None);
+
+        Assert.False(success);
+        Assert.Contains("not on a branch", error);
+        Assert.Equal(head, Head());
+        Assert.True(File.Exists(Path.Combine(_repo, "local.txt")));
+    }
+
     private void AssertBranchWasNotPublished(string branch)
     {
         Assert.Equal("", GitConfigTestSupport.Git(_origin, $"for-each-ref refs/heads/{branch}").Trim());

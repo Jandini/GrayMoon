@@ -352,7 +352,7 @@ public sealed class FeatureContextIsolationTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var workspace = await db.Workspaces.FirstAsync(w => w.WorkspaceId == ctx.WorkspaceId);
             workspace.RootPath = @"C:\Workspace";
-            // Legacy bad path from GetWindowsDirectoryName(RootPath) bug — must be relocated.
+            // Legacy bad path from GetWindowsDirectoryName(RootPath) bug - must be relocated.
             workspace.ManagedFeatureStorageRoot = @"C:\.graymoon\test-ws\features";
             await db.SaveChangesAsync();
         }
@@ -368,6 +368,7 @@ public sealed class FeatureContextIsolationTests
                 ["graymoon-api"] = "main",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var opsScope = ctx.CreateScope();

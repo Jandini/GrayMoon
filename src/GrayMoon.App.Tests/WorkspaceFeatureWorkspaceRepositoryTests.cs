@@ -25,7 +25,7 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
         await SeedWorkspaceRepositoryAsync(ctx);
         var sourceIds = await AddSourceRepositoriesAsync(ctx, SourceRepoName, "graymoon-ui");
         Assert.Equal(2, sourceIds.Count);
-        RespondToCreate(ctx, "graymoon-api", "graymoon-web", "graymoon-ui");
+        await RespondToCreate(ctx, "graymoon-api", "graymoon-web", "graymoon-ui");
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -47,7 +47,7 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedWorkspaceRepositoryAsync(ctx);
         await AddSourceRepositoriesAsync(ctx, SourceRepoName);
-        RespondToCreate(ctx, "graymoon-api", "graymoon-web");
+        await RespondToCreate(ctx, "graymoon-api", "graymoon-web");
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -75,7 +75,7 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await SeedWorkspaceRepositoryAsync(ctx);
         await AddSourceRepositoriesAsync(ctx, SourceRepoName);
-        RespondToCreate(ctx, "graymoon-api", "graymoon-web");
+        await RespondToCreate(ctx, "graymoon-api", "graymoon-web");
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, _ =>
             new WorkerCommandResponse(false, null, "root worktree failed"));
 
@@ -197,7 +197,7 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await AddSourceRepositoriesAsync(ctx, SourceRepoName);
-        RespondToCreate(ctx, "graymoon-api", "graymoon-web");
+        await RespondToCreate(ctx, "graymoon-api", "graymoon-web");
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -361,7 +361,7 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
     private static string WorktreePath(object args) =>
         JsonSerializer.SerializeToElement(args).GetProperty("worktreePath").GetString() ?? "";
 
-    private static void RespondToCreate(SyncStateTestContext ctx, params string[] repositoryNames)
+    private static async Task RespondToCreate(SyncStateTestContext ctx, params string[] repositoryNames)
     {
         var commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var branches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -372,6 +372,7 @@ public sealed class WorkspaceFeatureWorkspaceRepositoryTests
         }
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new { commits, branches });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, args =>
             new WorkerCommandResponse(true, new { success = true, worktreePath = WorktreePath(args) }, null));
     }

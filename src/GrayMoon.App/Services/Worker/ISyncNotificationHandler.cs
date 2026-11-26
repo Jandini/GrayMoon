@@ -49,9 +49,14 @@ public interface ISyncApplyObserver
 
 /// <summary>One notification whose repository state is stored and still needs the completion of its context.</summary>
 /// <param name="NeedsRecompute">False for a refs-only notification (branch lists and nothing else).</param>
+/// <param name="Changed">
+/// The groups of the repository's state that the write changed; none for a notification that only confirmed what
+/// was stored. Null when the writer did not say (the completion then treats everything probed as changed).
+/// </param>
 public sealed record AppliedSync(
     int WorkspaceId,
     WorkspaceFeatureContextId ContextId,
     bool IsSpecialWorkspace,
     int RepositoryId,
-    bool NeedsRecompute);
+    bool NeedsRecompute,
+    GrayMoon.App.Services.Workspaces.RepositoryFactGroups? Changed = null);

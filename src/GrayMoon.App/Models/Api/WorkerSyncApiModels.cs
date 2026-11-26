@@ -183,6 +183,23 @@ public sealed class WorkerFetchCommitsResponse
 
     [JsonPropertyName("currentTag")]
     public string? CurrentTag { get; set; }
+
+    /// <summary>The Worker computed the outgoing and incoming counts; false leaves the stored counts alone.</summary>
+    [JsonPropertyName("commitCountsProbed")]
+    public bool CommitCountsProbed { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public List<string>? LocalBranches { get; set; }
+
+    [JsonPropertyName("remoteBranches")]
+    public List<string>? RemoteBranches { get; set; }
+
+    [JsonPropertyName("defaultBranch")]
+    public string? DefaultBranch { get; set; }
+
+    /// <summary>The tag and branch lists are complete and may replace the stored rows (pruning included).</summary>
+    [JsonPropertyName("branchesProbed")]
+    public bool BranchesProbed { get; set; }
 }
 
 /// <summary>Worker sync response with projects array.</summary>

@@ -5,6 +5,7 @@ using GrayMoon.App.Services.Jobs;
 using GrayMoon.App.Services.Orchestration;
 using GrayMoon.App.Services.Versions;
 using GrayMoon.App.Tests.Policy.Characterization;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -28,6 +29,63 @@ public sealed class EffectiveVersionStartCheckTests
         Assert.Empty(plan.RepositoryIds);
         Assert.Contains("connector nuget-test returned HTTP 403", plan.StopMessage);
         Assert.DoesNotContain(s.Ctx.WorkerBridge.Calls, c => c.Command == "PushRepository");
+    }
+
+    [Fact]
+    public async Task Bulk_push_plan_waits_for_the_Git_events_that_are_not_applied_yet_before_it_reads_anything()
+    {
+        // A commit made a moment ago: its hook sync is still in the queue, so the stored commit is the branch point
+        // and the repository reads as "inherited, nothing to push". The plan used to be built from that.
+        var barrier = new GatedBarrier();
+        await using var s = await EffectiveVersionScenario.CreateAsync(configureServices: services =>
+        {
+            PolicyHarness.AddFacades(services);
+            services.AddSingleton<GrayMoon.App.Services.Worker.IWorkerSyncNotificationBarrier>(barrier);
+        });
+        await using var scope = s.Ctx.CreateScope();
+
+        var planning = scope.ServiceProvider.GetRequiredService<IWorkspacePushOperations>().GetPlanAsync(s.Ctx.WorkspaceId, s.Special);
+        await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Nothing was asked or decided while the events are pending.
+        Assert.False(planning.IsCompleted);
+        Assert.Equal(0, s.BranchPointCalls);
+        Assert.Equal(0, s.Registry.Lookups);
+
+        // The queue applies the commit, then lets the plan go on.
+        await s.MutateStateAsync(s.ProducerLinkId, state =>
+        {
+            state.HeadCommit = EffectiveVersionScenario.MovedSha;
+            state.OutgoingCommits = 1;
+        });
+        await s.WithDbAsync(async db =>
+        {
+            var link = await db.WorkspaceRepositories.SingleAsync(l => l.WorkspaceRepositoryId == s.ProducerLinkId);
+            link.OutgoingCommits = 1;
+            await db.SaveChangesAsync();
+        });
+        barrier.Release.SetResult();
+        var plan = await planning.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Null(plan.StopMessage);
+        Assert.True(plan.HasUnpushed);
+        Assert.Contains(s.ProducerId, plan.RepositoryIds);
+        Assert.Equal([s.Ctx.WorkspaceId], barrier.Workspaces.Distinct());
+    }
+
+    private sealed class GatedBarrier : GrayMoon.App.Services.Worker.IWorkerSyncNotificationBarrier
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<int> Workspaces { get; } = [];
+
+        public async Task WaitForPendingAsync(int workspaceId, CancellationToken cancellationToken)
+        {
+            lock (Workspaces)
+                Workspaces.Add(workspaceId);
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+        }
     }
 
     [Fact]

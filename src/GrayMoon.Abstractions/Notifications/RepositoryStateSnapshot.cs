@@ -85,6 +85,18 @@ public sealed class RepositoryStateSnapshot
     public bool ProjectsProbed { get; init; }
 
     /// <summary>
+    /// The Worker process that read this snapshot (<see cref="RepositoryStateCaptureClock.Session"/>). Null when the
+    /// snapshot carries no capture evidence; the App then orders it by when it arrived.
+    /// </summary>
+    public string? CaptureSession { get; init; }
+
+    /// <summary>The Worker's capture counter before the first read of this snapshot. Meaningful only with <see cref="CaptureSession"/>.</summary>
+    public long? CaptureStart { get; init; }
+
+    /// <summary>The Worker's capture counter after the last read of this snapshot.</summary>
+    public long? CaptureEnd { get; init; }
+
+    /// <summary>
     /// True when the only thing probed is the local and remote branch lists, as after a branch was created or deleted
     /// outside GrayMoon. Such a snapshot says nothing about what is checked out or how it compares to its upstream, so
     /// it must not derive sync status, reconcile pull requests or count as a completed sync.

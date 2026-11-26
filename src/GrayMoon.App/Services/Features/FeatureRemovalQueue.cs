@@ -18,7 +18,7 @@ namespace GrayMoon.App.Services.Features;
 public sealed class FeatureRemovalQueue(
     IServiceScopeFactory scopeFactory,
     IFeatureFolderCleanupService folderCleanup,
-    IWorkspaceCheckoutRefresh checkoutRefresh,
+    IWorkspaceRemoteRefresh remoteRefresh,
     ILogger<FeatureRemovalQueue> logger,
     TimeProvider? timeProvider = null)
     : BackgroundService, IFeatureRemovalQueue
@@ -215,11 +215,12 @@ public sealed class FeatureRemovalQueue(
     }
 
     /// <summary>
-    /// Runs the Workspace status refresh to its end before anything of the Feature is removed. The user has just
-    /// left the Feature for the Workspace and may create the next Feature right away, so the Workspace state must
-    /// be current first; and the refresh must not run beside the removal, because both start git processes for
-    /// every repository. Removals of one Workspace that arrive together share one refresh. A refresh that fails
-    /// is logged and the removal goes on: the user confirmed it, and a later Sync brings the status up to date.
+    /// Runs the Workspace's remote refresh (<see cref="IWorkspaceRemoteRefresh"/>: a fetch of every repository, no
+    /// Sync) to its end before anything of the Feature is removed. The user has just left the Feature for the
+    /// Workspace and may create the next Feature right away, so the Workspace must show first that it is behind;
+    /// and the refresh does not run beside the removal, because both start git processes for every repository.
+    /// Removals of one Workspace that arrive together share one refresh. A refresh that fails is logged and the
+    /// removal goes on: the user confirmed it, and a later fetch or Sync brings the counts up to date.
     /// </summary>
     private async Task RefreshWorkspaceFirstAsync(QueuedRemoval removal, CancellationToken stoppingToken)
     {
@@ -232,12 +233,12 @@ public sealed class FeatureRemovalQueue(
                 specialId = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(removal.WorkspaceId, stoppingToken);
             }
 
-            await checkoutRefresh.RunAsync(removal.WorkspaceId, specialId, stoppingToken);
+            await remoteRefresh.RunAsync(removal.WorkspaceId, specialId, stoppingToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(
-                ex, "Workspace status refresh before the Feature removal failed; removing anyway. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                ex, "Workspace remote refresh before the Feature removal failed; removing anyway. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
                 removal.WorkspaceId, removal.FeatureName);
         }
     }

@@ -16,9 +16,10 @@ namespace GrayMoon.App.Services.Git;
 public sealed partial class WorkspaceGitService
 {
     /// <summary>
-    /// Runs git fetch + tag list + commit counts for every repo in the workspace (no GitVersion, no csproj scan,
-    /// no branch listing). Updates only commit-count fields and RepositoryBranch tag rows in the DB.
-    /// Significantly faster than a full Sync. Pass <paramref name="repositoryIds"/> to restrict the fetch to
+    /// The remote-only observation: git fetch (pruning, with tags) for every repo in the workspace, then what the
+    /// fetch can change - commit counts and the upstream flag, the tag rows and the local and remote branch rows.
+    /// No GitVersion, no csproj scan, no file-version check, no dependency recompute, and the checked-out branch
+    /// and commit are not read again. Significantly faster than a full Sync. Pass <paramref name="repositoryIds"/> to restrict the fetch to
     /// a specific subset (e.g. one dependency level); null fetches every repository in the workspace.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, string>> QuickFetchAsync(
@@ -54,6 +55,8 @@ public sealed partial class WorkspaceGitService
 
         var completedCount = 0;
         var totalCount = links.Count;
+        // Before every FetchCommits command, so it is a safe "began at" for all of them.
+        var startedAt = RepositoryStateFreshness.Now();
         using var semaphore = new SemaphoreSlim(_maxConcurrent);
 
         var fetchTasks = links.Select(async link =>
@@ -94,34 +97,39 @@ public sealed partial class WorkspaceGitService
 
         var results = await Task.WhenAll(fetchTasks);
 
-        // Persist commit counts into the selected context (Feature or Workspace) via the state writer.
-        foreach (var (_, repoId, data, error) in results)
+        // Persist what the fetch can change into the selected context (Feature or Workspace) through the state
+        // writer: the commit counts and the upstream flag, and - when the Worker listed them - the tag and branch
+        // rows, which prunes the remote branches the fetch pruned. Nothing here says what is checked out, so the
+        // identity, the version and the projects are left alone and the sync status is not derived.
+        foreach (var (wrId, repoId, data, error) in results)
         {
             if (data == null || !string.IsNullOrWhiteSpace(error)) continue;
 
+            var onTag = !string.IsNullOrWhiteSpace(data.CurrentTag);
             await _stateWriter.ApplyAsync(contextId, workspaceId, repoId, new RepositoryStateSnapshot
             {
                 OutgoingCommits = data.OutgoingCommits,
                 IncomingCommits = data.IncomingCommits,
                 DefaultBranchBehind = data.DefaultBranchBehind,
                 DefaultBranchAhead = data.DefaultBranchAhead,
-                HasUpstream = data.HasUpstream,
-                CommitCountsProbed = data.OutgoingCommits.HasValue
-                    || data.IncomingCommits.HasValue
-                    || data.DefaultBranchBehind.HasValue
-                    || data.DefaultBranchAhead.HasValue,
-                UpstreamProbed = data.HasUpstream.HasValue,
-            }, cancellationToken: cancellationToken);
-        }
+                HasUpstream = onTag ? null : data.HasUpstream,
+                CommitCountsProbed = !onTag && data.CommitCountsProbed,
+                UpstreamProbed = !onTag && data.HasUpstream.HasValue,
+                CheckedOutTag = data.CurrentTag,
+                DefaultBranchName = data.BranchesProbed ? data.DefaultBranch : null,
+                LocalBranches = data.BranchesProbed ? data.LocalBranches ?? [] : null,
+                RemoteBranches = data.BranchesProbed ? data.RemoteBranches ?? [] : null,
+                Tags = data.BranchesProbed ? data.Tags ?? [] : null,
+                BranchesProbed = data.BranchesProbed,
+            }, new RepositoryStateWriteOptions { OperationStartedAt = startedAt }, cancellationToken);
 
-        // Update RepositoryBranch tag rows and HasNewerTag. Pass localBranches/remoteBranches as null so
-        // existing branch rows are not touched - only tag rows are refreshed.
-        foreach (var (wrId, _, data, error) in results)
-        {
-            if (!string.IsNullOrWhiteSpace(error)) continue;
-            if (data?.Tags == null && string.IsNullOrWhiteSpace(data?.CurrentTag)) continue;
-            await PersistBranchesAsync(contextId, wrId, localBranches: null, remoteBranches: null, defaultBranchName: null,
-                tags: data?.Tags, currentTag: data?.CurrentTag, cancellationToken);
+            // A Worker answer without the branch lists (its ref listing failed) still refreshes the tag rows and
+            // which tag is checked out, and leaves the branch rows as they are.
+            if (!data.BranchesProbed && (data.Tags != null || onTag))
+            {
+                await PersistBranchesAsync(contextId, wrId, localBranches: null, remoteBranches: null, defaultBranchName: null,
+                    tags: data.Tags, currentTag: data.CurrentTag, cancellationToken);
+            }
         }
 
         if (_hubContext != null)

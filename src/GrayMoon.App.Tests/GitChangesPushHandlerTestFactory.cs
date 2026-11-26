@@ -17,7 +17,8 @@ internal static class GitChangesPushHandlerTestFactory
         IGitChangesLineStatsRefresh? refresh = null,
         IWorkspaceGitChangesNotifier? notifier = null,
         IWorkspaceHookContextAttributor? attributor = null,
-        GrayMoon.Common.Git.GitChangesOptions? options = null)
+        GrayMoon.Common.Git.GitChangesOptions? options = null,
+        GrayMoon.App.Services.Workspaces.IRepositoryStateDriftMonitor? driftMonitor = null)
     {
         var factory = new GitChangesTestDbContext.TestDbContextFactory(ctx.Options);
         var services = new ServiceCollection();
@@ -35,7 +36,8 @@ internal static class GitChangesPushHandlerTestFactory
             attributor ?? scope.ServiceProvider.GetRequiredService<IWorkspaceHookContextAttributor>(),
             scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>(),
             notifier ?? new WorkspaceGitChangesNotifier(NullLogger<WorkspaceGitChangesNotifier>.Instance),
-            Microsoft.Extensions.Options.Options.Create(options ?? new GrayMoon.Common.Git.GitChangesOptions { WriteLegacyGitChangesTables = true }));
+            Microsoft.Extensions.Options.Options.Create(options ?? new GrayMoon.Common.Git.GitChangesOptions { WriteLegacyGitChangesTables = true }),
+            driftMonitor);
     }
 
     /// <summary>

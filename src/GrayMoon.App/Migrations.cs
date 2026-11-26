@@ -54,6 +54,8 @@ public static partial class Migrations
         (20, "Agent environment variables", dbContext => MigrateAgentEnvironmentVariablesAsync(dbContext)),
         (21, "Effective versions and branch baselines", dbContext => MigrateEffectiveVersionsAsync(dbContext)),
         (22, "Version file token not-checked reason", dbContext => MigrateFileVersionNotCheckedReasonAsync(dbContext)),
+        (23, "Feature repository removal outcome", dbContext => MigrateFeatureRepositoryRemovalOutcomeAsync(dbContext)),
+        (24, "Effective version evidence key", dbContext => MigrateEffectiveVersionEvidenceKeyAsync(dbContext)),
     };
 
     public static Task RunAllAsync(AppDbContext dbContext, ILogger? logger = null, TimeProvider? timeProvider = null) =>
@@ -90,6 +92,8 @@ public static partial class Migrations
             await MigrateReferenceRepositoriesAsync(dbContext, logger);
             // Strict step 16 inserts context state rows through EF; strict step 21 repeats this idempotently.
             await AddEffectiveVersionColumnsAsync(conn);
+            // The same reason: strict step 24 repeats this idempotently.
+            await AddEffectiveVersionEvidenceKeyColumnAsync(conn);
         }
 
         foreach (var step in strictPending)

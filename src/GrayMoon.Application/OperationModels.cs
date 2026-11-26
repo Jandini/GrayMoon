@@ -43,6 +43,16 @@ public sealed record OperationResult(
     /// <summary>True for a successful run that has something to warn about.</summary>
     public bool HasWarnings => Success && Warnings is { Count: > 0 };
 
+    /// <summary>
+    /// The typed outcome of the run: every target with the outcome of each of its steps, stable reason codes and
+    /// whether derived state is ready. Filled by operations that report per-target, per-step outcomes (Remove Feature
+    /// first), also when <see cref="Success"/> is false, so a caller reads what was done without parsing
+    /// <see cref="Error"/>. Null for operations that do not produce one yet; a null value is left out of the JSON, so
+    /// the response of those operations is unchanged.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public OperationOutcome? Outcome { get; init; }
+
     public static OperationResult Ok(
         IReadOnlyDictionary<int, string>? repoErrors = null,
         IReadOnlyDictionary<int, string>? levelErrors = null)

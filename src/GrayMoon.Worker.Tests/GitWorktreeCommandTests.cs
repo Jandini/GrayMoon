@@ -226,7 +226,7 @@ public sealed class GitWorktreeCommandTests : IDisposable
             Force = false,
         });
         Assert.False(cleanRemove.Success);
-        Assert.Equal("GitFailed", cleanRemove.ErrorCode);
+        Assert.Equal(WorktreeRemovalErrorCodes.UncommittedChanges, cleanRemove.ErrorCode);
 
         var forceRemove = await _remove.ExecuteAsync(new RemoveGitWorktreeRequest
         {

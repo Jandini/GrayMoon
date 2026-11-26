@@ -4,6 +4,7 @@
 @inject IFeatureRemovalDeparture Departure
 @inject NavigationManager Navigation
 @inject ILogger<RemoveFeatureModal> Logger
+@implements IDisposable
 
 @if (IsVisible)
 {
@@ -21,7 +22,7 @@
                             <span class="modal-title__secondary text-muted fw-normal fs-6" title="@_featureName">@_featureName</span>
                         }
                     </h5>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel" disabled="@_analyzing"></button>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="Cancel"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(_error))
@@ -30,10 +31,59 @@
                     }
                     @if (_plan is null)
                     {
-                        @* Fallback only: normal open preloads the plan via the page LoadingOverlay. *@
-                        @if (string.IsNullOrEmpty(_error))
+                        @* Opened from stored facts only: nothing was inspected live. The live details replace this after "Review details". *@
+                        @if (_analyzing)
                         {
-                            <p class="mb-0 text-muted">@( _analyzing ? "Refreshing removal details…" : "No removal plan is available." )</p>
+                            <p class="mb-0 text-muted">@(_analyzeProgress ?? "Checking every repository...")</p>
+                        }
+                        else if (_summary is { Success: true } summary)
+                        {
+                            <p class="mb-2">@RemoveFeatureQuickDialog.Headline(summary)</p>
+                            <p class="text-muted small mb-2">@RemoveFeatureQuickDialog.SafetyText</p>
+                            @if (RemoveFeatureQuickDialog.RecordedChangesText(summary) is { } recordedChanges)
+                            {
+                                <p class="text-muted small mb-2">@recordedChanges</p>
+                            }
+                            @if (summary.Pending.Count > 0)
+                            {
+                                <p class="mb-1 fw-semibold">Left from the last removal:</p>
+                                <ul class="list-unstyled mb-2 remove-feature-repo-list">
+                                    @foreach (var pending in summary.Pending)
+                                    {
+                                        <li class="mb-2">
+                                            <strong>@pending.RepositoryName</strong>
+                                            <div class="text-muted small">@RemoveFeatureQuickDialog.PendingText(pending)</div>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            @if (RemoveFeatureQuickDialog.ShowDeleteLocalBranches(summary))
+                            {
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="checkbox" id="quick-delete-local-branches" @bind="_deleteLocalBranches" />
+                                    <label class="form-check-label" for="quick-delete-local-branches">
+                                        Delete local Feature branches
+                                    </label>
+                                </div>
+                            }
+                            @if (RemoveFeatureQuickDialog.ShowDeleteRemoteBranches(summary))
+                            {
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="quick-delete-remote-branches" @bind="_deleteRemoteBranches" />
+                                    <label class="form-check-label" for="quick-delete-remote-branches">
+                                        Delete remote Feature branches
+                                    </label>
+                                </div>
+                            }
+                            @if (RemoveFeatureQuickDialog.ShowDeleteLocalBranches(summary))
+                            {
+                                <p class="text-muted small mb-2">@RemoveFeatureQuickDialog.BranchNote</p>
+                            }
+                            <p class="text-muted small mb-0">@RemoveFeatureQuickDialog.ReviewHint</p>
+                        }
+                        else if (string.IsNullOrEmpty(_error))
+                        {
+                            <p class="mb-0 text-muted">Loading...</p>
                         }
                     }
                     else if (_plan.Success)
@@ -168,9 +218,16 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel" disabled="@_analyzing">Cancel</button>
+                    <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="Cancel">Cancel</button>
+                    @if (_plan is null)
+                    {
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" @onclick="ReviewDetailsAsync"
+                                disabled="@(_analyzing || _summary is not { Success: true })">
+                            Review details
+                        </button>
+                    }
                     <button type="button" class="@RemoveCtaClass text-nowrap" data-default-action @onclick="RemoveAsync"
-                            disabled="@(_analyzing || _plan is null || !CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock))">
+                            disabled="@(!CanConfirm)">
                         Remove Feature
                     </button>
                 </div>
@@ -178,14 +235,15 @@
         </div>
     </div>
 }
-@* Confirm queues the background removal and leaves for the Workspace immediately via IFeatureRemovalDeparture. *@
+@* The dialog opens from stored facts and can be confirmed at once; "Review details" reads every repository live on demand.
+   Confirm queues the background removal and leaves for the Workspace immediately via IFeatureRemovalDeparture. *@
 
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public WorkspaceFeatureContextId? FeatureContextId { get; set; }
     /// <summary>
-    /// Pre-analyzed plan from the page LoadingOverlay job. When set, the dialog skips its own
-    /// "Checking..." analyze on open and shows this plan immediately.
+    /// Live details a caller already has. When set, the dialog opens on them instead of on the stored summary.
+    /// The Repositories page passes none: it opens the dialog at once and the user asks for the details.
     /// </summary>
     [Parameter] public RemoveFeaturePlan? InitialPlan { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -199,6 +257,12 @@
         "Some files were still in use, so part of the Feature folder was left behind. "
         + "It is marked for deletion and GrayMoon will remove it automatically later.";
     private bool _analyzing;
+    private string? _analyzeProgress;
+    private RemoveFeatureSummary? _summary;
+    private int? _summaryLoadedFor;
+    // A reopened dialog or a second click starts a new load; the result of an older one is ignored.
+    private int _loadGeneration;
+    private CancellationTokenSource? _loadCts;
     private bool _allowDiscard;
     private bool _allowForce;
     private bool _allowUnlock;
@@ -441,10 +505,21 @@
     private bool UseNeutralStatusText =>
         _plan?.Classification == RemoveFeatureClassification.Completed && !HasUnsavedWork;
 
+    // Green only for live details that are automatically safe. A dialog opened from stored facts never claims that.
     private string RemoveCtaClass =>
         _plan is not null && !RemoveCtaIsDestructive(_plan)
             ? "btn remove-feature-btn-safe"
             : "btn btn-danger";
+
+    /// <summary>
+    /// Without live details the removal can always be confirmed: it forces nothing. With them, every consent the
+    /// dialog shows must be ticked (<see cref="CanRemove"/>).
+    /// </summary>
+    private bool CanConfirm =>
+        !_analyzing
+        && (_plan is null
+            ? _summary is { Success: true }
+            : CanRemove(AnyRepoStatusUnknown, ShowDiscardCheckbox, _allowDiscard, ShowForceCheckbox, _allowForce, ShowUnlockCheckbox, _allowUnlock));
 
     internal static bool IsRepositoryDirty(RemoveFeatureRepositoryPlan repo) =>
         repo.HasUncommittedChanges || repo.HasStagedChanges || repo.HasConflicts;
@@ -670,18 +745,108 @@
         if (_analyzedFor == FeatureContextId.Value.Value && _plan is not null)
             return;
 
-        // Fallback when opened without a preloaded plan (should not happen from Repositories).
-        _analyzing = true;
+        // Opened without live details: show what is stored. One database read, no Worker command.
+        if (_summaryLoadedFor != FeatureContextId.Value.Value)
+            await LoadSummaryAsync(FeatureContextId.Value);
+    }
+
+    private async Task LoadSummaryAsync(WorkspaceFeatureContextId contextId)
+    {
+        _summaryLoadedFor = contextId.Value;
+        var (generation, token) = BeginLoad();
         _error = null;
         try
         {
-            await RefreshPlanAsync();
+            var summary = await FeatureOperations.GetRemoveFeatureSummaryAsync(contextId, token);
+            if (generation != _loadGeneration)
+                return;
+
+            _summary = summary;
+            _deleteLocalBranches = summary.Success && RemoveFeatureQuickDialog.ShowDeleteLocalBranches(summary);
+            _deleteRemoteBranches = summary.Success && RemoveFeatureQuickDialog.ShowDeleteRemoteBranches(summary);
+            if (!summary.Success)
+                _error = summary.Error;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Superseded or closed.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading the Remove Feature summary failed");
+            if (generation == _loadGeneration)
+                _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Reads the live details of every repository (one Worker inspection each and one pull request refresh), on
+    /// the user's request. The dialog then shows them with the consents each risk needs. Cancel stops waiting; the
+    /// result of a review that was cancelled or superseded is ignored.
+    /// </summary>
+    private async Task ReviewDetailsAsync()
+    {
+        if (FeatureContextId is not { } contextId || _analyzing)
+            return;
+
+        var (generation, token) = BeginLoad();
+        _analyzing = true;
+        _analyzeProgress = null;
+        _error = null;
+        try
+        {
+            var progress = new Progress<OperationProgress>(p =>
+            {
+                if (generation != _loadGeneration)
+                    return;
+                _analyzeProgress = p.Message;
+                _ = InvokeAsync(StateHasChanged);
+            });
+            var plan = await FeatureOperations.AnalyzeRemoveFeatureAsync(contextId, token, progress);
+            if (generation != _loadGeneration)
+                return;
+
+            ApplyPlan(plan);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Cancelled by the user or superseded.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AnalyzeRemoveFeature failed");
+            if (generation == _loadGeneration)
+                _error = ex.Message;
         }
         finally
         {
-            _analyzing = false;
+            if (generation == _loadGeneration)
+            {
+                _analyzing = false;
+                _analyzeProgress = null;
+            }
         }
     }
+
+    /// <summary>Starts a load that replaces any load still running: a new generation and its own cancellation.</summary>
+    private (int Generation, CancellationToken Token) BeginLoad()
+    {
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _loadCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        return (++_loadGeneration, cts.Token);
+    }
+
+    private void CancelLoad()
+    {
+        _loadGeneration++;
+        var previous = Interlocked.Exchange(ref _loadCts, null);
+        previous?.Cancel();
+        previous?.Dispose();
+    }
+
+    public void Dispose() => CancelLoad();
 
     /// <summary>
     /// Loads the Feature name for the title subtitle, same source as <see cref="FeatureStatusPanel"/>.
@@ -718,41 +883,12 @@
     }
 
     /// <summary>
-    /// Reloads the removal plan. Used on open and after a failed remove so a locked folder's
-    /// stored error shows in the open dialog without closing it. Does not clear <see cref="_error"/>.
-    /// </summary>
-    private async Task RefreshPlanAsync()
-    {
-        if (FeatureContextId is null)
-            return;
-
-        try
-        {
-            _plan = await FeatureOperations.AnalyzeRemoveFeatureAsync(FeatureContextId.Value);
-            _analyzedFor = FeatureContextId.Value.Value;
-            if (_plan.Success)
-            {
-                _deleteLocalBranches = _plan.Repositories.Any(HasLocalFeatureBranchToDelete);
-                _deleteRemoteBranches = _plan.Repositories.Any(HasRemoteFeatureBranchToDelete);
-            }
-            if (!_plan.Success && string.IsNullOrEmpty(_error))
-                _error = _plan.Error;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "AnalyzeRemoveFeature failed");
-            if (string.IsNullOrEmpty(_error))
-                _error = ex.Message;
-        }
-    }
-
-    /// <summary>
     /// Confirms removal: the departure service queues the work and returns the Workspace view to
     /// open now. The outcome (success, warnings or failure) arrives later as a toast.
     /// </summary>
     private async Task RemoveAsync()
     {
-        if (FeatureContextId is null)
+        if (FeatureContextId is null || !CanConfirm)
             return;
         _error = null;
         try
@@ -766,6 +902,7 @@
                     AllowUnlockWorktrees = _allowUnlock,
                     DeleteLocalBranches = _deleteLocalBranches,
                     DeleteRemoteBranches = _deleteRemoteBranches,
+                    // Null when the user did not review: nothing is forced then.
                     AnalyzedPlan = _plan
                 },
                 Navigation.Uri);
@@ -787,6 +924,11 @@
 
     private void ResetDialogState()
     {
+        CancelLoad();
+        _analyzing = false;
+        _analyzeProgress = null;
+        _summary = null;
+        _summaryLoadedFor = null;
         _plan = null;
         _analyzedFor = null;
         _appliedInitialPlanFor = null;
@@ -806,10 +948,10 @@
         return OnCancel.InvokeAsync();
     }
 
-    /// <summary>Esc closes (while not analyzing); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
+    /// <summary>Esc closes (and stops waiting for a review); Ctrl/Cmd+Enter is handled globally by modal-default-action.js via data-default-action.</summary>
     private Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key != "Escape" || _analyzing)
+        if (e.Key != "Escape")
             return Task.CompletedTask;
 
         return Cancel();

@@ -7,12 +7,21 @@ public sealed partial class WorkspaceActions
 {
     private async Task LoadWorkspaceAsync()
     {
+        // The context this load is for. The selection can change while it reads; the rows it built then belong to
+        // the context that was left and are not assigned.
+        var generation = _contextBinding.Generation;
+        var selectedContextId = _selectedContextId;
+        var isFeatureContext = _isFeatureContext;
         isLoading = true;
         errorMessage = null;
 
         try
         {
-            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            var loadedWorkspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (!_contextBinding.IsCurrent(generation, _disposed))
+                return;
+
+            workspace = loadedWorkspace;
             if (workspace == null)
             {
                 errorMessage = "Workspace not found.";
@@ -31,15 +40,17 @@ public sealed partial class WorkspaceActions
 
             _groupByDependencyLevel = (await CapabilitiesResolver.GetAsync(WorkspaceId)).UsesDependencyGraph;
 
-            var persistedActions = await _ciProvider.GetPersistedStatusesAsync(WorkspaceId, FeatureContextIdForCi);
+            var persistedActions = await _ciProvider.GetPersistedStatusesAsync(WorkspaceId, isFeatureContext ? selectedContextId : null);
 
             // For a Feature context, the checked-out branch and the dependency level live on
             // WorkspaceRepositoryContextState, not on the special Workspace's link - overlay them per repository so
             // Actions polls/displays the Feature's own branch and level instead of silently showing the Workspace's (§18/§2.2).
             // The snapshot of the viewed context also carries the upstream, outgoing commits and recorded parent branch
             // that pick the CI branch (UnpublishedBranchRules.CiBranch), for the special Workspace as well.
-            var contextStateByRepositoryId = (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, _selectedContextId, isSpecialWorkspace: !_isFeatureContext))
+            var contextStateByRepositoryId = (await LinkListQueryService.GetAllSnapshotsAsync(WorkspaceId, selectedContextId, isSpecialWorkspace: !isFeatureContext))
                 .ToDictionary(dto => dto.RepositoryId);
+            if (!_contextBinding.IsCurrent(generation, _disposed))
+                return;
 
             rows = workspace.Repositories
                 .Where(link => link.Repository != null && link.Repository.Connector != null)
@@ -47,7 +58,7 @@ public sealed partial class WorkspaceActions
                 .Select(link =>
                 {
                     var contextState = contextStateByRepositoryId.GetValueOrDefault(link.RepositoryId);
-                    var effectiveLink = _isFeatureContext
+                    var effectiveLink = isFeatureContext
                         ? link.WithBranchOverride(contextState?.BranchName)
                         : link;
 
@@ -81,7 +92,7 @@ public sealed partial class WorkspaceActions
                                 Archived = link.Repository.Archived,
                             CloneUrl = link.Repository.CloneUrl
                         },
-                        DependencyLevel = ResolveDependencyLevel(link, _isFeatureContext, contextState?.DependencyLevel),
+                        DependencyLevel = ResolveDependencyLevel(link, isFeatureContext, contextState?.DependencyLevel),
                         IsWorkspaceRepository = link.Role == WorkspaceRepositoryRole.Workspace,
                         WorkflowLines = workflowLines,
                         IsVerified = branchMatches && hasPersisted
@@ -97,12 +108,17 @@ public sealed partial class WorkspaceActions
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to load workspace. Please try again later.";
-            rows = [];
+            if (_contextBinding.IsCurrent(generation, _disposed))
+            {
+                errorMessage = "Failed to load workspace. Please try again later.";
+                rows = [];
+            }
         }
         finally
         {
-            isLoading = false;
+            // A load that was overtaken leaves the indicator to the load of the context that is selected now.
+            if (_contextBinding.IsCurrent(generation, _disposed))
+                isLoading = false;
         }
     }
 

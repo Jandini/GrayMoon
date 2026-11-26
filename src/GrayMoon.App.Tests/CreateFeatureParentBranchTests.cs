@@ -56,6 +56,7 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-ui"] = "release/3.0",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var opsScope = ctx.CreateScope();
@@ -89,6 +90,7 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
@@ -127,6 +129,7 @@ public sealed class CreateFeatureParentBranchTests
             },
             branches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
@@ -167,6 +170,7 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-api"] = "1.2.0",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
@@ -214,6 +218,7 @@ public sealed class CreateFeatureParentBranchTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();

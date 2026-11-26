@@ -46,6 +46,7 @@ public sealed class FeatureNameValidationTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var firstScope = ctx.CreateScope();

@@ -22,7 +22,7 @@ using Microsoft.Extensions.Options;
 
 namespace GrayMoon.App.Services.Features;
 
-public sealed class WorkspaceFeatureOperations(
+public sealed partial class WorkspaceFeatureOperations(
     IDbContextFactory<AppDbContext> dbContextFactory,
     IServiceScopeFactory scopeFactory,
     IWorkspaceOperationLock operationLock,
@@ -38,7 +38,11 @@ public sealed class WorkspaceFeatureOperations(
     IOptions<WorkspaceOptions> workspaceOptions,
     ILogger<WorkspaceFeatureOperations> logger,
     FeatureFinalizationCoordinator? finalizationCoordinator = null,
-    FeatureCodeGraphService? codeGraph = null) : IWorkspaceFeatureOperations
+    FeatureCodeGraphService? codeGraph = null,
+    RepositoryStateFreshness? stateFreshness = null,
+    IRepositoryStateDriftMonitor? stateDriftMonitor = null,
+    FeatureVersionStage? versionStage = null,
+    SyncRecomputeCoalescer? recomputeCoalescer = null) : IWorkspaceFeatureOperations
 {
     private int MaxParallel => Math.Max(1, workspaceOptions.Value.MaxParallelOperations);
 
@@ -223,6 +227,15 @@ public sealed class WorkspaceFeatureOperations(
             };
         }
 
+        // The seed below copies the Workspace's stored state into the Feature. A repository whose checkout is not
+        // where that state says it is (a commit, checkout or reset GrayMoon did not see) is synchronized first.
+        var storedStateCheck = await SyncRepositoriesWithStaleStoredStateAsync(
+            workspaceId, specialContextId, links, snapshot.Commits, snapshot.Branches, snapshot.Tags, progress, cancellationToken);
+        stageStart = logger.FeatureStageFinished(
+            "Create", workspaceId, name, "StoredStateCheck", stageStart, $"Synchronized={storedStateCheck.Synchronized}");
+        if (storedStateCheck.Error is not null)
+            return FailCreate("WorkspaceStateNotCurrent", storedStateCheck.Error);
+
         // Build worktree paths from the already-persisted storage root. Do not call pathResolver
         // inside the intent transaction: it opens a second AppDbContext and deadlocks SQLite
         // against this write (and against WorkspaceGitChangesWriteQueue).
@@ -335,6 +348,8 @@ public sealed class WorkspaceFeatureOperations(
         // paths in one repository, logs of 2026-11-25), on a machine where a git process costs over a second.
         // Released when the last worktree exists, and by the using on every other way out.
         using var monitoringPause = gitChangesMonitoringPause.Pause(contextId.Value);
+        // Set once the version stage has taken over: it then releases the hold on the Checkout syncs, not this method.
+        var versionStageStarted = false;
         try
         {
             // The Worker keeps the Checkout sync of each new worktree back while worktrees are created and released
@@ -478,12 +493,23 @@ public sealed class WorkspaceFeatureOperations(
             }
 
             // Every repository of a new Feature is on its branch point, the one case where the effective version needs
-            // the Worker and the package registry. Decided here, inside the operation, so the grid opens with final
-            // versions; it used to run in the recompute of the first hook sync, seconds after the overlay had closed.
-            progress?.Report(new OperationProgress("Verifying published packages..."));
-            await ResolveInitialEffectiveVersionsAsync(workspaceId, contextId, name, progress, cancellationToken);
-            stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "EffectiveVersions", stageStart);
-            await SetWorktreeHookSyncHoldAsync(contextId, hold: false, CancellationToken.None);
+            // the Worker and the package registry. The Feature is usable without that answer, so the stage runs after
+            // this operation has ended (FeatureVersionStage): it keeps the finalization barrier and the hold on the
+            // Checkout syncs until it is done, and Update, Push and Prepare wait for it in their start check. A host
+            // without the stage service decides the versions here, before the operation ends.
+            if (versionStage is not null)
+            {
+                versionStage.Start(workspaceId, contextId, name);
+                versionStageStarted = true;
+                stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "EffectiveVersions", stageStart, "Background");
+            }
+            else
+            {
+                progress?.Report(new OperationProgress("Verifying published packages..."));
+                await ResolveInitialEffectiveVersionsAsync(workspaceId, contextId, name, progress, cancellationToken);
+                stageStart = logger.FeatureStageFinished("Create", workspaceId, name, "EffectiveVersions", stageStart);
+                await SetWorktreeHookSyncHoldAsync(contextId, hold: false, CancellationToken.None);
+            }
 
             await selectedContextService.SetSelectedAsync(workspaceId, contextId, cancellationToken);
             if (createCodeGraphIndex)
@@ -520,7 +546,8 @@ public sealed class WorkspaceFeatureOperations(
         }
         finally
         {
-            await SetWorktreeHookSyncHoldAsync(contextId, hold: false, CancellationToken.None);
+            if (!versionStageStarted)
+                await SetWorktreeHookSyncHoldAsync(contextId, hold: false, CancellationToken.None);
         }
     }
 
@@ -535,7 +562,7 @@ public sealed class WorkspaceFeatureOperations(
         {
             var response = await workerBridge.SendCommandAsync(
                 WorkerHubMethods.HoldWorktreeHookSyncs,
-                new { key = $"create-feature-{contextId.Value}", hold },
+                new { key = FeatureVersionStage.HoldKey(contextId), hold },
                 cancellationToken);
             if (!response.Success)
                 logger.LogWarning(
@@ -738,529 +765,20 @@ public sealed class WorkspaceFeatureOperations(
         }
     }
 
-    public async Task<OperationResult> RemoveFeatureAsync(
-        WorkspaceFeatureContextId featureContextId,
-        RemoveFeatureOptions options,
-        IProgress<OperationProgress>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        var info = await contextResolver.GetRequiredAsync(featureContextId, cancellationToken: cancellationToken);
-        if (info.IsSpecialWorkspace)
-            return OperationResult.Fail("Cannot remove the special Workspace context.");
-
-        var startedAt = logger.FeatureOperationStarted(
-            "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName);
-        try
-        {
-            // The whole removal, including dropping the Feature's rows, takes no Workspace lock and does not
-            // refresh the Workspace. That refresh starts when the user leaves for the Workspace and must not
-            // wait for this background job. A caller that queues the removal waits for a free slot first.
-            var phaseOne = await RunRemovalPhaseOneAsync(featureContextId, info, options, progress, cancellationToken);
-            var outcome = phaseOne.Failure
-                ?? await FinalizeFeatureRemovalAsync(featureContextId, info, phaseOne, cancellationToken);
-            logger.FeatureOperationFinished(
-                "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt,
-                outcome.Success ? "Succeeded" : "Failed", outcome.Error);
-            return outcome;
-        }
-        catch (OperationCanceledException)
-        {
-            logger.FeatureOperationFinished(
-                "Remove", info.WorkspaceId, info.WorkspaceFeatureId, featureContextId.Value, info.FeatureName, startedAt, "Cancelled");
-            throw;
-        }
-    }
-
     /// <summary>
-    /// Validates the plan and removes the worktrees and branches. Deliberately takes no Workspace operation lock: a
-    /// removal running in the background must never stop Sync or any other operation from starting.
-    /// </summary>
-    private async Task<RemovalPhaseOne> RunRemovalPhaseOneAsync(
-        WorkspaceFeatureContextId featureContextId,
-        WorkspaceFeatureContextInfo info,
-        RemoveFeatureOptions options,
-        IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var plan = options.AnalyzedPlan is { Success: true } preAnalyzed
-                ? preAnalyzed
-                : await AnalyzeRemoveFeatureAsync(featureContextId, cancellationToken);
-            if (!plan.Success)
-                return RemovalPhaseOne.Failed(OperationResult.Fail(plan.Error ?? "Analyze failed."));
-
-            // Unknown disk state (Worker unreachable, or InspectWorktree failed) can hide real dirty work,
-            // so Remove is refused here regardless of discard/force authorization - see A2 rule.
-            if (plan.Repositories.Any(r => r.WorktreeStatusUnknown))
-                return RemovalPhaseOne.Failed(OperationResult.Fail(
-                    "Could not check one or more repositories. Make sure the Worker is running, then try again."));
-
-            // D3: require each authorization only when that risk is actually present (same rules as the
-            // Remove dialog checkboxes). Classification / PR-unknown / null outgoing / NeedsRepair alone
-            // make IsAutomaticallySafe false but do not need discard/force/unlock - Remove stays allowed
-            // (A3, I1).
-            var needsDiscard = plan.Repositories.Any(r =>
-                r.HasUncommittedChanges || r.HasStagedChanges || r.HasConflicts);
-            var needsForce = plan.Repositories.Any(r => r.NeedsForceDeleteAuthorization(plan.PullRequestStatusUnknown));
-            var needsUnlock = plan.Repositories.Any(r => r.IsLocked);
-
-            if (needsDiscard && !options.AllowDiscardUncommitted)
-                return RemovalPhaseOne.Failed(OperationResult.Fail(
-                    "This Feature has uncommitted changes; authorize discarding them explicitly."));
-            if (needsForce && !options.AllowForceDeleteLocalBranches)
-                return RemovalPhaseOne.Failed(OperationResult.Fail(
-                    "This Feature has local branches with commits not in the default branch; authorize force-deleting them explicitly."));
-            if (needsUnlock && !options.AllowUnlockWorktrees)
-                return RemovalPhaseOne.Failed(OperationResult.Fail(
-                    "This Feature has locked worktrees; authorize unlocking them explicitly."));
-
-            return await RemoveFeatureCoreAsync(featureContextId, info, options, plan, progress, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Feature Remove threw. WorkspaceId={WorkspaceId} FeatureName={FeatureName}", info.WorkspaceId, info.FeatureName);
-            return RemovalPhaseOne.Failed(OperationResult.Fail(ex.Message));
-        }
-    }
-
-    /// <summary>Shown for a repository that was clean in the Remove analysis and has uncommitted work when the removal runs.</summary>
-    internal const string ChangedSinceCheckMessage = "changed since the check, run Remove again.";
-
-    /// <summary>The Worker's <c>failureKind</c> for a worktree git refused to remove because it has modified or untracked files.</summary>
-    internal const string UncommittedChangesFailureKind = "UncommittedChanges";
-
-    /// <summary>
-    /// True when the analysed plan showed uncommitted, staged or conflicted work in this repository, so the user's
-    /// "discard uncommitted" choice covers it. A repository missing from the plan was never shown and is not covered.
-    /// </summary>
-    internal static bool RemovePlanShowedUncommittedWork(RemoveFeatureRepositoryPlan? planRow) =>
-        planRow is not null && (planRow.HasUncommittedChanges || planRow.HasStagedChanges || planRow.HasConflicts);
-
-    private async Task<RemovalPhaseOne> RemoveFeatureCoreAsync(
-        WorkspaceFeatureContextId featureContextId,
-        WorkspaceFeatureContextInfo info,
-        RemoveFeatureOptions options,
-        RemoveFeaturePlan plan,
-        IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        // Drift (09 SB-2), from the plan already analysed just before this ran: which branch, if any,
-        // the worktree was actually on instead of its Feature branch. Looked up by WorkspaceRepositoryId
-        // below so the removal report can name the kept branch instead of only deleting silently.
-        var driftByWrId = plan.Repositories.ToDictionary(r => r.WorkspaceRepositoryId, r => r);
-
-        // D2: the periodic Git Changes sweep must never scan this context's worktrees while they are
-        // being deleted below. Disposed in every case (success, failure, cancellation) so monitoring
-        // always resumes; the special Workspace context is never paused, so its own sweep is unaffected.
-        using var monitoringPause = gitChangesMonitoringPause.Pause(featureContextId.Value);
-
-        await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var feature = await db.WorkspaceFeatures
-            .FirstAsync(f => f.WorkspaceFeatureId == info.WorkspaceFeatureId, cancellationToken);
-
-        var specialContextId = await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(info.WorkspaceId, cancellationToken);
-        // Rows already Removed (a prior partial remove) are left alone here; only the still-live rows
-        // move to Removing. Skipping them keeps a retry from re-asking the Worker about an already gone worktree.
-        var rows = await db.WorkspaceFeatureRepositories
-            .Where(r => r.WorkspaceFeatureContextId == featureContextId.Value
-                && r.State != WorkspaceFeatureRepositoryState.Removed)
-            .ToListAsync(cancellationToken);
-
-        feature.LifecycleState = WorkspaceFeatureLifecycleState.Removing;
-        feature.UpdatedAt = DateTime.UtcNow;
-        foreach (var row in rows)
-            row.State = WorkspaceFeatureRepositoryState.Removing;
-        await db.SaveChangesAsync(cancellationToken);
-
-        // Before any worktree goes: CodeGraph's index (and a build still running) must not hold the Feature root.
-        await UninitializeCodeGraphAsync(info.WorkspaceId, featureContextId, progress, cancellationToken);
-
-        var wrIds = rows.Select(r => r.WorkspaceRepositoryId).ToList();
-        var links = await db.WorkspaceRepositories
-            .AsNoTracking()
-            .Include(l => l.Repository)!.ThenInclude(r => r!.Connector)
-            .Where(l => wrIds.Contains(l.WorkspaceRepositoryId))
-            .ToListAsync(cancellationToken);
-        var linkByWrId = links.ToDictionary(l => l.WorkspaceRepositoryId);
-
-        var errorsByWrId = new ConcurrentDictionary<int, string>();
-        var reportByWrId = new ConcurrentDictionary<int, RemoveFeatureRepositoryReport>();
-        var removeCompleted = 0;
-        var removeTotal = rows.Count;
-        string? workspaceRoot = null;
-        string? workspaceFolderName = null;
-        string? workspaceRepositoryName = null;
-        try
-        {
-            (workspaceRoot, workspaceFolderName, workspaceRepositoryName) =
-                await pathResolver.GetWorkerArgsAsync(specialContextId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not resolve Workspace worker paths for Feature branch delete.");
-        }
-
-        // D1's Worker-side residue cleanup only deletes files when both of these are set; an old App
-        // (or a resolution failure here) leaves them null, matching the old, report-only behaviour.
-        string? featureRootPath = null;
-        string? featureStorageRoot = null;
-        try
-        {
-            featureRootPath = await pathResolver.GetContextRootAsync(featureContextId, cancellationToken);
-            (featureStorageRoot, _, _) = await pathResolver.GetWorkerArgsAsync(featureContextId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not resolve Feature storage paths for worktree residue cleanup.");
-        }
-
-        // D10: the Workspace-role root worktree is removed last, alone, and only when every Source
-        // removal succeeded (git worktree remove on a root that still holds Source worktrees would
-        // fail or need --force).
-        var rootRow = rows.SingleOrDefault(r =>
-            linkByWrId.TryGetValue(r.WorkspaceRepositoryId, out var rootLink)
-            && rootLink.Role == WorkspaceRepositoryRole.Workspace);
-        var sourceRows = rows.Where(r => r != rootRow).ToList();
-        var rootKeptMessage = false;
-
-        using (var gate = new SemaphoreSlim(MaxParallel))
-        {
-            Func<WorkspaceFeatureRepository, Task> removeRowAsync = async row =>
-            {
-                await gate.WaitAsync(cancellationToken);
-                try
-                {
-                    var repoName = linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var reportLink)
-                        ? reportLink.Repository?.RepositoryName ?? ""
-                        : "";
-                    var isRootRow = ReferenceEquals(row, rootRow);
-
-                    var mainPath = await pathResolver.GetRepositoryPathAsync(
-                        specialContextId, row.WorkspaceRepositoryId, cancellationToken);
-                    // Force worktree remove only when the user authorized discarding dirty Feature files AND
-                    // the analysis they approved showed this repository as dirty. The discard choice covers
-                    // what the Remove dialog listed, not work saved after it (review 2026-11-10, finding 18).
-                    // AllowForceDeleteLocalBranches does not imply discard permission.
-                    var force = options.AllowDiscardUncommitted
-                        && RemovePlanShowedUncommittedWork(driftByWrId.GetValueOrDefault(row.WorkspaceRepositoryId));
-
-                    // The removal is queued and runs unattended. A repository that was clean at analysis and is dirty
-                    // now is never force-removed: without force, git worktree remove itself refuses a worktree with
-                    // modified or untracked files, and the Worker reports that as UncommittedChanges. A full
-                    // inspection before every removal answered the same question with about ten git processes.
-                    var response = await workerBridge.SendCommandAsync(
-                        WorkerHubMethods.RemoveGitWorktree,
-                        new
-                        {
-                            mainRepositoryPath = mainPath,
-                            worktreePath = row.WorktreePath,
-                            force,
-                            // The root removal deletes the directory itself; Worker residue cleanup must not run.
-                            featureRootPath = isRootRow ? null : featureRootPath,
-                            featureStorageRoot = isRootRow ? null : featureStorageRoot,
-                            unlock = options.AllowUnlockWorktrees
-                        },
-                        cancellationToken);
-                    if (!response.Success)
-                    {
-                        var refusal = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
-                        if (!force && string.Equals(refusal?.FailureKind, UncommittedChangesFailureKind, StringComparison.Ordinal))
-                        {
-                            var changed = string.IsNullOrWhiteSpace(repoName)
-                                ? ChangedSinceCheckMessage
-                                : $"{repoName}: {ChangedSinceCheckMessage}";
-                            logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, changed);
-                            errorsByWrId[row.WorkspaceRepositoryId] = changed;
-                            return;
-                        }
-
-                        logger.LogWarning(
-                            "RemoveGitWorktree failed for {Path}: {Error}. Repository={Repository} FeatureName={FeatureName}",
-                            row.WorktreePath, FeatureOperationLog.Redact(response.Error), repoName, info.FeatureName);
-                        errorsByWrId[row.WorkspaceRepositoryId] = string.IsNullOrWhiteSpace(response.Error)
-                            ? $"Failed to remove worktree {row.WorktreePath}."
-                            : response.Error;
-                        return;
-                    }
-
-                    var worktreeResult = WorkerResponseJson.DeserializeWorkerResponse<RemoveGitWorktreeResult>(response.Data);
-
-                    // The worktree is unregistered now, regardless of any kept branch or leftover files
-                    // below; persist this row's progress at once with its own short-lived context, so a
-                    // crash before the whole Feature finishes still keeps already-removed repos removed.
-                    await using (var rowDb = await dbContextFactory.CreateDbContextAsync(cancellationToken))
-                    {
-                        var trackedRow = await rowDb.WorkspaceFeatureRepositories.FirstAsync(
-                            r => r.WorkspaceFeatureRepositoryId == row.WorkspaceFeatureRepositoryId, cancellationToken);
-                        trackedRow.State = WorkspaceFeatureRepositoryState.Removed;
-                        trackedRow.LastError = null;
-                        await rowDb.SaveChangesAsync(cancellationToken);
-                    }
-
-                    // §27.8 / D4: after worktree remove, optionally delete the Feature branch locally
-                    // and/or remotely from the main repository. Tag-pinned repositories never got a
-                    // Feature branch; a same-named branch there is not ours.
-                    var branchName = row.IsDetached ? null : info.FeatureName;
-                    var planRow = driftByWrId.GetValueOrDefault(row.WorkspaceRepositoryId);
-                    var hasRemoteUpstream = planRow?.FeatureBranchHasUpstream == true;
-                    RemoveFeatureBranchOutcome branchOutcome;
-                    string? branchMessage;
-                    var remoteOutcome = RemoveFeatureRemoteBranchOutcome.NotApplicable;
-                    string? remoteMessage = null;
-
-                    if (string.IsNullOrWhiteSpace(branchName))
-                    {
-                        branchOutcome = RemoveFeatureBranchOutcome.NotApplicable;
-                        branchMessage = null;
-                    }
-                    else if (!linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var link)
-                        || string.IsNullOrWhiteSpace(link.Repository?.RepositoryName)
-                        || string.IsNullOrWhiteSpace(workspaceRoot)
-                        || string.IsNullOrWhiteSpace(workspaceFolderName))
-                    {
-                        // Never silently skipped: the repository's local branch may still exist, so this
-                        // is reported in the removal report rather than only logged (D2).
-                        branchOutcome = RemoveFeatureBranchOutcome.Failed;
-                        branchMessage = "Could not resolve repository details to delete the local branch.";
-                        logger.LogWarning(
-                            "Could not resolve repository details to delete local Feature branch {Branch} for WorkspaceRepository {WorkspaceRepositoryId}.",
-                            branchName, row.WorkspaceRepositoryId);
-                    }
-                    else if (!options.DeleteLocalBranches)
-                    {
-                        branchOutcome = RemoveFeatureBranchOutcome.Kept;
-                        branchMessage = "Local Feature branch kept (delete not selected).";
-                    }
-                    else
-                    {
-                        // A merged pull request whose head is this exact tip is deleted even when the tip
-                        // is not an ancestor of the default branch (squash and rebase). Each repository
-                        // decides that for itself, inside this parallel per-repository removal.
-                        var forceLocal = options.AllowForceDeleteLocalBranches
-                            || (planRow?.LocalBranchCoveredByMergedPullRequest == true && !plan.PullRequestStatusUnknown);
-                        var deleteLocal = await workerBridge.SendCommandAsync(
-                            "DeleteBranch",
-                            new
-                            {
-                                workspaceName = workspaceFolderName,
-                                repositoryName = repoName,
-                                workspaceRepositoryName,
-                                branchName,
-                                isRemote = false,
-                                force = forceLocal,
-                                workspaceRoot,
-                                // The branch row is removed below. A hook here would queue a sync of the main
-                                // checkout for every repository, for state this removal did not change.
-                                skipHooks = true
-                            },
-                            cancellationToken);
-                        if (deleteLocal.Success)
-                        {
-                            branchOutcome = RemoveFeatureBranchOutcome.Deleted;
-                            branchMessage = null;
-                            await RemovePersistedBranchAsync(row.WorkspaceRepositoryId, branchName, isRemote: false, cancellationToken);
-                        }
-                        else
-                        {
-                            branchMessage = string.IsNullOrWhiteSpace(deleteLocal.Error)
-                                ? "Local branch delete failed."
-                                : deleteLocal.Error;
-                            // A non-force delete is refused when the tip is not contained in HEAD or
-                            // origin/<default>. A force delete that still fails is a real failure.
-                            branchOutcome = forceLocal
-                                ? RemoveFeatureBranchOutcome.Failed
-                                : RemoveFeatureBranchOutcome.KeptUnmerged;
-                            logger.LogWarning(
-                                "Delete local Feature branch {Branch} failed for {Repo}: {Error}",
-                                branchName, repoName, FeatureOperationLog.Redact(deleteLocal.Error));
-                        }
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(branchName) && hasRemoteUpstream)
-                    {
-                        if (!options.DeleteRemoteBranches)
-                        {
-                            remoteOutcome = RemoveFeatureRemoteBranchOutcome.Kept;
-                            remoteMessage = "Remote Feature branch kept (delete not selected).";
-                        }
-                        else if (!linkByWrId.TryGetValue(row.WorkspaceRepositoryId, out var remoteLink)
-                            || string.IsNullOrWhiteSpace(remoteLink.Repository?.RepositoryName)
-                            || string.IsNullOrWhiteSpace(workspaceRoot)
-                            || string.IsNullOrWhiteSpace(workspaceFolderName))
-                        {
-                            remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
-                            remoteMessage = "Could not resolve repository details to delete the remote branch.";
-                            logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, remoteMessage);
-                        }
-                        else
-                        {
-                            var defaultBranch = remoteLink.DefaultBranchName;
-                            if (!string.IsNullOrWhiteSpace(defaultBranch)
-                                && branchName.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
-                            {
-                                remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
-                                remoteMessage = "Refused to delete the repository default branch.";
-                                logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, remoteMessage);
-                            }
-                            else
-                            {
-                                var expectedSha = planRow?.FeatureBranchSha;
-                                if (string.IsNullOrWhiteSpace(expectedSha))
-                                {
-                                    remoteOutcome = RemoveFeatureRemoteBranchOutcome.Failed;
-                                    remoteMessage = "Could not confirm the Feature branch tip for a safe remote delete.";
-                                    logger.FeatureRepositoryFailed("Remove", info.WorkspaceId, info.FeatureName, repoName, remoteMessage);
-                                }
-                                else
-                                {
-                                    var bearerToken = ConnectorHelpers.UnprotectToken(
-                                        remoteLink.Repository?.Connector?.UserToken);
-                                    var deleteRemote = await workerBridge.SendCommandAsync(
-                                        "DeleteBranch",
-                                        new
-                                        {
-                                            workspaceName = workspaceFolderName,
-                                            repositoryName = repoName,
-                                            workspaceRepositoryName,
-                                            branchName,
-                                            isRemote = true,
-                                            force = false,
-                                            bearerToken,
-                                            expectedSha,
-                                            workspaceRoot,
-                                            // Without this the pre-push hook sends a full snapshot of the main checkout.
-                                            skipHooks = true
-                                        },
-                                        cancellationToken);
-                                    if (deleteRemote.Success)
-                                    {
-                                        remoteOutcome = RemoveFeatureRemoteBranchOutcome.Deleted;
-                                        remoteMessage = null;
-                                        await RemovePersistedBranchAsync(row.WorkspaceRepositoryId, branchName, isRemote: true, cancellationToken);
-                                    }
-                                    else
-                                    {
-                                        var err = string.IsNullOrWhiteSpace(deleteRemote.Error)
-                                            ? "Remote branch delete failed."
-                                            : deleteRemote.Error;
-                                        remoteOutcome = err.Contains("no longer matches", StringComparison.OrdinalIgnoreCase)
-                                            || err.Contains("lease", StringComparison.OrdinalIgnoreCase)
-                                            ? RemoveFeatureRemoteBranchOutcome.RefusedLease
-                                            : RemoveFeatureRemoteBranchOutcome.Failed;
-                                        remoteMessage = err;
-                                        logger.LogWarning(
-                                            "Delete remote Feature branch {Branch} failed for {Repo}: {Error}",
-                                            branchName, repoName, FeatureOperationLog.Redact(deleteRemote.Error));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 09 SB-2: when the worktree was not on its Feature branch, name the branch that was
-                    // actually kept (or "(detached commit)" when there was none) so the report never
-                    // only says "removed" while leaving an unmerged branch silently behind.
-                    var keptBranchName = planRow is { IsOffFeatureBranch: true }
-                        ? planRow.CheckedOutBranch ?? "(detached commit)"
-                        : null;
-
-                    var residueRemaining = worktreeResult?.ResidueRemaining ?? false;
-                    reportByWrId[row.WorkspaceRepositoryId] = new RemoveFeatureRepositoryReport(
-                        row.WorkspaceRepositoryId,
-                        repoName,
-                        WorktreeRemoved: true,
-                        branchOutcome,
-                        branchMessage,
-                        residueRemaining,
-                        worktreeResult?.ResidueFileCount ?? 0,
-                        worktreeResult?.ResidueSampleFiles,
-                        worktreeResult?.ResidueMessage,
-                        keptBranchName,
-                        remoteOutcome,
-                        remoteMessage);
-                    logger.FeatureRepositoryDone("Remove", info.WorkspaceId, info.FeatureName, repoName, "WorktreeRemoved");
-                }
-                finally
-                {
-                    var done = Interlocked.Increment(ref removeCompleted);
-                    progress.Report(
-                        $"Removed feature from {done} of {removeTotal} repositories",
-                        done,
-                        removeTotal);
-                    gate.Release();
-                }
-            };
-
-            await Task.WhenAll(sourceRows.Select(removeRowAsync));
-            if (rootRow != null)
-            {
-                if (errorsByWrId.IsEmpty)
-                    await removeRowAsync(rootRow);
-                else
-                    rootKeptMessage = true;
-            }
-        }
-
-        if (!errorsByWrId.IsEmpty)
-        {
-            // Worker work ran in parallel; apply EF updates sequentially (DbContext is not thread-safe).
-            // Do not report success: the Feature still owns failed worktrees. Keep metadata for retry (§27.8).
-            // A failed row stays Removing with its error in LastError (D2 step 0): row-level NeedsRepair
-            // is reserved for the sync-time "worktree missing" case, not a failed Remove.
-            foreach (var row in rows)
-            {
-                if (!errorsByWrId.TryGetValue(row.WorkspaceRepositoryId, out var error))
-                    continue;
-                row.LastError = error;
-            }
-
-            var firstError = errorsByWrId.Values.First();
-            if (rootKeptMessage)
-            {
-                const string rootKept = "Workspace repository worktree kept until all repository worktrees are removed.";
-                firstError = $"{firstError} {rootKept}";
-                rootRow!.LastError = rootKept;
-            }
-
-            feature.LifecycleState = WorkspaceFeatureLifecycleState.NeedsRepair;
-            feature.LastError = firstError;
-            feature.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
-            return RemovalPhaseOne.Failed(OperationResult.Fail(firstError));
-        }
-
-        // Every worktree is unregistered now. Anything still on disk (a file or folder some program has open) is deleted
-        // here if it has let go, or marked pending deletion for the background cleanup; Remove itself never waits on it.
-        // Always asked, also without a Workspace repository row and without reported leftovers: the Worker deletes the
-        // Feature root only when it is empty, so a file outside every worktree (codegraph.json, .codegraph) would leave
-        // the folder behind and block the next Create of the same name with FeatureFolderExists. The Worker's cleaner
-        // re-checks the folder and refuses anything that is not this Feature's folder under the managed root.
-        var pendingDeletionFolder = await CleanupFeatureFolderForNameAsync(
-            info.WorkspaceId, info.FeatureName, onlyIfMarked: false, cancellationToken);
-
-        var report = rows
-            .Select(r => reportByWrId.TryGetValue(r.WorkspaceRepositoryId, out var entry) ? entry : null)
-            .Where(entry => entry is not null)
-            .Select(entry => entry!)
-            .ToList();
-        return new RemovalPhaseOne(null, report, pendingDeletionFolder, specialContextId);
-    }
-
-    /// <summary>
-    /// Drops the Feature's rows after its worktrees are gone. Does not refresh the Workspace and does not
+    /// Drops the Feature's rows after its worktrees are gone. Does not synchronize the Workspace and does not
     /// take the Workspace lock: the status refresh is a separate operation started when the user leaves.
     /// ParentBranchName / SourceBranchName is provenance only and must never drive a checkout here.
     /// </summary>
     private async Task<OperationResult> FinalizeFeatureRemovalAsync(
         WorkspaceFeatureContextId featureContextId,
         WorkspaceFeatureContextInfo info,
-        RemovalPhaseOne phaseOne,
+        RemovalRun run,
         CancellationToken cancellationToken)
     {
         var selected = await selectedContextService.GetSelectedAsync(info.WorkspaceId, cancellationToken);
         if (selected?.Value == featureContextId.Value)
-            await selectedContextService.SetSelectedAsync(info.WorkspaceId, phaseOne.SpecialContextId, cancellationToken);
+            await selectedContextService.SetSelectedAsync(info.WorkspaceId, run.SpecialContextId, cancellationToken);
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -1286,10 +804,16 @@ public sealed class WorkspaceFeatureOperations(
         db.WorkspaceFeatures.Remove(feature);
         await db.SaveChangesAsync(cancellationToken);
 
+        // The context is gone: what was remembered about the order of its reports goes with it.
+        stateFreshness?.ForgetContext(featureContextId);
+        stateDriftMonitor?.ForgetContext(featureContextId);
+        recomputeCoalescer?.Forget($"{info.WorkspaceId}:{featureContextId.Value}");
+
         return OperationResult.Ok() with
         {
-            RemoveFeatureReport = phaseOne.Report,
-            RemoveFeaturePendingDeletionFolder = phaseOne.PendingDeletionFolder,
+            RemoveFeatureReport = run.Report,
+            RemoveFeaturePendingDeletionFolder = run.PendingDeletionFolder,
+            Outcome = run.Outcome,
         };
     }
 
@@ -1332,17 +856,6 @@ public sealed class WorkspaceFeatureOperations(
                 "Could not remove deleted {Kind} branch {Branch} for WorkspaceRepository {WorkspaceRepositoryId}.",
                 isRemote ? "remote" : "local", branchName, workspaceRepositoryId);
         }
-    }
-
-    /// <summary>What the background part of Remove Feature leaves for <see cref="FinalizeFeatureRemovalAsync"/>.</summary>
-    private sealed record RemovalPhaseOne(
-        OperationResult? Failure,
-        IReadOnlyList<RemoveFeatureRepositoryReport> Report,
-        string? PendingDeletionFolder,
-        WorkspaceFeatureContextId SpecialContextId)
-    {
-        public static RemovalPhaseOne Failed(OperationResult failure) =>
-            new(failure, [], null, default);
     }
 
     /// <summary>
@@ -1461,20 +974,6 @@ public sealed class WorkspaceFeatureOperations(
         {
             logger.LogWarning(ex, "CodeGraph uninit failed. WorkspaceId={WorkspaceId} ContextId={ContextId}", workspaceId, featureContextId.Value);
         }
-    }
-
-    /// <summary>
-    /// App-side shape of the Worker's RemoveGitWorktree response (GrayMoon.Worker.Jobs.Response is not
-    /// referenced here), used only to read the residue fields added for the Remove report (D1/D2).
-    /// </summary>
-    private sealed class RemoveGitWorktreeResult
-    {
-        public bool Success { get; set; }
-        public bool ResidueRemaining { get; set; }
-        public int ResidueFileCount { get; set; }
-        public List<string>? ResidueSampleFiles { get; set; }
-        public string? ResidueMessage { get; set; }
-        public string? FailureKind { get; set; }
     }
 
     /// <summary>App-side shape of the Worker's CleanupFeatureFolder response.</summary>
@@ -1981,6 +1480,9 @@ public sealed class WorkspaceFeatureOperations(
 
         if (retryRows.Count > 0)
         {
+            // As in Create: no file watcher and no status scan of this context while worktrees are checked out into
+            // it, then one scan when they exist. A Repair that has nothing to retry does not pause anything.
+            using var monitoringPause = gitChangesMonitoringPause.Pause(featureContextId.Value);
             var capabilities = (await capabilitiesResolver.GetAsync(info.WorkspaceId, cancellationToken)).ToRepositoryOperationCapabilities();
             using var gate = new SemaphoreSlim(MaxParallel);
             var done = 0;
@@ -2067,6 +1569,9 @@ public sealed class WorkspaceFeatureOperations(
             {
                 await Task.WhenAll(sourceRetryRows.Select(retryRowAsync));
             }
+
+            monitoringPause.Dispose();
+            gitChangesAuditScheduler.Request(info.WorkspaceId, featureContextId, GitChangesAuditReason.FeatureCreated);
         }
 
         var ordered = results.OrderBy(r => r.WrId).Select(r => r.Result).ToList();
@@ -2458,7 +1963,7 @@ public sealed class WorkspaceFeatureOperations(
 
         // Workspace grid SyncStatus / GitVersion come from the link for the special context
         // (Project() reads wr.SyncStatus). Feature grids read context state instead, so seed from
-        // the link as the source of truth — special-state SyncStatus can lag and left new Features all-red.
+        // the link as the source of truth - special-state SyncStatus can lag and left new Features all-red.
         foreach (var link in links)
         {
             specialStates.TryGetValue(link.WorkspaceRepositoryId, out var src);
@@ -2799,7 +2304,7 @@ public sealed class WorkspaceFeatureOperations(
     {
         // A previous delete error (folder busy, permission denied) stays on the repository line as
         // Warning. It does not override pull-request classification: the retry is the same removal
-        // once the folder is free. A missing worktree is different — GrayMoon cannot confirm the folder.
+        // once the folder is free. A missing worktree is different - GrayMoon cannot confirm the folder.
         if (plans.Any(p => !p.WorktreeExists))
             return RemoveFeatureClassification.NeedsRepair;
         // Merged PRs and never-created PRs (fresh Feature with no commits/PR) are Completed-equivalent

@@ -42,7 +42,10 @@ public sealed partial class WorkspaceRepositoryOperations(
     IGitChangesWorkspaceScanner gitChangesScanner,
     WorkspaceRepositoryDetacher detacher,
     ILogger<WorkspaceRepositoryOperations> logger,
-    GrayMoon.App.Services.Policy.ReferenceImportGuard? referenceImportGuard = null) : IWorkspaceRepositoryOperations, IWorkspaceImportOperations
+    GrayMoon.App.Services.Policy.ReferenceImportGuard? referenceImportGuard = null,
+    RepositoryStateFreshness? stateFreshness = null,
+    IRepositoryStateDriftMonitor? stateDriftMonitor = null,
+    SyncRecomputeCoalescer? recomputeCoalescer = null) : IWorkspaceRepositoryOperations, IWorkspaceImportOperations
 {
     internal const string NonEmptyFolderMessage =
         "This folder already contains files. Choose another Workspace name or move the existing files.";

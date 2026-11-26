@@ -117,7 +117,7 @@ public static class GrayMoonServiceRegistration
         services.AddSingleton<FeatureRemovalQueue>();
         services.AddSingleton<IFeatureRemovalQueue>(sp => sp.GetRequiredService<FeatureRemovalQueue>());
         services.AddHostedService(sp => sp.GetRequiredService<FeatureRemovalQueue>());
-        services.AddSingleton<IWorkspaceCheckoutRefresh, WorkspaceCheckoutRefresh>();
+        services.AddSingleton<IWorkspaceRemoteRefresh, WorkspaceRemoteRefresh>();
         services.AddScoped<IFeatureRemovalDeparture, FeatureRemovalDeparture>();
         services.AddSingleton<FeatureFolderCleanupService>();
         services.AddSingleton<IFeatureFolderCleanupService>(sp => sp.GetRequiredService<FeatureFolderCleanupService>());
@@ -149,6 +149,10 @@ public static class GrayMoonServiceRegistration
         services.AddScoped<WorkspaceRepositoryStateWriter>();
         // Process-wide, not per circuit: the sync queue and every operation scope must see the same record.
         services.AddSingleton<RepositoryStateFreshness>();
+        services.AddSingleton<RepositoryStateReconciler>();
+        services.AddSingleton<IRepositoryStateReconciler>(sp => sp.GetRequiredService<RepositoryStateReconciler>());
+        services.AddHostedService(sp => sp.GetRequiredService<RepositoryStateReconciler>());
+        services.AddSingleton<IRepositoryStateDriftMonitor, RepositoryStateDriftMonitor>();
         services.AddSingleton<GrayMoon.Application.Repositories.Policy.IWorkspaceRepositoryOperationPolicy, GrayMoon.App.Services.Policy.WorkspaceRepositoryOperationPolicyService>();
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceActivationChecker>();
         services.AddScoped<GrayMoon.App.Services.Policy.ReferenceImportGuard>();
@@ -159,6 +163,7 @@ public static class GrayMoonServiceRegistration
         services.AddSingleton<SyncRecomputeCoalescer>();
         services.AddSingleton<FileVersionCheckCoalescer>();
         services.AddSingleton<FeatureFinalizationCoordinator>();
+        services.AddSingleton<FeatureVersionStage>();
         services.AddScoped<WorkspaceActionRepository>();
         services.AddScoped<WorkspaceActionService>();
         services.AddScoped<GitHubActionsCiProvider>();

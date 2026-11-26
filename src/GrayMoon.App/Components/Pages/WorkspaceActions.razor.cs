@@ -55,13 +55,32 @@ public sealed partial class WorkspaceActions : IDisposable
         {
             ActivityStateService.BecameActive += OnActivityBecameActive;
             var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-            _selectedContextId = info.ContextId;
-            _isFeatureContext = !info.IsSpecialWorkspace;
-            await LoadWorkspaceAsync();
+            await SelectContextAsync(info);
         });
     }
 
-    protected override void OnParametersSet() => ApplyIncomingSearchQuery();
+    /// <summary>Which <c>?context=</c> value the page shows, and the guard for loads that finish late.</summary>
+    private readonly PageContextBinding _contextBinding = new();
+
+    /// <summary>Browser back and forward change <c>?context=</c> while the page stays open; the selector is not involved.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        ApplyIncomingSearchQuery();
+        if (!_contextBinding.QueryChanged(ContextQuery))
+            return;
+
+        var info = await ContextNavigation.ResolveQueryChangeAsync(WorkspaceId, ContextQuery);
+        if (_contextBinding.QueryChanged(ContextQuery))
+            await SelectContextAsync(info);
+    }
+
+    private async Task SelectContextAsync(WorkspaceFeatureContextInfo info)
+    {
+        _selectedContextId = info.ContextId;
+        _isFeatureContext = !info.IsSpecialWorkspace;
+        _contextBinding.Bind(info.ContextId, info.IsSpecialWorkspace);
+        await _contextBinding.RunLatestAsync(LoadWorkspaceAsync);
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -169,10 +188,5 @@ public sealed partial class WorkspaceActions : IDisposable
         WorkspaceSyncHubConnectionHelper.DisposeFireAndForget(_hubConnection);
     }
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
-    {
-        var info = await FeatureContextResolver.GetRequiredAsync(contextId, WorkspaceId);
-        _selectedContextId = info.ContextId;
-        _isFeatureContext = !info.IsSpecialWorkspace;
-        await LoadWorkspaceAsync();
-    }
+        => await SelectContextAsync(await ContextNavigation.ResolveSelectionAsync(WorkspaceId, contextId));
 }

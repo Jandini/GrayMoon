@@ -37,6 +37,10 @@ public interface IGitWorktreeService
     /// When <paramref name="unlock"/> is true, runs <c>git worktree unlock</c> before the remove, so a
     /// locked worktree (<c>git worktree lock</c>) can be removed (D5). Defaults to false, matching
     /// today's behaviour for an old caller.
+    /// With <paramref name="force"/> and <paramref name="expectedHeadSha"/>, a worktree whose HEAD is another commit is
+    /// kept (<c>ChangedSinceReview</c>): the discard was authorized for what was reviewed. A locked worktree without
+    /// <paramref name="unlock"/>, a nested repository, a commit only the detached HEAD holds and (without force) an
+    /// unfinished merge, rebase or cherry-pick are refused with their own error code (<c>WorktreeRemovalErrorCodes</c>).
     /// </summary>
     Task<(bool Success, bool AlreadyRemoved, string? ErrorCode, string? ErrorMessage, WorktreeResidueResult Residue)> RemoveWorktreeAsync(
         string mainRepositoryPath,
@@ -45,7 +49,8 @@ public interface IGitWorktreeService
         CancellationToken ct,
         string? featureRootPath = null,
         string? featureStorageRoot = null,
-        bool unlock = false);
+        bool unlock = false,
+        string? expectedHeadSha = null);
 
     /// <summary>
     /// Reports everything removal needs to know about one worktree, checked live: registration,

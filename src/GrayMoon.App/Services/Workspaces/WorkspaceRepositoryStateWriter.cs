@@ -57,6 +57,20 @@ public sealed class RepositoryStateWriteOptions
 }
 
 /// <summary>
+/// What one state write did. <see cref="Probed"/> is what the snapshot claimed to have read; <see cref="Changed"/> is
+/// what was different from the stored state. A write that confirms what is stored changes nothing, and what
+/// depends on those facts (versions, dependency levels, file checks, the grid) has nothing to follow.
+/// </summary>
+/// <param name="Applied">False when the context or the link did not exist, so nothing was written.</param>
+public readonly record struct RepositoryStateWriteResult(bool Applied, RepositoryFactGroups Probed, RepositoryFactGroups Changed)
+{
+    public static RepositoryStateWriteResult NotApplied { get; } = new(false, RepositoryFactGroups.None, RepositoryFactGroups.None);
+
+    /// <summary>Existing callers ask "was it written": that is <see cref="Applied"/>.</summary>
+    public static implicit operator bool(RepositoryStateWriteResult result) => result.Applied;
+}
+
+/// <summary>
 /// The single writer of denormalized checkout badge state for a <see cref="WorkspaceFeatureContext"/>.
 /// Special Workspace contexts also mirror onto <see cref="WorkspaceRepositoryLink"/> for legacy readers
 /// until contract cleanup; Feature contexts write context state only.
@@ -86,7 +100,7 @@ public sealed class WorkspaceRepositoryStateWriter(
     /// Prefer <see cref="ApplyAsync(WorkspaceFeatureContextId, int, int, RepositoryStateSnapshot, RepositoryStateWriteOptions?, CancellationToken)"/>
     /// when the caller already has an explicit context id.
     /// </summary>
-    public async Task<bool> ApplyAsync(
+    public async Task<RepositoryStateWriteResult> ApplyAsync(
         int workspaceId,
         int repositoryId,
         RepositoryStateSnapshot snapshot,
@@ -97,8 +111,12 @@ public sealed class WorkspaceRepositoryStateWriter(
         return await ApplyAsync(contextId, workspaceId, repositoryId, snapshot, options, cancellationToken);
     }
 
-    /// <summary>Applies <paramref name="snapshot"/> to the given Feature context. Returns false when the link does not exist.</summary>
-    public async Task<bool> ApplyAsync(
+    /// <summary>
+    /// Applies <paramref name="snapshot"/> to the given context and reports which groups it changed. Not applied
+    /// (converts to false) when the context or the link does not exist: a report for a context that was deleted
+    /// writes nothing and creates no row.
+    /// </summary>
+    public async Task<RepositoryStateWriteResult> ApplyAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceId,
         int repositoryId,
@@ -115,7 +133,7 @@ public sealed class WorkspaceRepositoryStateWriter(
             logger.LogWarning(
                 "State write skipped: context {ContextId} missing or not in workspace {WorkspaceId}",
                 contextId.Value, workspaceId);
-            return false;
+            return RepositoryStateWriteResult.NotApplied;
         }
 
         var wr = await dbContext.WorkspaceRepositories
@@ -123,7 +141,7 @@ public sealed class WorkspaceRepositoryStateWriter(
         if (wr == null)
         {
             logger.LogWarning("State write skipped: workspace {WorkspaceId} repository {RepositoryId} not linked", workspaceId, repositoryId);
-            return false;
+            return RepositoryStateWriteResult.NotApplied;
         }
 
         var state = await dbContext.WorkspaceRepositoryContextStates
@@ -144,37 +162,60 @@ public sealed class WorkspaceRepositoryStateWriter(
         var isSpecialWorkspace = context.Kind == WorkspaceFeatureContextKind.Workspace;
         var isReferenceSnapshot = !isSpecialWorkspace
             && (await LoadReferenceSnapshotLinkIdsAsync(contextId, [wr.WorkspaceRepositoryId], cancellationToken)).Count > 0;
+        // A new row has nothing stored to compare with: everything the snapshot probed is a change.
+        var isNewState = dbContext.Entry(state).State == EntityState.Added;
+        var before = TrackedValues.Read(state, wr);
         var previousBranch = StageTracked(context, wr, state, snapshot, options, isReferenceSnapshot);
         if (snapshot.BranchesProbed)
             StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
+        var probed = RepositoryStateFreshness.ProbedGroups(snapshot);
+        var changed = isNewState ? probed & RepositoryFactGroups.Checkout : TrackedValues.Diff(before, TrackedValues.Read(state, wr));
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         if (snapshot.BranchesProbed)
         {
-            await branchWriter.PersistAsync(
+            if (await branchWriter.PersistAsync(
                 wr.WorkspaceRepositoryId,
                 snapshot.LocalBranches,
                 snapshot.RemoteBranches,
                 snapshot.DefaultBranchName ?? wr.DefaultBranchName,
                 snapshot.Tags,
-                cancellationToken);
+                cancellationToken))
+                changed |= RepositoryFactGroups.Branches;
         }
 
         if (options.OperationStartedAt is { } operationStartedAt)
-            freshness?.RecordOperationWrite(contextId, repositoryId, snapshot, operationStartedAt);
+            freshness?.RecordOperationWrite(contextId, repositoryId, snapshot, operationStartedAt, workspaceId);
+        freshness?.RecordApplied(contextId, repositoryId, snapshot, workspaceId);
 
         // Some Worker paths return projects without being asked (return-to-default, the hook fallback
         // when capabilities cannot be resolved); a workspace that does not discover projects keeps none.
-        if (snapshot.ProjectsProbed
-            && !options.DeferProjects
+        if (snapshot.ProjectsProbed && options.DeferProjects)
+        {
+            // The caller reconciles the projects itself, later: what that changes is not known here.
+            changed |= RepositoryFactGroups.Projects;
+        }
+        else if (snapshot.ProjectsProbed
             && (await capabilitiesResolver.GetAsync(workspaceId, cancellationToken)).DiscoversDotNetProjects)
+        {
+            // Most scans confirm the stored projects. The rows and edges are compared before and after the reconcile,
+            // so a scan that changed none of them is not reported as a change.
+            var projectCountBefore = (state.Projects, state.RepositoryType);
+            var projectsBefore = isNewState
+                ? null
+                : await workspaceProjectRepository.ReadProjectFingerprintAsync(contextId.Value, repositoryId, cancellationToken);
             await ApplyProjectsAsync(contextId, workspaceId, repositoryId, wr, state, isSpecialWorkspace, snapshot, cancellationToken);
+            if (projectsBefore is null
+                || projectCountBefore != (state.Projects, state.RepositoryType)
+                || !projectsBefore.SetEquals(await workspaceProjectRepository.ReadProjectFingerprintAsync(contextId.Value, repositoryId, cancellationToken)))
+                changed |= RepositoryFactGroups.Projects;
+        }
 
         if (options.ReconcilePullRequest)
             await ReconcilePullRequestsAsync(contextId, workspaceId, [(wr, state, previousBranch)], isSpecialWorkspace, cancellationToken);
 
-        return true;
+        return new RepositoryStateWriteResult(true, probed, changed);
     }
 
     /// <summary>
@@ -574,15 +615,16 @@ public sealed class WorkspaceRepositoryStateWriter(
     /// (or the project-row batch save, which flushes the same context). Does not merge dependency edges;
     /// callers that already have the full graph call <c>MergeWorkspaceProjectDependenciesAsync</c> once after.
     /// </summary>
-    public async Task ApplyBatchAsync(
+    public async Task<IReadOnlyDictionary<int, RepositoryStateWriteResult>> ApplyBatchAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceId,
         IReadOnlyList<(int RepositoryId, RepositoryStateSnapshot Snapshot)> items,
         RepositoryStateWriteOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        var results = new Dictionary<int, RepositoryStateWriteResult>();
         if (items.Count == 0)
-            return;
+            return results;
 
         options ??= new RepositoryStateWriteOptions();
 
@@ -593,7 +635,7 @@ public sealed class WorkspaceRepositoryStateWriter(
             logger.LogWarning(
                 "State write skipped: context {ContextId} missing or not in workspace {WorkspaceId}",
                 contextId.Value, workspaceId);
-            return;
+            return results;
         }
 
         var repoIds = items.Select(i => i.RepositoryId).Distinct().ToList();
@@ -634,14 +676,17 @@ public sealed class WorkspaceRepositoryStateWriter(
                 stateByWrl[wr.WorkspaceRepositoryId] = state;
             }
 
+            var isNewState = dbContext.Entry(state).State == EntityState.Added;
+            var before = TrackedValues.Read(state, wr);
             var previousBranch = StageTracked(
                 context, wr, state, snapshot, options, referenceSnapshotLinkIds.Contains(wr.WorkspaceRepositoryId));
             staged.Add((wr, state, previousBranch));
+            var branchesChanged = false;
 
             if (snapshot.BranchesProbed)
             {
                 StageTagRefresh(wr, state, isSpecialWorkspace, snapshot.Tags, snapshot.CheckedOutTag);
-                await branchWriter.PersistAsync(
+                branchesChanged = await branchWriter.PersistAsync(
                     wr.WorkspaceRepositoryId,
                     snapshot.LocalBranches,
                     snapshot.RemoteBranches,
@@ -650,6 +695,14 @@ public sealed class WorkspaceRepositoryStateWriter(
                     cancellationToken,
                     save: false);
             }
+
+            var probed = RepositoryStateFreshness.ProbedGroups(snapshot);
+            var changed = isNewState ? probed & RepositoryFactGroups.Checkout : TrackedValues.Diff(before, TrackedValues.Read(state, wr));
+            if (branchesChanged)
+                changed |= RepositoryFactGroups.Branches;
+            if (snapshot.ProjectsProbed)
+                changed |= RepositoryFactGroups.Projects;
+            results[repositoryId] = new RepositoryStateWriteResult(true, probed, changed);
 
             if (snapshot.ProjectsProbed && discoversProjects)
             {
@@ -682,17 +735,61 @@ public sealed class WorkspaceRepositoryStateWriter(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        if (freshness is not null && options.OperationStartedAt is { } operationStartedAt)
+        if (freshness is not null)
         {
             foreach (var (repositoryId, snapshot) in items)
             {
-                if (linkByRepo.ContainsKey(repositoryId))
-                    freshness.RecordOperationWrite(contextId, repositoryId, snapshot, operationStartedAt);
+                if (!linkByRepo.ContainsKey(repositoryId))
+                    continue;
+                if (options.OperationStartedAt is { } operationStartedAt)
+                    freshness.RecordOperationWrite(contextId, repositoryId, snapshot, operationStartedAt, workspaceId);
+                freshness.RecordApplied(contextId, repositoryId, snapshot, workspaceId);
             }
         }
 
         if (options.ReconcilePullRequest)
             await ReconcilePullRequestsAsync(contextId, workspaceId, staged, isSpecialWorkspace, cancellationToken);
+        return results;
+    }
+
+    /// <summary>The stored values a state write can change, read before and after it to report what changed.</summary>
+    private readonly record struct TrackedValues(
+        string? Branch,
+        string? Tag,
+        string? Head,
+        bool? HasNewerTag,
+        string? GitVersion,
+        bool? GitVersionPending,
+        int? Outgoing,
+        int? Incoming,
+        int? DefaultBehind,
+        int? DefaultAhead,
+        bool? HasUpstream,
+        RepoSyncStatus SyncStatus,
+        string? DefaultBranch)
+    {
+        public static TrackedValues Read(WorkspaceRepositoryContextState state, WorkspaceRepositoryLink wr) => new(
+            state.BranchName, state.CheckedOutTag, state.HeadCommit, state.HasNewerTag,
+            state.GitVersion, state.GitVersionPending,
+            state.OutgoingCommits, state.IncomingCommits, state.DefaultBranchBehindCommits, state.DefaultBranchAheadCommits,
+            state.BranchHasUpstream, state.SyncStatus, wr.DefaultBranchName);
+
+        public static RepositoryFactGroups Diff(TrackedValues before, TrackedValues after)
+        {
+            var changed = RepositoryFactGroups.None;
+            // The sync status and the default branch name are shown with the identity and follow it.
+            if (before.Branch != after.Branch || before.Tag != after.Tag || before.Head != after.Head || before.HasNewerTag != after.HasNewerTag
+                || before.SyncStatus != after.SyncStatus || before.DefaultBranch != after.DefaultBranch)
+                changed |= RepositoryFactGroups.Identity;
+            if (before.GitVersion != after.GitVersion || before.GitVersionPending != after.GitVersionPending)
+                changed |= RepositoryFactGroups.GitVersion;
+            if (before.Outgoing != after.Outgoing || before.Incoming != after.Incoming
+                || before.DefaultBehind != after.DefaultBehind || before.DefaultAhead != after.DefaultAhead)
+                changed |= RepositoryFactGroups.CommitCounts;
+            if (before.HasUpstream != after.HasUpstream)
+                changed |= RepositoryFactGroups.Upstream;
+            return changed;
+        }
     }
 
     /// <summary>
@@ -825,13 +922,15 @@ public sealed class WorkspaceRepositoryStateWriter(
             if (state.EffectiveVersionKind == (int)item.Kind
                 && state.EffectiveVersion == version
                 && state.EffectiveVersionCommitSha == commit
-                && state.EffectiveVersionReasonCode == item.ReasonCode)
+                && state.EffectiveVersionReasonCode == item.ReasonCode
+                && state.EffectiveVersionEvidenceKey == item.EvidenceKey)
                 continue;
 
             state.EffectiveVersionKind = (int)item.Kind;
             state.EffectiveVersion = version;
             state.EffectiveVersionCommitSha = commit;
             state.EffectiveVersionReasonCode = item.ReasonCode;
+            state.EffectiveVersionEvidenceKey = item.EvidenceKey;
             written++;
         }
 
@@ -941,4 +1040,5 @@ public sealed record EffectiveVersionWrite(
     EffectiveVersionKind Kind,
     string? EffectiveVersion,
     string? ResolvedForCommitSha,
-    string ReasonCode);
+    string ReasonCode,
+    string? EvidenceKey = null);

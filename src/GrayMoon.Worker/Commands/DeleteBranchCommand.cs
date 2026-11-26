@@ -31,13 +31,17 @@ public sealed class DeleteBranchCommand(IGitService git) : ICommandHandler<Delet
 
         try
         {
-            var (success, errorMessage) = await git.DeleteBranchAsync(
+            var result = await git.DeleteBranchDetailedAsync(
                 repoPath, branchName, request.IsRemote, request.Force, cancellationToken,
                 skipHooks: request.SkipHooks, bearerToken: request.BearerToken, expectedSha: request.ExpectedSha);
             return new DeleteBranchResponse
             {
-                Success = success,
-                ErrorMessage = errorMessage
+                Success = result.Success,
+                ErrorMessage = result.ErrorMessage,
+                FailureKind = result.FailureKind,
+                BranchSha = result.BranchSha,
+                HasUpstream = result.HasUpstream,
+                AlreadyAbsent = result.AlreadyAbsent,
             };
         }
         catch (Exception ex)

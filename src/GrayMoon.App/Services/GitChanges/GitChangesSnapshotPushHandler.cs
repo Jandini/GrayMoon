@@ -23,7 +23,8 @@ public sealed class GitChangesSnapshotPushHandler(
     IWorkspaceHookContextAttributor attributor,
     IWorkspaceFeatureContextResolver contextResolver,
     IWorkspaceGitChangesNotifier notifier,
-    IOptions<GitChangesOptions> gitChangesOptions)
+    IOptions<GitChangesOptions> gitChangesOptions,
+    GrayMoon.App.Services.Workspaces.IRepositoryStateDriftMonitor? driftMonitor = null)
 {
     public async Task HandleAsync(GitChangesSnapshotNotification notification, CancellationToken cancellationToken)
     {
@@ -67,6 +68,21 @@ public sealed class GitChangesSnapshotPushHandler(
                 s => s.WorkspaceFeatureContextId == contextId.Value.Value
                      && s.WorkspaceRepositoryId == workspaceRepository.WorkspaceRepositoryId,
                 cancellationToken);
+
+        // Every scan that is not older than the stored one says what is checked out now, also when it brings no
+        // new status (the periodic audit of an unchanged repository): the drift monitor compares it with the stored
+        // repository state, which a lost Git hook leaves behind.
+        if (existingContext == null || snapshot.Version >= existingContext.SnapshotVersion)
+        {
+            driftMonitor?.Observe(new GrayMoon.App.Services.Workspaces.RepositoryCheckoutObservation(
+                notification.WorkspaceId,
+                contextId.Value,
+                notification.RepositoryId,
+                workspaceRepository.WorkspaceRepositoryId,
+                snapshot.IsUnbornBranch ? null : snapshot.HeadCommit,
+                snapshot.BranchName,
+                snapshot.IsDetachedHead));
+        }
 
         if (existingContext != null && snapshot.Version <= existingContext.SnapshotVersion)
         {

@@ -326,32 +326,54 @@
         }
     }
 
+    /// <summary>Which <c>?context=</c> value the page shows, and the guard for loads that finish late.</summary>
+    private readonly PageContextBinding _contextBinding = new();
+
     protected override async Task OnInitializedAsync()
     {
         _pageAccess = await PageAccess.LoadIfAvailableAsync(WorkspaceId, WorkspacePage.Packages, async () =>
         {
             var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-            _selectedContextId = info.ContextId;
-            _packageConsumersResolved = info.LastSyncedAt != null;
-            await LoadAsync();
+            await SelectContextAsync(info);
         });
     }
 
-    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+    /// <summary>Browser back and forward change <c>?context=</c> while the page stays open; the selector is not involved.</summary>
+    protected override async Task OnParametersSetAsync()
     {
-        _selectedContextId = contextId;
-        var info = await ContextResolver.GetRequiredAsync(contextId, WorkspaceId);
+        if (!_contextBinding.QueryChanged(ContextQuery))
+            return;
+
+        var info = await ContextNavigation.ResolveQueryChangeAsync(WorkspaceId, ContextQuery);
+        if (_contextBinding.QueryChanged(ContextQuery))
+            await SelectContextAsync(info);
+    }
+
+    private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+        => await SelectContextAsync(await ContextNavigation.ResolveSelectionAsync(WorkspaceId, contextId));
+
+    private async Task SelectContextAsync(WorkspaceFeatureContextInfo info)
+    {
+        _selectedContextId = info.ContextId;
         _packageConsumersResolved = info.LastSyncedAt != null;
-        await LoadAsync();
+        _contextBinding.Bind(info.ContextId, info.IsSpecialWorkspace);
+        await _contextBinding.RunLatestAsync(LoadAsync);
     }
 
     private async Task LoadAsync()
     {
+        // The context this load is for. What it read for a context that was left meanwhile is not assigned.
+        var generation = _contextBinding.Generation;
+        var contextId = _selectedContextId;
         try
         {
             isLoading = true;
             errorMessage = null;
-            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            var loadedWorkspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (!_contextBinding.IsCurrent(generation))
+                return;
+
+            workspace = loadedWorkspace;
             if (workspace == null)
             {
                 errorMessage = "Workspace not found.";
@@ -361,24 +383,35 @@
                 _packageConsumersResolved = false;
                 return;
             }
-            packages = _selectedContextId is WorkspaceFeatureContextId ctx
+            var loadedPackages = contextId is WorkspaceFeatureContextId ctx
                 ? await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId, ctx.Value)
                 : await WorkspaceProjectRepository.GetPackagesByWorkspaceIdAsync(WorkspaceId);
-            dependentRepositories = await WorkspaceProjectRepository.GetPackageDependentRepositoriesAsync(WorkspaceId, _selectedContextId);
-            packageAccessNeeds = await WorkspaceProjectRepository.GetPackageAccessNeedsAsync(WorkspaceId, _selectedContextId);
+            var loadedDependents = await WorkspaceProjectRepository.GetPackageDependentRepositoriesAsync(WorkspaceId, contextId);
+            var loadedNeeds = await WorkspaceProjectRepository.GetPackageAccessNeedsAsync(WorkspaceId, contextId);
+            if (!_contextBinding.IsCurrent(generation))
+                return;
+
+            packages = loadedPackages;
+            dependentRepositories = loadedDependents;
+            packageAccessNeeds = loadedNeeds;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading packages for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to load packages. Please try again later.";
-            packages = new List<WorkspaceProject>();
-            dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
-            packageAccessNeeds = new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
-            _packageConsumersResolved = false;
+            if (_contextBinding.IsCurrent(generation))
+            {
+                errorMessage = "Failed to load packages. Please try again later.";
+                packages = new List<WorkspaceProject>();
+                dependentRepositories = new Dictionary<int, IReadOnlyList<PackageDependentRepository>>();
+                packageAccessNeeds = new Dictionary<int, IReadOnlyList<PackageAccessNeed>>();
+                _packageConsumersResolved = false;
+            }
         }
         finally
         {
-            isLoading = false;
+            // A load that was overtaken leaves the indicator to the load of the context that is selected now.
+            if (_contextBinding.IsCurrent(generation))
+                isLoading = false;
         }
     }
 

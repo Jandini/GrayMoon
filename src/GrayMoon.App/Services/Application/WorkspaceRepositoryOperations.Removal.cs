@@ -76,6 +76,16 @@ public sealed partial class WorkspaceRepositoryOperations
                 if (features.Count > 0)
                     return OperationResult.Fail(FeaturesExistOnRemoveMessage(features));
 
+                // Read while the rows exist: what the App remembers in memory about these contexts goes with them.
+                List<int> contextIds;
+                await using (var db = await dbContextFactory.CreateDbContextAsync(token))
+                {
+                    contextIds = await db.WorkspaceFeatureContexts.AsNoTracking()
+                        .Where(c => c.WorkspaceId == workspaceId)
+                        .Select(c => c.WorkspaceFeatureContextId)
+                        .ToListAsync(token);
+                }
+
                 report.Report("Removing Git hooks...");
                 var summary = await detacher.DetachAsync(
                     workspaceId,
@@ -85,6 +95,16 @@ public sealed partial class WorkspaceRepositoryOperations
                     token);
                 if (!summary.Success)
                     return DetachFailureText.ToFailure(summary, DetachFailureText.WorkspaceNotRemoved, DetachFailureText.RetryRemoveWorkspace);
+
+                foreach (var contextId in contextIds)
+                {
+                    var id = new GrayMoon.Application.Features.WorkspaceFeatureContextId(contextId);
+                    stateFreshness?.ForgetContext(id);
+                    stateDriftMonitor?.ForgetContext(id);
+                    recomputeCoalescer?.Forget($"{workspaceId}:{contextId}");
+                }
+
+                stateFreshness?.ForgetWorkspace(workspaceId);
 
                 logger.LogInformation(
                     "Persistence: removed Workspace. WorkspaceId={WorkspaceId} Name={Name} Repositories={Repositories} ReleasedWatchers={ReleasedWatchers}",

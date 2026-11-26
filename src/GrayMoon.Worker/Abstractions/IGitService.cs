@@ -65,6 +65,17 @@ public interface IGitService
     Task<CreateBranchResult> CreateBranchAsync(string repoPath, string newBranchName, string baseBranchName, CancellationToken ct, bool skipHooks = false);
     /// <summary>Deletes a local or remote branch. Returns (success, errorMessage). For remote, runs git push origin --delete. For local, when <paramref name="force"/> is true, uses git branch -D. When <paramref name="skipHooks"/> is true, hooks are disabled for the remote delete, so the pre-push hook does not queue a sync for a branch the caller is about to leave behind. When deleting a remote branch, pass <paramref name="bearerToken"/> so private remotes authenticate the same way as fetch/pull/push.</summary>
     Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null);
+
+    /// <summary>
+    /// <see cref="DeleteBranchAsync"/> with what the delete saw: the local tip and upstream, why a branch was kept
+    /// (<see cref="BranchDeleteFailureKinds"/>), and whether a remote branch was already gone. For a local delete,
+    /// <paramref name="expectedSha"/> keeps a branch whose tip is another commit (<c>TipChanged</c>).
+    /// </summary>
+    async Task<BranchDeleteResult> DeleteBranchDetailedAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
+    {
+        var (success, errorMessage) = await DeleteBranchAsync(repoPath, branchName, isRemote, force, ct, skipHooks, bearerToken, expectedSha);
+        return new BranchDeleteResult(success, errorMessage, success ? null : BranchDeleteFailureKinds.Failed);
+    }
     /// <summary>Fetches only tags from origin (git fetch origin --tags). Does not touch branches. Returns (success, errorMessage).</summary>
     Task<(bool Success, string? ErrorMessage)> FetchTagsAsync(string repoPath, string? bearerToken, CancellationToken ct);
     /// <summary>Checks out the specified tag (detached HEAD). Returns (success, errorMessage).</summary>

@@ -47,14 +47,36 @@ public sealed class WorkspaceStateRecomputeScope(
         await hubContext.Clients.All.SendAsync("WorkspaceSynced", workspaceId, cancellationToken);
     }
 
-    /// <summary>Recomputes without broadcasting, for callers that send their own follow-up notification.</summary>
-    public async Task RecomputeAsync(
+    /// <summary>
+    /// The groups of a repository's stored state that the recompute reads. Effective versions are decided from the
+    /// checked-out commit, the branch and the GitVersion result and from the projects that consume a version; the
+    /// file-version check compares against versions and commits and reads files that only a new commit changes; the
+    /// dependency stats read projects, edges and versions. Commit counts, the upstream flag and the branch and tag
+    /// lists are read by none of the three.
+    /// </summary>
+    public const RepositoryFactGroups RecomputeInputs =
+        RepositoryFactGroups.Identity | RepositoryFactGroups.GitVersion | RepositoryFactGroups.Projects;
+
+    /// <summary>
+    /// Whether a state write that changed <paramref name="changed"/> needs the recompute of its context. Null means
+    /// the writer did not say what changed, which is treated as "everything".
+    /// </summary>
+    public static bool NeedsRecompute(RepositoryFactGroups? changed)
+        => changed is not { } groups || (groups & RecomputeInputs) != 0;
+
+    /// <summary>
+    /// The full recompute of a context, without broadcasting, for callers that send their own follow-up notification.
+    /// It rebuilds every derived value from the stored rows, so it is also the reference a narrower decision is
+    /// checked against. Returns false when one of its parts failed (the failure is logged and the other parts still
+    /// ran): the context is then owed another recompute.
+    /// </summary>
+    public async Task<bool> RecomputeAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
         // Effective versions first (design D5): the file-version check and the dependency stats below compare against them.
-        await ResolveEffectiveVersionsAsync(workspaceId, contextId, cancellationToken);
+        var complete = await ResolveEffectiveVersionsAsync(workspaceId, contextId, cancellationToken);
 
         if (fileVersionService != null)
         {
@@ -67,10 +89,12 @@ public sealed class WorkspaceStateRecomputeScope(
             {
                 // A file-version check needs the worker; losing it must not also lose the dependency recompute.
                 logger.LogError(ex, "File version check failed for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
+                complete = false;
             }
         }
 
         await RecomputeDependencyStatsAsync(workspaceId, contextId, cancellationToken);
+        return complete;
     }
 
     /// <summary>
@@ -78,22 +102,25 @@ public sealed class WorkspaceStateRecomputeScope(
     /// answers; a repository that left its branch point costs no Worker or registry call). A failure is logged and the
     /// stored decisions stay as they were: a stale inheritance is ignored at read once HEAD moves (I10), and every
     /// operation start resolves again with fresh answers.
+    /// Returns false when the resolution failed.
     /// </summary>
-    public async Task ResolveEffectiveVersionsAsync(
+    public async Task<bool> ResolveEffectiveVersionsAsync(
         int workspaceId,
         WorkspaceFeatureContextId contextId,
         CancellationToken cancellationToken = default)
     {
         if (effectiveVersionResolver == null)
-            return;
+            return true;
 
         try
         {
             await effectiveVersionResolver.ResolveAsync(workspaceId, contextId, repositoryIds: null, bypassCache: false, cancellationToken);
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Effective version resolution failed for workspace {WorkspaceId} context {ContextId}", workspaceId, contextId.Value);
+            return false;
         }
     }
 

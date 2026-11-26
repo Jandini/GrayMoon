@@ -94,6 +94,7 @@ public partial class AppDbContext
             entity.Property(s => s.EffectiveVersion).HasMaxLength(100);
             entity.Property(s => s.EffectiveVersionCommitSha).HasMaxLength(64);
             entity.Property(s => s.EffectiveVersionReasonCode).HasMaxLength(50);
+            entity.Property(s => s.EffectiveVersionEvidenceKey).HasMaxLength(64);
             entity.Property(s => s.SyncStatus)
                 .HasDefaultValue(RepoSyncStatus.NeedsSync)
                 .HasSentinel(RepoSyncStatus.InSync);

@@ -163,6 +163,18 @@ mixes every context's data into one answer, or persists onto the wrong row.
    snapshot from the readable fields of a response and mark groups as probed by
    guessing: App and Worker are version-locked, and a response without `State`
    read nothing.
+9. **Order two reports by evidence, never by arrival.** A snapshot the Worker
+   captured first can reach the App last. `RepositoryStateFreshness.Evaluate`
+   decides what of a waiting snapshot may be applied (operation start times,
+   and the Worker's capture stamps); use it, do not compare timestamps of
+   your own. Branch lists and tags belong to the repository and are shared by
+   every context of a Workspace; what is checked out belongs to one context.
+   When the order of two reports is not known, ask `IRepositoryStateReconciler`
+   for one read of that repository.
+10. **A hook is a hint, not a journal.** Hook syncs are dropped while the
+    Worker is disconnected and do not survive an App restart. Stored commit
+    and branch are repaired by `RepositoryStateDriftMonitor` from the Git
+    Changes audit; never add a stored fact that only a hook can refresh.
 
 ### Before merging a change that touches Feature/worktree data
 
@@ -344,7 +356,13 @@ runs on the thread pool while the dispatcher may be rendering the page.
 3. **Re-check the precondition when a queued destructive action runs.**
    A choice made in an analysis dialog (discard, force) covers what the user
    saw. If the repository changed between analysis and execution, skip it with
-   a message; never carry `force` forward blindly. [18]
+   a message; never carry `force` forward blindly. [18] In Remove Feature a
+   consent reaches only the repositories the reviewed details listed with that
+   risk, bound to the commit they showed (`expectedHeadSha`, `expectedSha`); a
+   consent without reviewed details authorizes nothing, and nothing is retried
+   with force. The kinds of refusal that say work is at stake come from the
+   Worker's evidence (`WorktreeRemovalErrorCodes`, `BranchDeleteFailureKinds`),
+   never from the text of git's message.
 4. **Rollback and cleanup must not depend on the folder being empty.** Mark a
    leftover folder with `PendingDeleteMarker` so a later Create of the same
    name can finish it. [19]

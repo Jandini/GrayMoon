@@ -17,4 +17,10 @@ public sealed record WorktreeResidueResult(
 {
     /// <summary>No residue left behind.</summary>
     public static readonly WorktreeResidueResult None = new(false, 0, [], null);
+
+    /// <summary>
+    /// The worktree as the inventory listed it right before it was removed (branch, HEAD, detached); null when it was
+    /// not registered. Lets the caller say which branch a worktree was on without a second read.
+    /// </summary>
+    public GrayMoon.Common.Git.GitWorktreeInfo? Registration { get; init; }
 }

@@ -110,6 +110,45 @@ public sealed class WorkspaceContextNavigationService(
         return await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
     }
 
+    /// <summary>
+    /// The context a <c>?context=</c> value names when it changed while the page stayed open (browser back or
+    /// forward, an edited URL). A Feature id of this Workspace selects that Feature; no value, or an id that does not
+    /// belong here, selects the special Workspace. Unlike <see cref="ResolveForPageAsync"/> it never revives the
+    /// stored selection (a URL without the value means the Workspace, or the page would stay on the Feature the user
+    /// just navigated away from) and never rewrites the URL. The result is stored as the selection.
+    /// </summary>
+    public async Task<WorkspaceFeatureContextInfo> ResolveQueryChangeAsync(
+        int workspaceId,
+        int? contextQuery,
+        CancellationToken cancellationToken = default)
+    {
+        WorkspaceFeatureContextInfo? info = null;
+        if (contextQuery is int q && q > 0)
+        {
+            info = await TryResolveOwnedAsync(new WorkspaceFeatureContextId(q), workspaceId, cancellationToken);
+            if (info is null)
+                logger.LogWarning("Ignoring context {ContextId} on workspace {WorkspaceId}; it belongs to another workspace or is missing.", q, workspaceId);
+        }
+
+        info ??= await contextResolver.GetRequiredAsync(
+            await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken), workspaceId, cancellationToken);
+        await selectedContextService.SetSelectedAsync(workspaceId, info.ContextId, cancellationToken);
+        return info;
+    }
+
+    /// <summary>
+    /// The context the selector handed to a page. The selector's list can be briefly behind (a Feature removed in
+    /// another tab): a context that no longer belongs to the Workspace resolves to the special Workspace instead of
+    /// throwing out of the page's event handler.
+    /// </summary>
+    public async Task<WorkspaceFeatureContextInfo> ResolveSelectionAsync(
+        int workspaceId,
+        WorkspaceFeatureContextId contextId,
+        CancellationToken cancellationToken = default)
+        => await TryResolveOwnedAsync(contextId, workspaceId, cancellationToken)
+           ?? await contextResolver.GetRequiredAsync(
+               await contextResolver.GetOrCreateSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken), workspaceId, cancellationToken);
+
     private async Task<WorkspaceFeatureContextInfo?> TryResolveOwnedAsync(
         WorkspaceFeatureContextId contextId,
         int workspaceId,

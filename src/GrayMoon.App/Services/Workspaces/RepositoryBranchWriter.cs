@@ -29,8 +29,9 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
     /// caller holds the bare name (the Worker lists them bare) or the prefixed ref, so every writer agrees on one row per branch.
     /// Removes branches/tags not in the fetched list, adds new ones, updates LastSeenAt for existing ones. Optionally marks the default branch (e.g. main or master).
     /// The branch and tag lists belong to the repository and are shared by every context. Which tag a context has checked out is
-    /// per-context state and is written by <see cref="WorkspaceRepositoryStateWriter.ApplyTagRefreshAsync"/>, never here.</summary>
-    public async Task PersistAsync(
+    /// per-context state and is written by <see cref="WorkspaceRepositoryStateWriter.ApplyTagRefreshAsync"/>, never here.
+    /// Returns true when a row was added or removed or a default flag or tag rank changed; a list that only confirmed the stored rows returns false.</summary>
+    public async Task<bool> PersistAsync(
         int workspaceRepositoryId,
         IReadOnlyList<string>? localBranches,
         IReadOnlyList<string>? remoteBranches,
@@ -77,6 +78,11 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             }
         }
 
+        // What the rows say before this write, to tell a list that changed nothing from one that did.
+        var before = existingBranches
+            .Select(b => (b.BranchName, b.IsRemote, b.IsTag, b.IsDefault, b.SortIndex))
+            .ToHashSet();
+
         // Clear IsDefault for all existing; we will set it for the default branch below
         foreach (var b in existingBranches)
             b.IsDefault = false;
@@ -121,9 +127,17 @@ public sealed class RepositoryBranchWriter(AppDbContext dbContext, ILogger<Repos
             dbContext.RepositoryBranches.RemoveRange(toRemove);
         }
 
+        // Changed: a row was added or removed, or the default flag or a tag's rank moved. LastSeenAt alone is not a change.
+        var after = existingBranches
+            .Except(toRemove)
+            .Select(b => (b.BranchName, b.IsRemote, b.IsTag, b.IsDefault, b.SortIndex))
+            .ToHashSet();
+        var changed = toRemove.Count > 0 || fetchedRefs.Count != after.Count(r => fetchedRefs.Contains((r.BranchName, r.IsRemote, r.IsTag))) || !before.SetEquals(after);
+
         if (save)
             await SaveBranchChangesAsync(cancellationToken);
         logger.LogTrace("Persisted {Count} ref(s) for workspace repository {WorkspaceRepositoryId}", fetchedRefs.Count, workspaceRepositoryId);
+        return changed;
     }
 
     /// <summary>Prunes remote branch rows that are no longer present in git after a fetch --prune. Returns the number of rows removed.</summary>

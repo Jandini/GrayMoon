@@ -12,7 +12,8 @@ public sealed class WorktreeRemovalFailureClassifierTests
     [InlineData("Unlink of file 'bin/app.dll' failed. Should I try again? (y/n) n", WorktreeRemovalFailureKind.PathInUse)]
     [InlineData("fatal: unable to access 'C:/f/repo/.git': Permission denied", WorktreeRemovalFailureKind.AccessDenied)]
     [InlineData("Access is denied.", WorktreeRemovalFailureKind.AccessDenied)]
-    [InlineData("fatal: 'C:/f/repo' contains modified or untracked files, use --force to delete it", WorktreeRemovalFailureKind.UncommittedChanges)]
+    // The wording of a refusal is not evidence of uncommitted work: that kind comes only from the Worker's error code.
+    [InlineData("fatal: 'C:/f/repo' contains modified or untracked files, use --force to delete it", WorktreeRemovalFailureKind.GitRefusal)]
     [InlineData("fatal: cannot remove a locked working tree, lock reason: testing", WorktreeRemovalFailureKind.WorktreeLocked)]
     [InlineData("fatal: 'C:/f/repo' is not a working tree", WorktreeRemovalFailureKind.GitRefusal)]
     [InlineData("fatal: validation failed, cannot remove working tree: '.git' is not a file", WorktreeRemovalFailureKind.GitRefusal)]
@@ -29,6 +30,19 @@ public sealed class WorktreeRemovalFailureClassifierTests
     public void Logical_worker_error_codes_are_git_refusals_even_with_in_use_words(string code)
     {
         Assert.Equal(WorktreeRemovalFailureKind.GitRefusal, WorktreeRemovalFailureClassifier.Classify(code, "Permission denied"));
+    }
+
+    [Theory]
+    [InlineData(WorktreeRemovalErrorCodes.UncommittedChanges, WorktreeRemovalFailureKind.UncommittedChanges)]
+    [InlineData(WorktreeRemovalErrorCodes.WorktreeLocked, WorktreeRemovalFailureKind.WorktreeLocked)]
+    [InlineData(WorktreeRemovalErrorCodes.OperationInProgress, WorktreeRemovalFailureKind.OperationInProgress)]
+    [InlineData(WorktreeRemovalErrorCodes.UnpreservedCommits, WorktreeRemovalFailureKind.UnpreservedCommits)]
+    [InlineData(WorktreeRemovalErrorCodes.NestedRepository, WorktreeRemovalFailureKind.NestedRepository)]
+    public void Evidence_codes_decide_the_kind_whatever_the_message_says(string code, WorktreeRemovalFailureKind expected)
+    {
+        Assert.Equal(expected, WorktreeRemovalFailureClassifier.Classify(code, "ein lokalisierter Text ohne bekannte Marker"));
+        Assert.Equal(expected, WorktreeRemovalFailureClassifier.Classify(code, "Permission denied"));
+        Assert.Equal(expected, WorktreeRemovalFailureClassifier.Classify(code, null));
     }
 
     [Fact]

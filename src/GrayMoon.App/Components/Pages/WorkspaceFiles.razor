@@ -253,26 +253,51 @@
         }
     }
 
+    /// <summary>Which <c>?context=</c> value the page shows, and the guard for loads that finish late.</summary>
+    private readonly PageContextBinding _contextBinding = new();
+
     protected override async Task OnInitializedAsync()
     {
         var info = await ContextNavigation.ResolveForPageAsync(WorkspaceId, ContextQuery);
-        _selectedContextId = info.ContextId;
-        await LoadAsync();
+        await SelectContextAsync(info);
+    }
+
+    /// <summary>Browser back and forward change <c>?context=</c> while the page stays open; the selector is not involved.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_contextBinding.QueryChanged(ContextQuery))
+            return;
+
+        var info = await ContextNavigation.ResolveQueryChangeAsync(WorkspaceId, ContextQuery);
+        if (_contextBinding.QueryChanged(ContextQuery))
+            await SelectContextAsync(info);
     }
 
     private async Task OnSelectedContextChangedAsync(WorkspaceFeatureContextId contextId)
+        => await SelectContextAsync(await ContextNavigation.ResolveSelectionAsync(WorkspaceId, contextId));
+
+    private async Task SelectContextAsync(WorkspaceFeatureContextInfo info)
     {
-        _selectedContextId = contextId;
-        await LoadAsync();
+        _selectedContextId = info.ContextId;
+        _contextBinding.Bind(info.ContextId, info.IsSpecialWorkspace);
+        await _contextBinding.RunLatestAsync(LoadAsync);
     }
 
     private async Task LoadAsync()
     {
+        // The context this load is for. The selection can change while it waits for the database or the Worker
+        // paths; what it read then belongs to the context that was left and is not assigned.
+        var generation = _contextBinding.Generation;
+        var contextId = _selectedContextId;
         try
         {
             isLoading = true;
             errorMessage = null;
-            workspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            var loadedWorkspace = await WorkspaceRepository.GetByIdAsync(WorkspaceId);
+            if (!_contextBinding.IsCurrent(generation))
+                return;
+
+            workspace = loadedWorkspace;
             if (workspace == null)
             {
                 errorMessage = "Workspace not found.";
@@ -283,28 +308,31 @@
                 contextFolderName = null;
                 return;
             }
-            if (_selectedContextId is null)
+            if (contextId is null)
             {
                 errorMessage = "No Feature context selected.";
                 return;
             }
-            usesRepositoryVersioning = (await CapabilitiesResolver.GetAsync(WorkspaceId)).UsesRepositoryVersioning;
-            var workerArgs = await PathResolver.GetWorkerArgsAsync(_selectedContextId.Value);
-            var workerRoot = workerArgs.WorkspaceRoot;
-            var folderName = workerArgs.WorkspaceFolderName;
-            workspaceRoot = workerRoot;
-            workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
-            contextFolderName = folderName;
-            workspaceRepos = workspace.Repositories
-                .Where(r => r.Repository != null)
-                .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
-                .ToList();
+            var versioning = (await CapabilitiesResolver.GetAsync(WorkspaceId)).UsesRepositoryVersioning;
+            var workerArgs = await PathResolver.GetWorkerArgsAsync(contextId.Value);
             var list = await WorkspaceFileRepository.GetByWorkspaceIdAsync(WorkspaceId);
             // Context-scoped (§7/AGENTS.md "Feature-context scoping"): IsMissingOnDisk is per-context state, not
             // a single shared flag - a Feature must see its own worktree's missing-file answer, not the
             // Workspace's (or another Feature's). Falls back to the shared WorkspaceFile row only for the
             // special Workspace / files with no context-state row yet.
-            var missingFlags = await FileVersionService.GetMissingFlagsByFileIdAsync(WorkspaceId, _selectedContextId.Value);
+            var missingFlags = await FileVersionService.GetMissingFlagsByFileIdAsync(WorkspaceId, contextId.Value);
+            var configs = await VersionConfigRepository.GetByWorkspaceIdAsync(WorkspaceId);
+            if (!_contextBinding.IsCurrent(generation))
+                return;
+
+            usesRepositoryVersioning = versioning;
+            workspaceRoot = workerArgs.WorkspaceRoot;
+            workspaceRepositoryName = workerArgs.WorkspaceRepositoryName;
+            contextFolderName = workerArgs.WorkspaceFolderName;
+            workspaceRepos = workspace.Repositories
+                .Where(r => r.Repository != null)
+                .Select(r => new WorkspaceRepoItem { RepositoryId = r.RepositoryId, RepositoryName = r.Repository!.RepositoryName })
+                .ToList();
             files = list.Select(f => new WorkspaceFileDto
             {
                 FileId = f.FileId,
@@ -315,18 +343,22 @@
                 FilePath = f.FilePath,
                 IsMissingOnDisk = missingFlags.GetValueOrDefault(f.FileId) == true
             }).ToList();
-            var configs = await VersionConfigRepository.GetByWorkspaceIdAsync(WorkspaceId);
             fileVersionConfigs = configs.ToDictionary(c => c.FileId, c => c.VersionPattern);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading files for workspace {WorkspaceId}", WorkspaceId);
-            errorMessage = "Failed to load files. Please try again later.";
-            files = new List<WorkspaceFileDto>();
+            if (_contextBinding.IsCurrent(generation))
+            {
+                errorMessage = "Failed to load files. Please try again later.";
+                files = new List<WorkspaceFileDto>();
+            }
         }
         finally
         {
-            isLoading = false;
+            // A load that was overtaken leaves the indicator to the load of the context that is selected now.
+            if (_contextBinding.IsCurrent(generation))
+                isLoading = false;
         }
     }
 

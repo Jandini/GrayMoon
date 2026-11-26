@@ -124,6 +124,26 @@ The endpoint should be thin. Pages and endpoints must not resolve `WorkspaceGitS
 
 REST endpoints resolve the special Workspace context (`GetOrCreateSpecialWorkspaceContextIdAsync`); no endpoint maps `IWorkspaceFeatureOperations`. A new endpoint that should act on a Feature needs an explicit context parameter, not an implicit one.
 
+### The typed outcome (`OperationOutcome`)
+
+`OperationResult.Outcome` (`src/GrayMoon.Application/OperationOutcome.cs`) is the typed form of what an operation did, for a caller that must not parse `Error` text, a toast or a log: a page, a REST client, a later MCP tool. It is additive: an operation that does not fill it returns the same JSON as before (the property is left out when null; `OperationResultContractTests` pins the old shapes).
+
+```text
+OperationOutcome        OperationId, Operation, WorkspaceId, ContextId, ContractVersion, DerivedState, Status
+  Targets[]             OperationTarget (kind, name, RepositoryId, WorkspaceRepositoryId, path) + Status
+    Steps[]             Step key, Status, ReasonCode, Message, Observed, Invalidated, RequiredAuthorization, CanRetry
+```
+
+- `OperationOutcomeStatus`: `Succeeded`, `NoOp`, `Skipped`, `Blocked`, `Failed`, `Cancelled`, `Unknown`, and `Partial` for an aggregate. `OperationOutcomeAggregate.Of` is the one rule for combining steps into a target and targets into a run: one part of unknown outcome makes the whole `Unknown`, a mixture of done and not done is `Partial`, skipped parts do not count next to parts that did something.
+- `Unknown` means the command may have taken effect (a lost reply). It is never reported as `Failed`, and the facts named in `Invalidated` are read again before anything is retried.
+- A step is independent: a removed worktree with a kept branch is a `Succeeded` step and a `Skipped` step, not one success or one failure.
+- `ReasonCode` is one of `OperationReasonCodes`. A code is never renamed; add new ones there. `Message` is for people.
+- `RequiredAuthorization` (one of `OperationAuthorizations`) names the consent a `Blocked` step needs. A consent is for the named target and the evidence the caller saw; an operation never widens it and never retries with force on its own.
+- `Observed` / `Invalidated` (`OperationFactGroups`) say which groups of repository facts the step established or made stale.
+- Enums of this contract are written as names in JSON. Raise `ContractVersion` only for a change an existing reader could misread.
+
+A new operation that reports per repository builds its outcome from the same step results it persists, so the UI, REST and automation read one truth. Test a new producer the way `OperationOutcomeContractTests` does: serialize the result and read the JSON as a caller that knows nothing about the UI.
+
 ---
 
 ## 4A. Update and Push is one entry point
@@ -201,11 +221,19 @@ When adding new repository state:
 - mark it probed only when the operation truly obtained authoritative data; a step skipped by profile or failure reports `*Probed = false`, never `true` with null;
 - test that unrelated partial operations preserve existing values.
 
+A new Worker path that reads state for a notification goes through `IRepositoryStateProbe`, which stamps the capture (`CaptureSession`, `CaptureStart`, `CaptureEnd`); one that builds a snapshot itself takes `RepositoryStateCaptureClock.Next()` before its first read and after its last. Never copy stamps from one snapshot to another and never invent them on the App side: a snapshot without stamps is ordered by arrival, which is correct, while wrong stamps make the App drop a newer report. An App operation that writes state it read through a Worker command passes `RepositoryStateWriteOptions.OperationStartedAt` (read before the command was sent). A caller that needs to know whether its write changed anything reads `RepositoryStateWriteResult.Changed` instead of comparing rows itself. When stored state cannot be trusted (two reports of unknown order, evidence that was lost), ask `IRepositoryStateReconciler.Request` for one read of that repository; do not start a Sync of the Workspace.
+
+A hook can be lost, so no feature may depend on a hook as its only source of a stored fact. Commit and branch are covered by the drift check (`RepositoryStateDriftMonitor`, fed by every Git Changes status snapshot). A new stored fact that only a hook reports needs its own recovery: a value the periodic audit already reads, or a read at the start of the operation that depends on it.
+
 Hook paths send partial snapshots too (`RepositoryStateSnapshot.IsBranchRefsOnly` from the `reference-transaction` hook carries branch lists only). A new hook-driven field must be null-when-unknown so `SyncCommandHandler`'s "persist only non-null fields" semantics hold.
 
 ---
 
 ## 9. Batch recomputation
+
+An operation that decides from stored state what to change (which repositories to push, which versions to write) first waits for the Git events that are not applied yet (`PendingSyncNotificationWait.WaitAsync` on `IWorkerSyncNotificationBarrier`) and then runs the start check that makes the facts it needs authoritative (`EffectiveVersionStartCheck` for versions). Update, Update and Push, Prepare Workspace and bulk Push do both. When a new input can change an effective version decision without changing the commit, add it to `EffectiveVersionResolver.EvidenceKeyOf`; a decision is reused only while that key is unchanged.
+
+A hook batch runs the context recompute only when a state write changed one of `WorkspaceStateRecomputeScope.RecomputeInputs`. When you add a stored field that the effective-version resolver, the file-version check or the dependency stats read, add it to the comparison in `WorkspaceRepositoryStateWriter` (`TrackedValues`) under a group that is a recompute input, and add a case to `ScopedRecomputeTests`; otherwise a hook that changes only that field leaves the derived state behind. A field none of the three reads belongs to a group that is not an input.
 
 When one user action updates several repositories:
 
@@ -393,7 +421,7 @@ final broadcast
 
 Lock scopes (`IWorkspaceOperationLock`, implemented by `WorkspaceOperationRunner`):
 
-- `TryStartStructural` locks the whole Workspace and is refused while any context mutation runs. Current structural kinds: `create-feature`, `repair-feature`, `rollback-feature`, `remove-external-worktree`, `refresh-workspace` (`WorkspaceCheckoutRefresh`), `enable-workspace-repository`, plus legacy `TryStart` and REST `WorkspaceCommandHttp.RunExclusiveAsync`.
+- `TryStartStructural` locks the whole Workspace and is refused while any context mutation runs. Current structural kinds: `create-feature`, `repair-feature`, `rollback-feature`, `remove-external-worktree`, `enable-workspace-repository`, plus legacy `TryStart` and REST `WorkspaceCommandHttp.RunExclusiveAsync`.
 - `TryStartContext` locks one context (job key `WorkspaceJobKeys.ContextOverlayKey`) and is refused while the Workspace is structurally busy.
 - Remove Feature takes no lock: it runs in `FeatureRemovalQueue` (at most `IFeatureRemovalQueue.MaxConcurrentRemovals` = 4 at once) so Sync and every other operation keep working. Code that must not run during a removal cannot rely on `IsWorkspaceStructurallyBusy`.
 
@@ -614,6 +642,32 @@ Reference test: `WorkspaceRepositoryLinkListQueryServiceTests.Feature_context_so
 - Worktree create is idempotent per repository (an existing matching, finished worktree is success; an unfinished one is created again, see above); keep that when changing retry or ordering. The Workspace-role (root) worktree is created first and removed last.
 - Deletes below the Feature storage root go through the Worker's guarded cleaners (`FeatureFolderCleaner`, residue removal): never a folder holding a `.git` directory, a registered worktree, an existing Feature, or a path outside a managed `...\features` root. Reparse points are deleted, never followed.
 - Repair, reconcile and rollback never delete worktrees the user still needs; the reconciler only changes lifecycle state.
+
+---
+
+### Removing a worktree
+
+`git worktree remove` without `--force` refuses modified and untracked files and submodules, and nothing else. It deletes, with exit code 0, a clean worktree in the middle of a merge, rebase or cherry-pick, a worktree on a detached commit that no ref holds, ignored files, and a repository nested in an ignored folder (git 2.55; `WorktreeRemovalSafetyTests` states this against real git, so a change in git shows there). `GitWorktreeService.RemoveWorktreeAsync` therefore adds, under the exclusive claim and right before the command:
+
+```text
+lock                 from the inventory it lists anyway; refused before git runs unless unlock was authorized
+nested repository    a .git folder or file below the worktree (a folder walk, no process); refused with or without force
+unpreserved commits  detached HEAD on a commit no branch, remote-tracking branch or tag contains (one for-each-ref,
+                     only when the inventory says detached); refused with or without force
+unfinished operation MERGE_HEAD, CHERRY_PICK_HEAD, rebase-merge, rebase-apply in the worktree's git directory;
+                     refused without force
+changed since review with force and expectedHeadSha: HEAD is another commit than the reviewed one; refused
+```
+
+Rules when changing this code:
+
+- A refusal that says work is at stake is an error code set from evidence (`WorktreeRemovalErrorCodes`), never a match on git's message. `UncommittedChanges` is established by reading the worktree's status after git refused and the worktree is still registered. Message text only tells an open file from a denied access, which changes wording only.
+- Exit code 0 is trusted (no second inventory read). A caller that got no answer does not send the removal again: it lists the worktrees. A second removal of an unregistered path answers `alreadyRemoved` without running git.
+- Force is never implied and never retried. Ignored files go with the worktree by decision; a new guard that keeps more must not make the removal of an ordinary built .NET worktree fail.
+- Do not add a git process to the removal of a clean worktree on its branch: it costs two (inventory, remove), held by `The_guards_add_no_git_process_to_the_removal_of_a_clean_worktree_on_its_branch`.
+- A branch delete reports `failureKind`, the tip and the upstream from the listing it already runs (`BranchDeleteResult`); pass `expectedSha` for a forced local delete so a branch that moved is kept.
+
+On the App side `WorkspaceFeatureOperations.Removal.cs` owns the removal: per repository a Worktree, LocalBranch, RemoteBranch and Residue step, each stored on the row (`FeatureRepositoryRemovalRecord` in `RemovalOutcomeJson`) right after it ran. A new step gets a key in `RemoveFeatureSteps`, an `OperationStepOutcome`, and a place in "is this step unresolved"; a step that kept something on purpose is `Skipped` or `Blocked`, never `Failed`.
 
 ---
 

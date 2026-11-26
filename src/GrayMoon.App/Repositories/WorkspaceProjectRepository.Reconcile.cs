@@ -6,6 +6,42 @@ namespace GrayMoon.App.Repositories;
 public sealed partial class WorkspaceProjectRepository
 {
     /// <summary>
+    /// What the dependency graph reads of one repository in one context: its project rows and every dependency edge
+    /// that starts or ends at one of them, as an order-independent set of lines. Two equal sets mean a reconcile
+    /// changed nothing the graph or the version consumers read. Row ids are left out of the project lines (a row
+    /// replaced by an equal one is no change) and edges name their ends by identity, not by id.
+    /// </summary>
+    public async Task<HashSet<string>> ReadProjectFingerprintAsync(
+        int workspaceFeatureContextId,
+        int repositoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var projects = await dbContext.WorkspaceProjects.AsNoTracking()
+            .Where(p => p.WorkspaceFeatureContextId == workspaceFeatureContextId && p.RepositoryId == repositoryId)
+            .Select(p => new { p.ProjectIdentityKey, p.ProjectFilePath, p.ProjectName, p.ProjectType, p.TargetFramework, p.PackageId, p.IsGenerated, p.MatchedConnectorId })
+            .ToListAsync(cancellationToken);
+        var edges = await dbContext.ProjectDependencies.AsNoTracking()
+            .Where(d => (d.DependentProject!.WorkspaceFeatureContextId == workspaceFeatureContextId && d.DependentProject.RepositoryId == repositoryId)
+                        || (d.ReferencedProject!.WorkspaceFeatureContextId == workspaceFeatureContextId && d.ReferencedProject.RepositoryId == repositoryId))
+            .Select(d => new
+            {
+                FromRepository = d.DependentProject!.RepositoryId,
+                From = d.DependentProject.ProjectIdentityKey ?? d.DependentProject.ProjectFilePath,
+                ToRepository = d.ReferencedProject!.RepositoryId,
+                To = d.ReferencedProject.ProjectIdentityKey ?? d.ReferencedProject.ProjectFilePath,
+                d.Version,
+            })
+            .ToListAsync(cancellationToken);
+
+        var lines = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in projects)
+            lines.Add($"P\u001f{p.ProjectIdentityKey}\u001f{p.ProjectFilePath}\u001f{p.ProjectName}\u001f{(int)p.ProjectType}\u001f{p.TargetFramework}\u001f{p.PackageId}\u001f{p.IsGenerated}\u001f{p.MatchedConnectorId}");
+        foreach (var e in edges)
+            lines.Add($"E\u001f{e.FromRepository}\u001f{e.From}\u001f{e.ToRepository}\u001f{e.To}\u001f{e.Version}");
+        return lines;
+    }
+
+    /// <summary>
     /// The one reconciliation entry point for project snapshots of a context: merges the projects of every repository whose
     /// scan was authoritative (<see cref="ProjectScanOutcome.IsAuthoritative"/>), rebuilds those repositories' dependency
     /// edges (optional) and, when requested, recomputes the dependency levels, all under one projection gate and one database

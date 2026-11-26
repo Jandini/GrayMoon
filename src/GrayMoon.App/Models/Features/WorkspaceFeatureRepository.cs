@@ -65,4 +65,11 @@ public sealed class WorkspaceFeatureRepository
 
     [MaxLength(2000)]
     public string? LastError { get; set; }
+
+    /// <summary>
+    /// What Remove Feature last did to this repository, step by step (worktree, local branch, remote branch, leftover
+    /// files), as JSON of <c>FeatureRepositoryRemovalRecord</c>. It is what a retry continues from and what the
+    /// status of an incomplete removal shows, so the outcome of a step survives a restart. Null until a removal ran.
+    /// </summary>
+    public string? RemovalOutcomeJson { get; set; }
 }

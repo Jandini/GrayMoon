@@ -423,6 +423,7 @@ public sealed class FileVersionStoredCommitTests
                 [EffectiveVersionScenario.ConsumerName] = "release/2.4",
             },
         });
+        await s.Ctx.StoreHeadSnapshotAsCurrentStateAsync();
         s.Ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
         s.Ctx.WorkerBridge.Calls.Clear();
 

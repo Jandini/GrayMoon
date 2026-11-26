@@ -14,7 +14,8 @@ public sealed class UndoPushCommand(
     IGitService git, IGitRepositoryReader reader,
     IRepositoryVersionProviderFactory versionProviderFactory,
     IHubConnectionProvider hubProvider,
-    ILogger<UndoPushCommand> logger) : ICommandHandler<UndoPushRequest, UndoPushResponse>
+    ILogger<UndoPushCommand> logger,
+    ICsProjFileService? csProjFileService = null) : ICommandHandler<UndoPushRequest, UndoPushResponse>
 {
     public async Task<UndoPushResponse> ExecuteAsync(UndoPushRequest request, CancellationToken cancellationToken = default)
     {
@@ -102,6 +103,24 @@ public sealed class UndoPushCommand(
         // The reset moved HEAD; the App decides the effective version per HEAD commit.
         var headCommit = await reader.GetHeadCommitAsync(repoPath, cancellationToken);
 
+        // A discarding undo (reset --hard) puts the files of the remote commit back, project files included, and no
+        // git hook reports a reset. Without a scan the App kept the projects and package references of the commits
+        // that were just undone until the next Sync. With "keep changes" (reset --mixed) the files do not change,
+        // so the stored projects are still what is on disk and nothing is scanned.
+        List<RepositorySyncProjectNotification>? projects = null;
+        if (!request.KeepChanges && csProjFileService is not null && request.EffectiveCapabilities.ShouldDiscoverProjects)
+        {
+            try
+            {
+                projects = RepositorySyncProjectMapper.ToNotifications(await csProjFileService.FindAsync(repoPath, cancellationToken));
+            }
+            catch (ProjectDiscoveryException ex)
+            {
+                // The reset already succeeded. Not probed, so the stored rows stay.
+                logger.LogWarning(ex, "Post-reset project discovery failed for repo {RepoId}; projects left unprobed", request.RepositoryId);
+            }
+        }
+
         return new RepositorySyncNotification
         {
             WorkspaceId = request.WorkspaceId,
@@ -116,7 +135,8 @@ public sealed class UndoPushCommand(
             HasUpstream = hasUpstream,
             DefaultBranchBehind = defaultBehind,
             DefaultBranchAhead = defaultAhead,
-            // This pass never scans the working tree, so the project marker stays false and the
+            Projects = projects,
+            // Probed only after a discarding undo that could be scanned; otherwise the marker stays false and the
             // persisted project rows survive the reset.
             State = new RepositoryStateSnapshot
             {
@@ -128,6 +148,8 @@ public sealed class UndoPushCommand(
                 DefaultBranchBehind = defaultBehind,
                 DefaultBranchAhead = defaultAhead,
                 HasUpstream = hasUpstream,
+                Projects = projects,
+                ProjectsProbed = projects != null,
                 IdentityProbed = true,
                 GitVersionProbed = versionResult.Probed,
                 CommitCountsProbed = outgoing.HasValue || incoming.HasValue,
