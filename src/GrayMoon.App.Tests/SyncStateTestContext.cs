@@ -313,6 +313,22 @@ public sealed class SyncStateTestContext : IAsyncDisposable
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Stores <paramref name="status"/> as the repository's sync status, on the link and on every state row it has:
+    /// the starting point of a test about a repository that is not in sync yet.
+    /// </summary>
+    public async Task SetStoredSyncStatusAsync(RepoSyncStatus status)
+    {
+        var factory = _provider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        await db.WorkspaceRepositories
+            .Where(wr => wr.WorkspaceRepositoryId == WorkspaceRepositoryId)
+            .ExecuteUpdateAsync(s => s.SetProperty(wr => wr.SyncStatus, status));
+        await db.WorkspaceRepositoryContextStates
+            .Where(s => s.WorkspaceRepositoryId == WorkspaceRepositoryId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.SyncStatus, status));
+    }
+
     public async Task<WorkspaceFeatureContextId> GetSpecialContextIdAsync()
     {
         await using var scope = CreateScope();

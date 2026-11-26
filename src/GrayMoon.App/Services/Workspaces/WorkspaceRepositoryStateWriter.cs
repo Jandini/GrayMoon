@@ -1070,7 +1070,9 @@ public sealed class WorkspaceRepositoryStateWriter(
             wr.DefaultBranchName = snapshot.DefaultBranchName;
 
         ApplySyncStatus(state, snapshot, options, wr.DefaultBranchName, isReferenceSnapshot);
-        if (isSpecialWorkspace)
+        // A write that leaves the status alone leaves it on the link too: copying the row's status then would
+        // overwrite the link with a value this write did not decide.
+        if (isSpecialWorkspace && options.SyncStatus != SyncStatusWrite.Leave)
             wr.SyncStatus = state.SyncStatus;
 
         return previousBranch;

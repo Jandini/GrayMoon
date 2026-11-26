@@ -211,8 +211,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
                 .HasMaxLength(200);
 
             entity.Property(wr => wr.SyncStatus)
+                // The sentinel is a value no row has. With a real status as the sentinel, a row inserted with that
+                // status got the column default instead: a first row stored as "in sync" was saved as "sync".
                 .HasDefaultValue(RepoSyncStatus.NeedsSync)
-                .HasSentinel(RepoSyncStatus.InSync);
+                .HasSentinel((RepoSyncStatus)(-1));
 
             entity.HasOne(wr => wr.Workspace)
                 .WithMany(workspace => workspace.Repositories)
