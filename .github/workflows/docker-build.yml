@@ -13,7 +13,43 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      # An image is published only after the Test workflow passed for this tag. Test starts from the same tag push,
+      # so this waits for that run instead of testing again. When Test failed, rerun it, then rerun this job.
+      - name: Wait for tests
+        if: env.push-to-registry == 'true'
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          RUNS="repos/${{ github.repository }}/actions/workflows/test.yml/runs?head_sha=${{ github.sha }}&event=push&per_page=100"
+          # head_branch is the tag name for a tag push; the same commit can also have runs for a branch or another tag.
+          NEWEST='[.workflow_runs[] | select(.head_branch == env.TAG)] | sort_by(.created_at) | last // empty | "\(.status) \(.conclusion // "none") \(.html_url)"'
+
+          while true; do
+            # No run listed yet, or a request that fails, means "not yet". The step timeout ends the wait.
+            if ! RUN=$(gh api "$RUNS" --jq "$NEWEST"); then
+              RUN=""
+            fi
+            read -r STATUS CONCLUSION URL <<< "$RUN" || true
+
+            if [ "$STATUS" = "completed" ]; then
+              if [ "$CONCLUSION" = "success" ]; then
+                echo "Tests passed: $URL"
+                exit 0
+              fi
+              echo "::error::Tests did not pass for tag '$TAG' ($CONCLUSION), so no image is published: $URL"
+              exit 1
+            fi
+
+            echo "Waiting for the Test run of tag '$TAG' (${STATUS:-not listed yet})."
+            sleep 20
+          done
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0

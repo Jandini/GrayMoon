@@ -188,17 +188,16 @@ public sealed class WorkspaceReferenceOperationsTests
     {
         var manifest = new FakeManifest();
         await using var ctx = await CreateAsync(manifest);
-        await SeedGraphAsync(ctx);
+        var graph = await SeedGraphAsync(ctx);
+        // With a Workspace repository the change writes the definition, which gives the test a point inside the work.
+        await MutateLinkAsync(ctx, graph.ConsumerId, link => link.Role = WorkspaceRepositoryRole.Workspace);
 
-        string? overlayKey = null;
         await using var scope = ctx.CreateScope();
         var runner = scope.ServiceProvider.GetRequiredService<IWorkspaceOperationRunner>();
-        runner.Changed += () =>
-        {
-            var key = runner.GetRunning(ctx.WorkspaceId)?.OverlayKey;
-            if (key is not null)
-                overlayKey = key;
-        };
+        // Read while the work runs, when the operation is certainly registered. The runner's Changed event is no
+        // such point: short work can end before the first notification is raised.
+        string? overlayKey = null;
+        manifest.OnDefinitionWrite = () => overlayKey = runner.GetRunning(ctx.WorkspaceId)?.OverlayKey;
 
         var result = await scope.ServiceProvider.GetRequiredService<IWorkspaceReferenceOperations>()
             .SetDefaultAsync(ctx.WorkspaceId, true);
@@ -745,6 +744,9 @@ public sealed class WorkspaceReferenceOperationsTests
         /// <summary>When set, writing the definition from the database fails with this message.</summary>
         public string? DefinitionFailure { get; init; }
 
+        /// <summary>Runs during a definition write, so inside the locked operation that asked for it.</summary>
+        public Action? OnDefinitionWrite { get; set; }
+
         public IReadOnlyList<WorkspaceRepositoryReferenceRevisionChange> Revisions
         {
             get
@@ -770,6 +772,7 @@ public sealed class WorkspaceReferenceOperationsTests
         {
             lock (_log)
                 _log.Add("definition");
+            OnDefinitionWrite?.Invoke();
             return Task.FromResult(DefinitionFailure is null ? OperationResult.Ok() : OperationResult.Fail(DefinitionFailure));
         }
 
