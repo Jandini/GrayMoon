@@ -234,12 +234,27 @@ A git process costs about 1.5 s on that machine, and both operations started far
 - `RemoveWorktreeAsync` lists the worktrees again only after a non-zero exit. `DeleteBranchAsync` reads "exists" and "is checked out here" with one `for-each-ref`. Test: `FeatureWorktreeGitProcessCountTests`.
 - `InspectWorktreeAsync` reads HEAD, branch, upstream, counts and changes from one `git status --porcelain=v2 --branch` and reuses them for the Feature branch when the worktree is on it: 5 processes instead of 13 to 14. It also reports an unfinished merge, rebase or cherry-pick. Test: `FeatureWorktreeGitProcessCountTests`.
 - The Remove analysis no longer sends `GetGitChangeStatus` per repository; the changes come from the inspection. Test: `RemoveFeatureWorkspaceRefreshTests`.
-- The Workspace refresh starts when the last queued removal of the Workspace has ended, not when the user confirms Remove. Its "Refreshing workspace state..." overlay therefore appears at the end of the removal. Test: `WorkspaceFeatureReconcilerTests`.
+- The Workspace refresh and the removal no longer run beside each other. First built as "refresh when the last removal has ended"; changed after round 5 to "refresh first, then remove" (see Round 5). Test: `WorkspaceFeatureReconcilerTests`.
 - `GetGitVersionAtBranchPoint` runs one git process before GitVersion instead of two.
 - Create Feature holds the deferred Checkout syncs (`HoldWorktreeHookSyncs`) until its version step has ended. Tests: `WorktreeCreateHookDeferralTests`, `CreateFeatureHookSyncHoldTests`.
 
 Not built: taking the parent version of a new Feature from the version the Workspace already stores, which would skip the GitVersion runs of the version step. Both GitVersion invocations returned the same version on three branches of the GrayMoon repository (GitVersion 5.12), which is one configuration. The stored Workspace version is also only as fresh as its last sync: a tag that arrived since would be missed, and this version is the one dependents are pinned to.
 
-### Round 5: what to read
+## Round 5 (2026-11-26, 10:35 to 12:09)
+
+| Point | Round 4 | Round 5 |
+|---|---|---|
+| Feature Remove | 93 s alone, 160 s beside the refresh | 53.3, 54.5, 59.3 and 49.8 s (the middle two beside a Create Feature) |
+| `InspectWorktree` during "Checking" | 16 to 26 s | 5.4 to 7.3 s |
+| `Stage=EffectiveVersions` | 53 to 59 s | 21.0, 22.4, 22.0 and 19.8 s |
+| `Stage=SourceWorktrees` | 62 to 66 s | 62.5 to 67.4 s (not changed) |
+| `Stage=HeadSnapshot` | 12 to 16 s | 15.6 s alone; 53.8 s on the first Create after start; 45.6 and 36.6 s beside a removal |
+| Feature Create in total | 147 to 151 s | 105 s alone; 129 to 147 s otherwise |
+
+"Releasing 40 Checkout sync(s)" came 0.5 s after the version step in all four creates. The `RepositoryBranches` unique error occurred once (10:36:45, during the checkout of the first Create); the Create succeeded.
+
+Tester: with the refresh at the end of the removal, a Feature could be created before the Workspace was refreshed (11:31:22 and 12:03:17, 13 and 24 s after Remove was confirmed). Built after that: the queue runs the refresh to its end first and removes the Feature afterwards, so the Workspace is busy with "Refreshing workspace state..." right after the confirm and the removal starts when it has ended.
+
+### Round 5: what to read (kept for reference)
 
 Feature Remove `DurationMs` against 93 s alone and 160 s beside the refresh; no `InspectWorktree` between "Feature Remove started" and "Feature Remove finished"; "Refreshing Workspace repository status" only after "Feature Remove finished". `InspectWorktree` duration in the Worker log during "Checking" against 16 to 26 s. `Stage=EffectiveVersions` against 53 to 59 s; "Releasing n Checkout sync(s)" after that stage, not before.

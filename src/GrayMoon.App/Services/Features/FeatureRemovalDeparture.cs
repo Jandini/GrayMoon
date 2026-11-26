@@ -5,8 +5,8 @@ namespace GrayMoon.App.Services.Features;
 
 /// <summary>
 /// Confirm-time leave for Remove Feature. Queues the background removal, then persists and returns the Workspace
-/// view. The Workspace status refresh is not started here: the removal queue starts it when the removal has ended,
-/// so the two do not compete for git processes. Feature lifecycle is not consulted.
+/// view. The Workspace status refresh is not started here: the removal queue runs it first and removes the Feature
+/// when it has ended, so the two do not compete for git processes. Feature lifecycle is not consulted.
 /// </summary>
 public sealed class FeatureRemovalDeparture(
     IFeatureRemovalQueue queue,

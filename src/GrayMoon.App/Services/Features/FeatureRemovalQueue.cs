@@ -186,6 +186,7 @@ public sealed class FeatureRemovalQueue(
         OperationResult result;
         try
         {
+            await RefreshWorkspaceFirstAsync(removal, stoppingToken);
             await using var scope = scopeFactory.CreateAsyncScope();
             var operations = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
             result = await operations.RemoveFeatureAsync(
@@ -205,7 +206,6 @@ public sealed class FeatureRemovalQueue(
         }
 
         _pending.TryRemove(removal.FeatureContextId.Value, out _);
-        await StartWorkspaceRefreshAsync(removal);
 
         // A folder the Worker had to leave behind (something still has it open) is retried every 30 minutes until it is gone.
         if (result.Success && !string.IsNullOrEmpty(result.RemoveFeaturePendingDeletionFolder))
@@ -215,26 +215,29 @@ public sealed class FeatureRemovalQueue(
     }
 
     /// <summary>
-    /// Starts the Workspace status refresh once no other removal of the same Workspace is queued or running, whether
-    /// this one succeeded or not: branches and worktrees may have changed either way. Not waited for. A failure to
-    /// start it is logged and does not change the outcome of the removal.
+    /// Runs the Workspace status refresh to its end before anything of the Feature is removed. The user has just
+    /// left the Feature for the Workspace and may create the next Feature right away, so the Workspace state must
+    /// be current first; and the refresh must not run beside the removal, because both start git processes for
+    /// every repository. Removals of one Workspace that arrive together share one refresh. A refresh that fails
+    /// is logged and the removal goes on: the user confirmed it, and a later Sync brings the status up to date.
     /// </summary>
-    private async Task StartWorkspaceRefreshAsync(QueuedRemoval removal)
+    private async Task RefreshWorkspaceFirstAsync(QueuedRemoval removal, CancellationToken stoppingToken)
     {
-        if (_pending.Values.Contains(removal.WorkspaceId))
-            return;
-
         try
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
-            var specialId = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(removal.WorkspaceId);
-            checkoutRefresh.Start(removal.WorkspaceId, specialId);
+            WorkspaceFeatureContextId specialId;
+            await using (var scope = scopeFactory.CreateAsyncScope())
+            {
+                var resolver = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureContextResolver>();
+                specialId = await resolver.GetOrCreateSpecialWorkspaceContextIdAsync(removal.WorkspaceId, stoppingToken);
+            }
+
+            await checkoutRefresh.RunAsync(removal.WorkspaceId, specialId, stoppingToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(
-                ex, "Workspace status refresh could not be started after the Feature removal. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
+                ex, "Workspace status refresh before the Feature removal failed; removing anyway. WorkspaceId={WorkspaceId} FeatureName={FeatureName}",
                 removal.WorkspaceId, removal.FeatureName);
         }
     }
