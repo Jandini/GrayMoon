@@ -25,6 +25,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<InternalsVisibleTo Include="GrayMoon.Worker.Tests" />
+		<InternalsVisibleTo Include="graymoon-libgit2-aot-probe" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="appsettings.json">

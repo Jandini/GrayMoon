@@ -1,0 +1,258 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 7fae846..4f72828 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -116,3 +116,20 @@ jobs:
+             test_command="dotnet test LibGit2Sharp.sln --configuration Release -p:TargetFrameworks=${{ matrix.tfm }} --logger "GitHubActions" -p:ExtraDefine=LEAKS_IDENTIFYING"
+             docker run -t --rm --platform linux/${{ matrix.arch }} -v "$PWD:/home/gittools/app" -w "/home/gittools/app" -e OPENSSL_ENABLE_SHA1_SIGNATURES=1 gittools/build-images:${{ matrix.distro }}-sdk-${{ matrix.sdk }} sh -c "$git_command && $test_command"
+ 
++  publish:
++    name: Publish to nuget.org
++    if: startsWith(github.ref, 'refs/tags/')
++    needs: [ build, test, test-linux ]
++    runs-on: ubuntu-22.04
++    steps:
++      - name: Install .NET SDK
++        uses: actions/setup-dotnet@v4.0.0
++        with:
++          dotnet-version: 9.0.x
++      - name: Download packages
++        uses: actions/download-artifact@v4.1.4
++        with:
++          name: NuGet packages
++          path: packages
++      - name: Push
++        run: dotnet nuget push "packages/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}"
+diff --git a/LibGit2Sharp/Core/NativeMethods.cs b/LibGit2Sharp/Core/NativeMethods.cs
+index cbb850b..2294063 100644
+--- a/LibGit2Sharp/Core/NativeMethods.cs
++++ b/LibGit2Sharp/Core/NativeMethods.cs
+@@ -220,7 +220,7 @@ internal static extern int git_blob_create_from_stream_commit(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_blob_filtered_content(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_object* blob,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string as_path,
+             [MarshalAs(UnmanagedType.Bool)] bool check_for_binary_data);
+@@ -274,7 +274,7 @@ internal static extern int git_branch_next(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_branch_remote_name(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_repository* repo,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string canonical_branch_name);
+ 
+@@ -353,12 +353,12 @@ internal delegate int git_remote_rename_problem_cb(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_branch_upstream_name(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_repository* repo,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string referenceName);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void git_buf_dispose(GitBuf buf);
++        internal static extern void git_buf_dispose([In, Out] GitBuf buf);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_checkout_tree(
+@@ -400,7 +400,7 @@ internal static extern unsafe int git_commit_create_from_ids(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_commit_create_buffer(
+-            GitBuf res,
++            [In, Out] GitBuf res,
+             git_repository* repo,
+             git_signature* author,
+             git_signature* committer,
+@@ -441,8 +441,8 @@ internal static extern unsafe int git_commit_create_with_signature(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_commit_extract_signature(
+-            GitBuf signature,
+-            GitBuf signed_data,
++            [In, Out] GitBuf signature,
++            [In, Out] GitBuf signed_data,
+             git_repository* repo,
+             ref GitOid commit_id,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string field);
+@@ -469,16 +469,16 @@ internal static extern unsafe int git_config_set_multivar(
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string value);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int git_config_find_global(GitBuf global_config_path);
++        internal static extern int git_config_find_global([In, Out] GitBuf global_config_path);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int git_config_find_system(GitBuf system_config_path);
++        internal static extern int git_config_find_system([In, Out] GitBuf system_config_path);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int git_config_find_xdg(GitBuf xdg_config_path);
++        internal static extern int git_config_find_xdg([In, Out] GitBuf xdg_config_path);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int git_config_find_programdata(GitBuf programdata_config_path);
++        internal static extern int git_config_find_programdata([In, Out] GitBuf programdata_config_path);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe void git_config_free(git_config* cfg);
+@@ -609,7 +609,7 @@ internal static extern unsafe int git_describe_commit(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_describe_format(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_describe_result* describe,
+             ref GitDescribeFormatOptions options);
+ 
+@@ -737,7 +737,7 @@ internal static extern int git_filter_unregister(
+ 
+         // git_libgit2_opts(GIT_OPT_GET_SEARCH_PATH, int level, git_buf *buf)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int git_libgit2_opts(int option, uint level, GitBuf buf);
++        internal static extern int git_libgit2_opts(int option, uint level, [In, Out] GitBuf buf);
+ 
+         // git_libgit2_opts(GIT_OPT_SET_SEARCH_PATH, int level, const char *path)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+@@ -756,7 +756,7 @@ internal static extern int git_libgit2_opts(int option,
+ 
+         // git_libgit2_opts(GIT_OPT_GET_USER_AGENT, git_buf *buf)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int git_libgit2_opts(int option, GitBuf buf);
++        internal static extern int git_libgit2_opts(int option, [In, Out] GitBuf buf);
+ 
+         // git_libgit2_opts(GIT_OPT_SET_EXTENSIONS, const char **extensions, size_t len)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+@@ -778,7 +778,7 @@ internal static extern int git_libgit2_opts(int option,
+ 
+         // git_libgit2_opts(GIT_OPT_GET_SEARCH_PATH, int level, git_buf *buf)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl, EntryPoint = "git_libgit2_opts")]
+-        internal static extern int git_libgit2_opts_osxarm64(int option, IntPtr nop2, IntPtr nop3, IntPtr nop4, IntPtr nop5, IntPtr nop6, IntPtr nop7, IntPtr nop8, uint level, GitBuf buf);
++        internal static extern int git_libgit2_opts_osxarm64(int option, IntPtr nop2, IntPtr nop3, IntPtr nop4, IntPtr nop5, IntPtr nop6, IntPtr nop7, IntPtr nop8, uint level, [In, Out] GitBuf buf);
+ 
+         // git_libgit2_opts(GIT_OPT_SET_SEARCH_PATH, int level, const char *path)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl, EntryPoint = "git_libgit2_opts")]
+@@ -797,7 +797,7 @@ internal static extern int git_libgit2_opts_osxarm64(int option, IntPtr nop2, In
+ 
+         // git_libgit2_opts(GIT_OPT_GET_USER_AGENT, git_buf *buf)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl, EntryPoint = "git_libgit2_opts")]
+-        internal static extern int git_libgit2_opts_osxarm64(int option, IntPtr nop2, IntPtr nop3, IntPtr nop4, IntPtr nop5, IntPtr nop6, IntPtr nop7, IntPtr nop8, GitBuf buf);
++        internal static extern int git_libgit2_opts_osxarm64(int option, IntPtr nop2, IntPtr nop3, IntPtr nop4, IntPtr nop5, IntPtr nop6, IntPtr nop7, IntPtr nop8, [In, Out] GitBuf buf);
+ 
+         // git_libgit2_opts(GIT_OPT_SET_EXTENSIONS, const char **extensions, size_t len)
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl, EntryPoint = "git_libgit2_opts")]
+@@ -1010,7 +1010,7 @@ internal static extern unsafe int git_merge_analysis(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern int git_message_prettify(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string message,
+             [MarshalAs(UnmanagedType.Bool)] bool strip_comments,
+             sbyte comment_char);
+@@ -1053,7 +1053,7 @@ internal static extern unsafe int git_note_remove(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_note_default_ref(
+-            GitBuf notes_ref,
++            [In, Out] GitBuf notes_ref,
+             git_repository* repo);
+ 
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+@@ -1127,7 +1127,7 @@ internal static extern unsafe int git_object_peel(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_object_short_id(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_object* obj);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+@@ -1328,14 +1328,14 @@ internal static extern unsafe UIntPtr git_reflog_entrycount
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern int git_refspec_transform(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             IntPtr refspec,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string name);
+ 
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern int git_refspec_rtransform(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             IntPtr refspec,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string name);
+ 
+@@ -1522,7 +1522,7 @@ IntPtr data
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern int git_repository_discover(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictFilePathMarshaler))] FilePath start_path,
+             [MarshalAs(UnmanagedType.Bool)] bool across_fs,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictFilePathMarshaler))] FilePath ceiling_dirs);
+@@ -1587,7 +1587,7 @@ internal static extern unsafe int git_repository_mergehead_foreach(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_repository_message(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_repository* repository);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+@@ -1810,7 +1810,7 @@ internal static extern unsafe int git_submodule_lookup(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_submodule_resolve_url(
+-            GitBuf buf,
++            [In, Out] GitBuf buf,
+             git_repository* repo,
+             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalCookie = UniqueId.UniqueIdentifier, MarshalTypeRef = typeof(StrictUtf8Marshaler))] string url);
+ 
+@@ -2092,7 +2092,7 @@ internal static extern unsafe int git_repository_open_from_worktree(
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern unsafe int git_worktree_is_locked(
+-            GitBuf reason,
++            [In, Out] GitBuf reason,
+             git_worktree* worktree);
+ 
+         [DllImport(libgit2, CallingConvention = CallingConvention.Cdecl)]
+diff --git a/LibGit2Sharp/LibGit2Sharp.csproj b/LibGit2Sharp/LibGit2Sharp.csproj
+index 1e88448..757d0e9 100644
+--- a/LibGit2Sharp/LibGit2Sharp.csproj
++++ b/LibGit2Sharp/LibGit2Sharp.csproj
+@@ -2,13 +2,14 @@
+ 
+   <PropertyGroup>
+     <TargetFrameworks>net472;net8.0</TargetFrameworks>
++    <PackageId>GrayMoon.LibGit2Sharp</PackageId>
+     <LangVersion>12.0</LangVersion>
+     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+-    <Description>LibGit2Sharp brings all the might and speed of libgit2, a native Git implementation, to the managed world of .NET</Description>
++    <Description>Fork of LibGit2Sharp that also works when compiled as Native AOT (buffer parameters are marshalled back from libgit2). LibGit2Sharp brings all the might and speed of libgit2, a native Git implementation, to the managed world of .NET</Description>
+     <Company>LibGit2Sharp contributors</Company>
+     <Copyright>Copyright © LibGit2Sharp contributors</Copyright>
+     <PackageTags>libgit2 git</PackageTags>
+-    <PackageProjectUrl>https://github.com/libgit2/libgit2sharp/</PackageProjectUrl>
++    <PackageProjectUrl>https://github.com/Jandini/libgit2sharp/</PackageProjectUrl>
+     <Authors>LibGit2Sharp contributors</Authors>
+     <PublishRepositoryUrl>true</PublishRepositoryUrl>
+     <EmbedUntrackedSources>true</EmbedUntrackedSources>
+@@ -48,7 +49,7 @@
+ 
+   <Target Name="SetNuspecProperties" BeforeTargets="GenerateNuspec">
+     <PropertyGroup>
+-      <PackageReleaseNotes>https://github.com/libgit2/libgit2sharp/blob/$(SourceRevisionId)/CHANGES.md</PackageReleaseNotes>
++      <PackageReleaseNotes>https://github.com/Jandini/libgit2sharp/blob/$(SourceRevisionId)/CHANGES.md</PackageReleaseNotes>
+     </PropertyGroup>
+   </Target>
+ 

@@ -21,8 +21,9 @@ public sealed class WorkerInstallProbe : IWorkerInstallProbe
     {
         try
         {
-            // Reading the version runs the type initializer of LibGit2Sharp's native methods, which loads git2-*.dll.
-            _ = LibGit2Sharp.GlobalSettings.Version;
+            // Features is answered by the native library, so reading it loads git2-*.dll. The version alone is not
+            // enough: it comes from assembly attributes and never touches the native library.
+            _ = LibGit2Sharp.GlobalSettings.Version.Features;
             return null;
         }
         catch (Exception ex)
