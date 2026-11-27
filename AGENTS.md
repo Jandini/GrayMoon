@@ -480,6 +480,33 @@ runs on the thread pool while the dispatcher may be rendering the page.
    cancel cover them. [PushRepositoryCommand, UndoPushCommand]
 8. A sweep that deletes takes the same lock as the code that adds.
    [FeatureFolderCleaner]
+9. **The Worker is published as a Native AOT exe, so nothing in it may need
+   reflection at run time.** Such code compiles, passes the unit tests (they
+   run on the normal runtime) and then fails or does nothing in the published
+   exe. The trim and AOT analyzer warnings are build errors in the Worker;
+   never suppress one. In particular:
+   - JSON goes through `WorkerJsonContext` (`Services/WorkerJsonContext.cs`):
+     pass `WorkerJsonContext.Default.<Type>` to `JsonSerializer` and
+     `ReadFromJsonAsync`, never a type argument with options. A new command
+     adds its request and response type there, and so does any new type sent
+     over the hub. `WorkerJsonContextTests` fails when one is missing or when
+     the generated JSON differs from what reflection would write.
+   - Never read a property by name (`GetType().GetProperty`). A fact the
+     Worker needs from any request or response is an interface in
+     `Jobs/CommandContracts.cs` (`ICommandOutcome`, `IWorkspaceScopedRequest`,
+     `IRepositoryNamedRequest`, `IWorkspaceNamedRequest`); a type that has the
+     property implements the interface (`CommandContractConventionTests`).
+   - An options class bound from configuration has `{ get; set; }` properties.
+     The generated binder skips an `init` property without an error, and the
+     setting then has no effect (`WorkerOptionsBindingTests`).
+   - Regular expressions are `[GeneratedRegex]` partial properties, not
+     `RegexOptions.Compiled`, which the AOT exe can only interpret.
+   - No `{@Value}` in a log template: Serilog reads the object by reflection.
+     Log the JSON text from `WorkerJsonOptions.SerializeResponse` or the
+     single values.
+   - `dev/Test-WorkerAot.ps1` publishes the exe and runs
+     `AotWorkerSmokeTests` against it; run it after a change to commands, the
+     hub or startup.
 
 ### Trust boundaries (App)
 

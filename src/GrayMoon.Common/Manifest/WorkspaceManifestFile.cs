@@ -18,18 +18,6 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
     /// </summary>
     public const int MaxSchemaVersion = 2;
 
-    private static readonly JsonSerializerOptions WriteOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
-    private static readonly JsonSerializerOptions ReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     string IWorkspaceManifestFile.FileName => FileName;
 
     public int CurrentSchemaVersion => MaxSchemaVersion;
@@ -55,7 +43,7 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 : null
         };
 
-        var json = JsonSerializer.Serialize(sorted, WriteOptions).Replace("\r\n", "\n");
+        var json = JsonSerializer.Serialize(sorted, WorkspaceManifestJsonContext.Default.WorkspaceManifest).Replace("\r\n", "\n");
         return json + "\n";
     }
 
@@ -90,7 +78,7 @@ public sealed class WorkspaceManifestFile : IWorkspaceManifestFile
                 return false;
             }
 
-            var parsed = JsonSerializer.Deserialize<WorkspaceManifest>(content, ReadOptions);
+            var parsed = JsonSerializer.Deserialize(content, WorkspaceManifestJsonContext.Default.WorkspaceManifest);
             if (parsed is null)
             {
                 error = "Workspace definition is empty";

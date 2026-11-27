@@ -59,3 +59,52 @@ jobs:
           name: test-results-${{ github.run_number }}
           path: "**/*.trx"
           retention-days: 7
+
+  # The Worker is published as a Native AOT exe. The unit tests above run on the normal runtime and cannot show that
+  # the exe works, so this job publishes it and tests it: the first script compares the in-process Git reads
+  # (GrayMoon.LibGit2Sharp) between the two runtimes, the second starts the exe against a hub and sends commands.
+  # Native AOT cannot be compiled for another operating system, so this needs a Windows runner (MSVC linker).
+  worker-aot:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: LibGit2Sharp gives the same answers as Native AOT
+        shell: pwsh
+        run: ./dev/Test-LibGit2SharpAot.ps1 -WorkDir "${{ runner.temp }}\libgit2-aot"
+
+      - name: The Native AOT Worker connects and answers commands
+        shell: pwsh
+        run: ./dev/Test-WorkerAot.ps1 -WorkDir "${{ runner.temp }}\worker-aot"
+
+  # The same smoke test for the Linux exe, which the Docker image serves. The Worker writes its log under
+  # /usr/share/GrayMoon (it normally runs as a systemd service), so the runner user is given that folder.
+  worker-aot-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install the native linker and make the log folder writable
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+          sudo mkdir -p /usr/share/GrayMoon
+          sudo chown -R "$USER" /usr/share/GrayMoon
+
+      - name: The Native AOT Worker connects and answers commands
+        shell: pwsh
+        run: ./dev/Test-WorkerAot.ps1 -WorkDir "${{ runner.temp }}/worker-aot"

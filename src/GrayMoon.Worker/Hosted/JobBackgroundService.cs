@@ -40,13 +40,6 @@ public abstract class JobBackgroundService(
 
     private readonly record struct PendingStreamLine(WorkerCommandStreamKind Kind, string Text);
 
-    /// <summary>Matches hub JSON style enough for a useful byte-size estimate of the <see cref="WorkerCommandResponse"/> argument.</summary>
-    private static readonly JsonSerializerOptions ResponsePayloadSizeJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
-    };
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("JobBackgroundService starting with {MaxConcurrent} workers", _maxConcurrent);
@@ -125,9 +118,9 @@ public abstract class JobBackgroundService(
                     workerId, envelope.Kind, envelope.CommandJob?.RequestId, envelope.CommandJob?.Command);
                 if (envelope.CommandJob != null)
                 {
-                    var errorBody = new { Success = false, Error = ex.Message };
                     logger.LogInformation("ResponseCommand {RequestId} failed: {Error}", envelope.CommandJob.RequestId, ex.Message);
-                    logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", envelope.CommandJob.RequestId, errorBody);
+                    if (logger.IsEnabled(LogLevel.Trace))
+                        logger.LogTrace("ResponseCommand {RequestId} response content: {ResponseBody}", envelope.CommandJob.RequestId, WorkerJsonOptions.SerializeResponse(new WorkerCommandResponse(false, null, ex.Message)));
                     try
                     {
                         await SendResponseAsync(envelope.CommandJob.RequestId, envelope.CommandJob.Command, new WorkerCommandResponse(false, null, ex.Message), stoppingToken);
@@ -198,8 +191,10 @@ public abstract class JobBackgroundService(
         sw.Stop();
         var (success, error) = GetCommandSuccessAndError(result);
         logger.LogInformation("ResponseCommand {RequestId} completed ({Command}) in {ElapsedMs}ms (queued {QueueWaitMs}ms)", job.RequestId, job.Command, sw.ElapsedMilliseconds, queueWaitMs);
-        logger.LogTrace("ResponseCommand {RequestId} response content: {@ResponseBody}", job.RequestId, result);
-        await SendResponseAsync(job.RequestId, job.Command, new WorkerCommandResponse(success, result, error), ct);
+        var response = new WorkerCommandResponse(success, result, error);
+        if (logger.IsEnabled(LogLevel.Trace))
+            logger.LogTrace("ResponseCommand {RequestId} response content: {ResponseBody}", job.RequestId, WorkerJsonOptions.SerializeResponse(response));
+        await SendResponseAsync(job.RequestId, job.Command, response, ct);
     }
 
     private async Task SendCommandOutputLoopAsync(
@@ -246,20 +241,13 @@ public abstract class JobBackgroundService(
         return string.Concat(text.AsSpan(0, MaxCommandStreamLineLength), " …");
     }
 
-    /// <summary>If result has a Success property that is false, return (false, ErrorMessage); otherwise (true, null).</summary>
-    private static (bool success, string? error) GetCommandSuccessAndError(object? result)
+    /// <summary>A response that reports failure (<see cref="ICommandOutcome"/>) gives (false, its message); every other result is a success.</summary>
+    internal static (bool success, string? error) GetCommandSuccessAndError(object? result)
     {
-        if (result == null) return (true, null);
-        var type = result.GetType();
-        var successProp = type.GetProperty("Success", typeof(bool));
-        if (successProp?.GetValue(result) is true) return (true, null);
-        if (successProp?.GetValue(result) is false)
-        {
-            var errorProp = type.GetProperty("ErrorMessage", typeof(string));
-            var msg = errorProp?.GetValue(result) as string;
-            return (false, !string.IsNullOrWhiteSpace(msg) ? msg : "Command failed.");
-        }
-        return (true, null);
+        if (result is not ICommandOutcome { Success: false } outcome)
+            return (true, null);
+
+        return (false, !string.IsNullOrWhiteSpace(outcome.ErrorMessage) ? outcome.ErrorMessage : "Command failed.");
     }
 
     private async Task SendResponseAsync(string requestId, string command, WorkerCommandResponse response, CancellationToken ct)
@@ -293,7 +281,7 @@ public abstract class JobBackgroundService(
     {
         try
         {
-            var json = JsonSerializer.Serialize(response, ResponsePayloadSizeJsonOptions);
+            var json = WorkerJsonOptions.SerializeResponse(response);
             var utf8Bytes = Encoding.UTF8.GetByteCount(json);
 
             if (utf8Bytes >= 32 * 1024)

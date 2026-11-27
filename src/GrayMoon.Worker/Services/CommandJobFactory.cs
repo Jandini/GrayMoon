@@ -35,132 +35,131 @@ public sealed class CommandJobFactory
         }
 
         var json = args.Value.GetRawText();
-        var options = WorkerJsonOptions.SerializerOptions;
 
         return command switch
         {
-            "SyncRepository" => JsonSerializer.Deserialize<SyncRepositoryRequest>(json, options)
+            "SyncRepository" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.SyncRepositoryRequest)
                 ?? throw new ArgumentException("Invalid SyncRepository args"),
-            "RefreshRepositoryVersion" => JsonSerializer.Deserialize<RefreshRepositoryVersionRequest>(json, options)
+            "RefreshRepositoryVersion" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.RefreshRepositoryVersionRequest)
                 ?? throw new ArgumentException("Invalid RefreshRepositoryVersion args"),
-            "GetCommitCounts" => JsonSerializer.Deserialize<GetCommitCountsRequest>(json, options)
+            "GetCommitCounts" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetCommitCountsRequest)
                 ?? throw new ArgumentException("Invalid GetCommitCounts args"),
-            "EnsureWorkspace" => JsonSerializer.Deserialize<EnsureWorkspaceRequest>(json, options)
+            "EnsureWorkspace" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.EnsureWorkspaceRequest)
                 ?? throw new ArgumentException("Invalid EnsureWorkspace args"),
-            "GetWorkspaceRepositories" => JsonSerializer.Deserialize<GetWorkspaceRepositoriesRequest>(json, options)
+            "GetWorkspaceRepositories" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetWorkspaceRepositoriesRequest)
                 ?? throw new ArgumentException("Invalid GetWorkspaceRepositories args"),
-            "GetRepositoryVersion" => JsonSerializer.Deserialize<GetRepositoryVersionRequest>(json, options)
+            "GetRepositoryVersion" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetRepositoryVersionRequest)
                 ?? throw new ArgumentException("Invalid GetRepositoryVersion args"),
-            WorkerHubMethods.GetGitVersionAtBranchPoint => JsonSerializer.Deserialize<GetGitVersionAtBranchPointRequest>(json, options)
+            WorkerHubMethods.GetGitVersionAtBranchPoint => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetGitVersionAtBranchPointRequest)
                 ?? throw new ArgumentException("Invalid GetGitVersionAtBranchPoint args"),
-            "GetGitVersionAtDefaultTip" => JsonSerializer.Deserialize<GetGitVersionAtDefaultTipRequest>(json, options)
+            "GetGitVersionAtDefaultTip" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetGitVersionAtDefaultTipRequest)
                 ?? throw new ArgumentException("Invalid GetGitVersionAtDefaultTip args"),
-            "GetWorkspaceExists" => JsonSerializer.Deserialize<GetWorkspaceExistsRequest>(json, options)
+            "GetWorkspaceExists" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetWorkspaceExistsRequest)
                 ?? throw new ArgumentException("Invalid GetWorkspaceExists args"),
-            "GetHostInfo" => JsonSerializer.Deserialize<GetHostInfoRequest>(json, options) ?? new GetHostInfoRequest(),
-            "SyncRepositoryDependencies" => JsonSerializer.Deserialize<SyncRepositoryDependenciesRequest>(json, options)
+            "GetHostInfo" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetHostInfoRequest) ?? new GetHostInfoRequest(),
+            "SyncRepositoryDependencies" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.SyncRepositoryDependenciesRequest)
                 ?? throw new ArgumentException("Invalid SyncRepositoryDependencies args"),
-            "RefreshRepositoryProjects" => JsonSerializer.Deserialize<RefreshRepositoryProjectsRequest>(json, options)
+            "RefreshRepositoryProjects" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.RefreshRepositoryProjectsRequest)
                 ?? throw new ArgumentException("Invalid RefreshRepositoryProjects args"),
-            "CommitSyncRepository" => JsonSerializer.Deserialize<CommitSyncRepositoryRequest>(json, options)
+            "CommitSyncRepository" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CommitSyncRepositoryRequest)
                 ?? throw new ArgumentException("Invalid CommitSyncRepository args"),
-            "GetBranches" => JsonSerializer.Deserialize<GetBranchesRequest>(json, options)
+            "GetBranches" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetBranchesRequest)
                 ?? throw new ArgumentException("Invalid GetBranches args"),
-            "CheckoutBranch" => JsonSerializer.Deserialize<CheckoutBranchRequest>(json, options)
+            "CheckoutBranch" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CheckoutBranchRequest)
                 ?? throw new ArgumentException("Invalid CheckoutBranch args"),
-            "CheckoutTag" => JsonSerializer.Deserialize<CheckoutTagRequest>(json, options)
+            "CheckoutTag" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CheckoutTagRequest)
                 ?? throw new ArgumentException("Invalid CheckoutTag args"),
-            "ReturnToDefaultBranch" => JsonSerializer.Deserialize<ReturnToDefaultBranchRequest>(json, options)
+            "ReturnToDefaultBranch" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.ReturnToDefaultBranchRequest)
                 ?? throw new ArgumentException("Invalid ReturnToDefaultBranch args"),
-            "RefreshBranches" => JsonSerializer.Deserialize<RefreshBranchesRequest>(json, options)
+            "RefreshBranches" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.RefreshBranchesRequest)
                 ?? throw new ArgumentException("Invalid RefreshBranches args"),
-            "CreateBranch" => JsonSerializer.Deserialize<CreateBranchRequest>(json, options)
+            "CreateBranch" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CreateBranchRequest)
                 ?? throw new ArgumentException("Invalid CreateBranch args"),
-            "SetUpstreamBranch" => JsonSerializer.Deserialize<SetUpstreamBranchRequest>(json, options)
+            "SetUpstreamBranch" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.SetUpstreamBranchRequest)
                 ?? throw new ArgumentException("Invalid SetUpstreamBranch args"),
-            "DeleteBranch" => JsonSerializer.Deserialize<DeleteBranchRequest>(json, options)
+            "DeleteBranch" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.DeleteBranchRequest)
                 ?? throw new ArgumentException("Invalid DeleteBranch args"),
-            "StageAndCommit" => JsonSerializer.Deserialize<StageAndCommitRequest>(json, options)
+            "StageAndCommit" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.StageAndCommitRequest)
                 ?? throw new ArgumentException("Invalid StageAndCommit args"),
-            "PushRepository" => JsonSerializer.Deserialize<PushRepositoryRequest>(json, options)
+            "PushRepository" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.PushRepositoryRequest)
                 ?? throw new ArgumentException("Invalid PushRepository args"),
-            "SearchFiles" => JsonSerializer.Deserialize<SearchFilesRequest>(json, options)
+            "SearchFiles" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.SearchFilesRequest)
                 ?? throw new ArgumentException("Invalid SearchFiles args"),
-            "UpdateFileVersions" => JsonSerializer.Deserialize<UpdateFileVersionsRequest>(json, options)
+            "UpdateFileVersions" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.UpdateFileVersionsRequest)
                 ?? throw new ArgumentException("Invalid UpdateFileVersions args"),
-            "GetFileContents" => JsonSerializer.Deserialize<GetFileContentsRequest>(json, options)
+            "GetFileContents" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetFileContentsRequest)
                 ?? throw new ArgumentException("Invalid GetFileContents args"),
-            "ValidatePath" => JsonSerializer.Deserialize<ValidatePathRequest>(json, options)
+            "ValidatePath" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.ValidatePathRequest)
                 ?? throw new ArgumentException("Invalid ValidatePath args"),
-            "DotnetRestore" => JsonSerializer.Deserialize<DotnetRestoreRequest>(json, options)
+            "DotnetRestore" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.DotnetRestoreRequest)
                 ?? throw new ArgumentException("Invalid DotnetRestore args"),
-            "UndoPush" => JsonSerializer.Deserialize<UndoPushRequest>(json, options)
+            "UndoPush" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.UndoPushRequest)
                 ?? throw new ArgumentException("Invalid UndoPush args"),
-            WorkerHubMethods.SelfUpdate => JsonSerializer.Deserialize<SelfUpdateRequest>(json, options)
+            WorkerHubMethods.SelfUpdate => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.SelfUpdateRequest)
                 ?? throw new ArgumentException("Invalid SelfUpdate args"),
-            WorkerHubMethods.CheckFileVersions => JsonSerializer.Deserialize<CheckFileVersionsRequest>(json, options)
+            WorkerHubMethods.CheckFileVersions => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CheckFileVersionsRequest)
                 ?? throw new ArgumentException("Invalid CheckFileVersions args"),
-            WorkerHubMethods.GetHeadCommits => JsonSerializer.Deserialize<GetHeadCommitsRequest>(json, options)
+            WorkerHubMethods.GetHeadCommits => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetHeadCommitsRequest)
                 ?? throw new ArgumentException("Invalid GetHeadCommits args"),
-            WorkerHubMethods.ResolveGeneratedPackageReferences => JsonSerializer.Deserialize<ResolveGeneratedPackageReferencesRequest>(json, options)
+            WorkerHubMethods.ResolveGeneratedPackageReferences => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.ResolveGeneratedPackageReferencesRequest)
                 ?? throw new ArgumentException("Invalid ResolveGeneratedPackageReferences args"),
-            "UpdateBranchFromDefault" => JsonSerializer.Deserialize<UpdateBranchFromDefaultRequest>(json, options)
+            "UpdateBranchFromDefault" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.UpdateBranchFromDefaultRequest)
                 ?? throw new ArgumentException("Invalid UpdateBranchFromDefault args"),
-            "FetchCommits" => JsonSerializer.Deserialize<FetchCommitsRequest>(json, options)
+            "FetchCommits" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.FetchCommitsRequest)
                 ?? throw new ArgumentException("Invalid FetchCommits args"),
-"EnsureGitChangesWatchers" => JsonSerializer.Deserialize<EnsureGitChangesWatchersRequest>(json, options)
+"EnsureGitChangesWatchers" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.EnsureGitChangesWatchersRequest)
     ?? throw new ArgumentException("Invalid EnsureGitChangesWatchers args"),
-            "GetGitChangeStatus" => JsonSerializer.Deserialize<GetGitChangeStatusRequest>(json, options)
+            "GetGitChangeStatus" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetGitChangeStatusRequest)
                 ?? throw new ArgumentException("Invalid GetGitChangeStatus args"),
-            "GetGitFileDiff" => JsonSerializer.Deserialize<GetGitFileDiffRequest>(json, options)
+            "GetGitFileDiff" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetGitFileDiffRequest)
                 ?? throw new ArgumentException("Invalid GetGitFileDiff args"),
-            "StageGitChanges" => JsonSerializer.Deserialize<StageGitChangesRequest>(json, options)
+            "StageGitChanges" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.StageGitChangesRequest)
                 ?? throw new ArgumentException("Invalid StageGitChanges args"),
-            "UnstageGitChanges" => JsonSerializer.Deserialize<UnstageGitChangesRequest>(json, options)
+            "UnstageGitChanges" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.UnstageGitChangesRequest)
                 ?? throw new ArgumentException("Invalid UnstageGitChanges args"),
-            "DiscardGitChanges" => JsonSerializer.Deserialize<DiscardGitChangesRequest>(json, options)
+            "DiscardGitChanges" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.DiscardGitChangesRequest)
                 ?? throw new ArgumentException("Invalid DiscardGitChanges args"),
-            "CommitGitChanges" => JsonSerializer.Deserialize<CommitGitChangesRequest>(json, options)
+            "CommitGitChanges" => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CommitGitChangesRequest)
                 ?? throw new ArgumentException("Invalid CommitGitChanges args"),
-            WorkerHubMethods.ListGitWorktrees => JsonSerializer.Deserialize<ListGitWorktreesRequest>(json, options)
+            WorkerHubMethods.ListGitWorktrees => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.ListGitWorktreesRequest)
                 ?? throw new ArgumentException("Invalid ListGitWorktrees args"),
-            WorkerHubMethods.CreateGitWorktree => JsonSerializer.Deserialize<CreateGitWorktreeRequest>(json, options)
+            WorkerHubMethods.CreateGitWorktree => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CreateGitWorktreeRequest)
                 ?? throw new ArgumentException("Invalid CreateGitWorktree args"),
-            WorkerHubMethods.RemoveGitWorktree => JsonSerializer.Deserialize<RemoveGitWorktreeRequest>(json, options)
+            WorkerHubMethods.RemoveGitWorktree => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.RemoveGitWorktreeRequest)
                 ?? throw new ArgumentException("Invalid RemoveGitWorktree args"),
-            WorkerHubMethods.InspectWorktree => JsonSerializer.Deserialize<InspectWorktreeRequest>(json, options)
+            WorkerHubMethods.InspectWorktree => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.InspectWorktreeRequest)
                 ?? throw new ArgumentException("Invalid InspectWorktree args"),
-            WorkerHubMethods.CleanupFeatureFolder => JsonSerializer.Deserialize<CleanupFeatureFolderRequest>(json, options)
+            WorkerHubMethods.CleanupFeatureFolder => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CleanupFeatureFolderRequest)
                 ?? throw new ArgumentException("Invalid CleanupFeatureFolder args"),
-            WorkerHubMethods.SweepPendingFeatureFolders => JsonSerializer.Deserialize<SweepPendingFeatureFoldersRequest>(json, options)
+            WorkerHubMethods.SweepPendingFeatureFolders => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.SweepPendingFeatureFoldersRequest)
                 ?? throw new ArgumentException("Invalid SweepPendingFeatureFolders args"),
-            WorkerHubMethods.HoldWorktreeHookSyncs => JsonSerializer.Deserialize<HoldWorktreeHookSyncsRequest>(json, options)
+            WorkerHubMethods.HoldWorktreeHookSyncs => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.HoldWorktreeHookSyncsRequest)
                 ?? throw new ArgumentException("Invalid HoldWorktreeHookSyncs args"),
-            WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize<AttachWorkspaceRepositoryRequest>(json, options)
+            WorkerHubMethods.AttachWorkspaceRepository => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.AttachWorkspaceRepositoryRequest)
                 ?? throw new ArgumentException("Invalid AttachWorkspaceRepository args"),
-            WorkerHubMethods.DiscardWorkspaceRoot => JsonSerializer.Deserialize<DiscardWorkspaceRootRequest>(json, options)
+            WorkerHubMethods.DiscardWorkspaceRoot => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.DiscardWorkspaceRootRequest)
                 ?? throw new ArgumentException("Invalid DiscardWorkspaceRoot args"),
-            WorkerHubMethods.WriteRepositoryFile => JsonSerializer.Deserialize<WriteRepositoryFileRequest>(json, options)
+            WorkerHubMethods.WriteRepositoryFile => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.WriteRepositoryFileRequest)
                 ?? throw new ArgumentException("Invalid WriteRepositoryFile args"),
-            WorkerHubMethods.InitCodeGraph => JsonSerializer.Deserialize<InitCodeGraphRequest>(json, options)
+            WorkerHubMethods.InitCodeGraph => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.InitCodeGraphRequest)
                 ?? throw new ArgumentException("Invalid InitCodeGraph args"),
-            WorkerHubMethods.UninitCodeGraph => JsonSerializer.Deserialize<UninitCodeGraphRequest>(json, options)
+            WorkerHubMethods.UninitCodeGraph => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.UninitCodeGraphRequest)
                 ?? throw new ArgumentException("Invalid UninitCodeGraph args"),
-            WorkerHubMethods.WatchCodeGraphInit => JsonSerializer.Deserialize<WatchCodeGraphInitRequest>(json, options)
+            WorkerHubMethods.WatchCodeGraphInit => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.WatchCodeGraphInitRequest)
                 ?? throw new ArgumentException("Invalid WatchCodeGraphInit args"),
-            WorkerHubMethods.CollectGitEvidence => JsonSerializer.Deserialize<CollectGitEvidenceRequest>(json, options)
+            WorkerHubMethods.CollectGitEvidence => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.CollectGitEvidenceRequest)
                 ?? throw new ArgumentException("Invalid CollectGitEvidence args"),
-            WorkerHubMethods.GetAiProviders => JsonSerializer.Deserialize<GetAiProvidersRequest>(json, options)
+            WorkerHubMethods.GetAiProviders => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetAiProvidersRequest)
                 ?? throw new ArgumentException("Invalid GetAiProviders args"),
-            WorkerHubMethods.GenerateAiText => JsonSerializer.Deserialize<GenerateAiTextRequest>(json, options)
+            WorkerHubMethods.GenerateAiText => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GenerateAiTextRequest)
                 ?? throw new ArgumentException("Invalid GenerateAiText args"),
-            WorkerHubMethods.DetachRepositories => JsonSerializer.Deserialize<DetachRepositoriesRequest>(json, options)
+            WorkerHubMethods.DetachRepositories => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.DetachRepositoriesRequest)
                 ?? throw new ArgumentException("Invalid DetachRepositories args"),
-            WorkerHubMethods.GetGitChangesMonitoring => JsonSerializer.Deserialize<GetGitChangesMonitoringRequest>(json, options)
+            WorkerHubMethods.GetGitChangesMonitoring => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.GetGitChangesMonitoringRequest)
                 ?? throw new ArgumentException("Invalid GetGitChangesMonitoring args"),
-            WorkerHubMethods.ListWorkspaceRootFolders => JsonSerializer.Deserialize<ListWorkspaceRootFoldersRequest>(json, options)
+            WorkerHubMethods.ListWorkspaceRootFolders => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.ListWorkspaceRootFoldersRequest)
                 ?? throw new ArgumentException("Invalid ListWorkspaceRootFolders args"),
-            WorkerHubMethods.InspectWorkspaceFolder => JsonSerializer.Deserialize<InspectWorkspaceFolderRequest>(json, options)
+            WorkerHubMethods.InspectWorkspaceFolder => JsonSerializer.Deserialize(json, WorkerJsonContext.Default.InspectWorkspaceFolderRequest)
                 ?? throw new ArgumentException("Invalid InspectWorkspaceFolder args"),
             _ => throw new NotSupportedException($"Unknown command: {command}")
         };

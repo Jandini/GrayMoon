@@ -7,7 +7,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// Paths are resolved from the workspace root, folder name and repository names exactly as
 /// <c>GetGitChangeStatus</c> does; the App never sends raw absolute paths.
 /// </summary>
-public sealed class EnsureGitChangesWatchersRequest : WorkspaceCommandRequest
+public sealed class EnsureGitChangesWatchersRequest : WorkspaceCommandRequest, IWorkspaceScopedRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }
@@ -20,7 +20,7 @@ public sealed class EnsureGitChangesWatchersRequest : WorkspaceCommandRequest
     public List<EnsureGitChangesWatchersRepository> Repositories { get; set; } = [];
 }
 
-public sealed class EnsureGitChangesWatchersRepository
+public sealed class EnsureGitChangesWatchersRepository : IRepositoryNamedRequest
 {
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; set; }

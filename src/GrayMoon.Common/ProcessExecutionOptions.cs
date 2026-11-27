@@ -6,6 +6,8 @@ namespace GrayMoon.Common;
 /// duration (e.g. <c>GitProcessRunner</c> distinguishing network vs local git operations) should pass
 /// their own value instead of relying on this default.
 /// </summary>
+// The properties are settable, not init-only: the Worker is a Native AOT exe whose generated configuration binder
+// skips init-only properties without an error (WorkerOptionsBindingTests).
 public sealed class ProcessExecutionOptions
 {
     public const string SectionName = "ProcessExecution";
@@ -16,5 +18,5 @@ public sealed class ProcessExecutionOptions
     /// forever. A process that never exits (credential prompt, stuck file lock, unresponsive network
     /// share) previously blocked its caller's worker/semaphore slot indefinitely.
     /// </summary>
-    public int DefaultTimeoutSeconds { get; init; } = 60;
+    public int DefaultTimeoutSeconds { get; set; } = 60;
 }

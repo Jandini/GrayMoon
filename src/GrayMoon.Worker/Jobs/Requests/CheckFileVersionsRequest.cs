@@ -1,11 +1,11 @@
 using System.Text.Json.Serialization;
 namespace GrayMoon.Worker.Jobs.Requests;
-public sealed class CheckFileVersionsRequest : WorkspaceCommandRequest
+public sealed class CheckFileVersionsRequest : WorkspaceCommandRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")] public string? WorkspaceName { get; set; }
     [JsonPropertyName("files")] public List<CheckFileVersionsItem>? Files { get; set; }
 }
-public sealed class CheckFileVersionsItem
+public sealed class CheckFileVersionsItem : IRepositoryNamedRequest
 {
     [JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }
     [JsonPropertyName("filePath")] public string? FilePath { get; set; }

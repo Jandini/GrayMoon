@@ -84,7 +84,7 @@ public sealed class KnownEnvironmentVariableDto
     public string? CurrentValue { get; set; }
 }
 
-public sealed class GenerateAiTextResponse
+public sealed class GenerateAiTextResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

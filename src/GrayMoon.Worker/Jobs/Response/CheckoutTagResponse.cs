@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class CheckoutTagResponse
+public sealed class CheckoutTagResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

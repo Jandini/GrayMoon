@@ -3,7 +3,7 @@ using GrayMoon.Abstractions.Notifications;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class CommitSyncRepositoryResponse
+public sealed class CommitSyncRepositoryResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

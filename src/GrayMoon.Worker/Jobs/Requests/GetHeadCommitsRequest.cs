@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 namespace GrayMoon.Worker.Jobs.Requests;
 /// <summary>Resolves current HEAD commit SHAs for the named repositories in one workspace.</summary>
-public sealed class GetHeadCommitsRequest : WorkspaceCommandRequest
+public sealed class GetHeadCommitsRequest : WorkspaceCommandRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")] public string? WorkspaceName { get; set; }
     /// <summary>Repository folder names under the workspace root.</summary>

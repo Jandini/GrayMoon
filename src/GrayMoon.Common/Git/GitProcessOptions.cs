@@ -8,17 +8,19 @@ namespace GrayMoon.Common.Git;
 /// worker/semaphore slot forever. No automatic retry is triggered by a timeout; existing retry-on-bad-exit-code
 /// behavior for clone/fetch/pull/push/ls-remote is unchanged, just now bounded per attempt.
 /// </summary>
+// The properties are settable, not init-only: the Worker is a Native AOT exe whose generated configuration binder
+// skips init-only properties without an error (WorkerOptionsBindingTests).
 public sealed class GitProcessOptions
 {
     /// <summary>Local/fast operations: status, diff/show, rev-parse, cat-file, add, restore, reset, commit,
     /// branch/tag queries, commit counts, Git Changes stage/unstage/commit. Default 60.</summary>
-    public int DefaultTimeoutSeconds { get; init; } = 60;
+    public int DefaultTimeoutSeconds { get; set; } = 60;
 
     /// <summary>Network operations: fetch, pull, push, ls-remote. Default 180.</summary>
-    public int NetworkTimeoutSeconds { get; init; } = 180;
+    public int NetworkTimeoutSeconds { get; set; } = 180;
 
     /// <summary>dotnet-gitversion invocations, which scan full repository history. Default 90.</summary>
-    public int GitVersionTimeoutSeconds { get; init; } = 90;
+    public int GitVersionTimeoutSeconds { get; set; } = 90;
 
     /// <summary>
     /// Clone is intentionally its own tier, separate from <see cref="NetworkTimeoutSeconds"/>: an initial
@@ -29,7 +31,7 @@ public sealed class GitProcessOptions
     /// Also applies to <c>git checkout --progress</c>, which fills a new Feature worktree and takes about as long as the
     /// checkout of the original clone did.
     /// </summary>
-    public int CloneTimeoutSeconds { get; init; } = 0;
+    public int CloneTimeoutSeconds { get; set; } = 0;
 
     /// <summary>
     /// Clone liveness bound: a clone is killed only after it has produced no output at all (stdout or stderr) for this many
@@ -38,5 +40,5 @@ public sealed class GitProcessOptions
     /// the first progress line too, so keep it generous. Default 180; 0 disables. Also applies to
     /// <c>git checkout --progress</c> (Feature worktree checkout).
     /// </summary>
-    public int CloneIdleTimeoutSeconds { get; init; } = 180;
+    public int CloneIdleTimeoutSeconds { get; set; } = 180;
 }

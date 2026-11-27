@@ -50,8 +50,7 @@ internal static class WorkerCli
             .AddApplicationSettings()
             .Build();
 
-        var options = new WorkerOptions();
-        appConfig.GetSection(WorkerOptions.SectionName).Bind(options);
+        var options = WorkerOptionsSetup.ReadWorkerOptions(appConfig);
         WorkerCliOptions.ApplyTo(options, parseResult);
 
         return await RunCommandHandler.RunAsync(options, cancellationToken).ConfigureAwait(false);

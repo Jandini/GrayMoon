@@ -6,27 +6,23 @@ using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class CsProjFileParser : ICsProjFileParser
+public sealed partial class CsProjFileParser : ICsProjFileParser
 {
     // Matches a complete PackageReference element - self-closing (<PackageReference ... />) or with child
     // elements (<PackageReference ...>...</PackageReference>). Singleline so . spans newlines, which lets
     // a single match cover attributes spread across multiple lines.
-    private static readonly Regex PackageReferenceElementRegex = new(
-        @"<PackageReference\b.*?(?:/>|</PackageReference\s*>)",
-        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    [GeneratedRegex(@"<PackageReference\b.*?(?:/>|</PackageReference\s*>)", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex PackageReferenceElementRegex { get; }
 
-    private static readonly Regex IncludeAttributeRegex = new(
-        @"\bInclude\s*=\s*""([^""]*)""",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"\bInclude\s*=\s*""([^""]*)""", RegexOptions.IgnoreCase)]
+    private static partial Regex IncludeAttributeRegex { get; }
 
     // Captures the opening-quote prefix and closing quote so only the value between them is swapped.
-    private static readonly Regex VersionAttributeRegex = new(
-        @"(\bVersion\s*=\s*"")[^""]*("")",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"(\bVersion\s*=\s*"")[^""]*("")", RegexOptions.IgnoreCase)]
+    private static partial Regex VersionAttributeRegex { get; }
 
-    private static readonly Regex VersionElementRegex = new(
-        @"(<Version\s*>)[^<]*(</Version\s*>)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"(<Version\s*>)[^<]*(</Version\s*>)", RegexOptions.IgnoreCase)]
+    private static partial Regex VersionElementRegex { get; }
 
     public Task<CsProjFileInfo?> ParseAsync(string csprojPath, CancellationToken cancellationToken = default, string? repositoryRoot = null)
     {

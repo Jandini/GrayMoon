@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Proves or disproves that the Worker's LibGit2Sharp code works when compiled as Native AOT.
+    The same checks run on the normal runtime and as an AOT exe; dev/Test-LibGit2SharpAot.ps1 runs both and
+    compares the answers. Not part of the solution and not shipped.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GrayMoon.Worker.AotProbe</RootNamespace>
+    <AssemblyName>graymoon-libgit2-aot-probe</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- The Worker is a framework-dependent exe project; this probe is published self contained (AOT). -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GrayMoon.Worker\GrayMoon.Worker.csproj" />
+  </ItemGroup>
+
+  <!--
+    Test another LibGit2Sharp build (a patched one, or a new release) without touching the Worker project:
+    -p:LibGit2SharpOverrideVersion=<version> and, for a local package, -p:LibGit2SharpOverrideSource=<folder>.
+  -->
+  <PropertyGroup Condition="'$(LibGit2SharpOverrideSource)' != ''">
+    <RestoreAdditionalProjectSources>$(LibGit2SharpOverrideSource)</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(LibGit2SharpOverrideVersion)' != ''">
+    <PackageReference Include="GrayMoon.LibGit2Sharp" Version="$(LibGit2SharpOverrideVersion)" />
+  </ItemGroup>
+
+</Project>

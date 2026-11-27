@@ -3,7 +3,7 @@ using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class SyncRepositoryResponse
+public sealed class SyncRepositoryResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; } = true;

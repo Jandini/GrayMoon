@@ -4,7 +4,7 @@ using GrayMoon.Worker.Models;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class ReturnToDefaultBranchResponse
+public sealed class ReturnToDefaultBranchResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

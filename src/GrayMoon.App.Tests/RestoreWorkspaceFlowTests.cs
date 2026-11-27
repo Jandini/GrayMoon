@@ -24,7 +24,7 @@ public sealed class RestoreWorkspaceFlowTests
         var choices = RestoreWorkspaceFlow.ToBranchChoices(list);
 
         Assert.Equal(["main", "develop", "graymoon/workspace-setup"], choices.Select(c => c.DisplayName).ToArray());
-        Assert.Equal(["Default", null, null], choices.Select(c => c.Badge).ToArray());
+        Assert.Equal(new List<string?> { "Default", null, null }, choices.Select(c => c.Badge).ToList());
         Assert.Equal([0, 1, 2], choices.Select(c => c.RepositoryId).ToArray());
     }
 

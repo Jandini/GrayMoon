@@ -300,7 +300,7 @@ cancel commands where supported
 Install tab       labelled "Update" and shown red while the state is VersionMismatch (also red while Offline,
                   except during a Desktop restart);
                   shows the PowerShell install command (served by GET /api/worker/install),
-                  the .NET 10 runtime note, the "Reinstall the Worker to finish securing GrayMoon" notice,
+                  the "Reinstall the Worker to finish securing GrayMoon" notice,
                   "Show pairing code", and a stale Windows service password notice
                   footer: "Update Now" on a mismatch (sends SelfUpdate), "Install" in Desktop mode
                   (gray "Installing" while that install runs, gray "Restarting" while a restart runs), "Download"

@@ -6,13 +6,18 @@ ARG VERSION=1.0.0
 
 COPY . .
 
-# Publish Worker (framework-dependent, multi-file) for Linux x64 and Windows x64; pack as zip for download
-RUN apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*
-RUN dotnet publish "src/GrayMoon.Worker/GrayMoon.Worker.csproj" -c Release -r linux-x64 -o /worker/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true
-RUN dotnet publish "src/GrayMoon.Worker/GrayMoon.Worker.csproj" -c Release -r win-x64 -o /worker/publish-win /p:Version=$VERSION /p:DisableGitVersionTask=true /p:DebugType=None /p:DebugSymbols=false /p:PublishReadyToRun=true
-RUN find /worker/publish-linux /worker/publish-win \( -name '*.pdb' -o -name '*.Development.*' -o -name '*.Development' \) -delete
+# The Worker is a Native AOT exe (set in its project): no .NET runtime on the host. The Linux exe is built here;
+# clang and zlib1g-dev are what the AOT link step needs. Hosts need a glibc at least as new as this image's.
+RUN apt-get update && apt-get install -y --no-install-recommends zip clang zlib1g-dev && rm -rf /var/lib/apt/lists/*
+RUN dotnet publish "src/GrayMoon.Worker/GrayMoon.Worker.csproj" -c Release -r linux-x64 -o /worker/publish-linux /p:Version=$VERSION /p:DisableGitVersionTask=true /p:DebugType=None /p:DebugSymbols=false
+RUN find /worker/publish-linux \( -name '*.pdb' -o -name '*.dbg' -o -name '*.Development.*' -o -name '*.Development' \) -delete
 RUN cd /worker/publish-linux && zip -q -r /worker/graymoon-worker-linux.zip .
-RUN cd /worker/publish-win && zip -q -r /worker/graymoon-worker-windows.zip .
+
+# The Windows exe cannot be compiled on Linux (Native AOT has no cross-OS compile). It is built on Windows before
+# the image build and passed in as worker-dist/graymoon-worker-windows.zip: docker-build.yml does that in its
+# worker-windows job; for a local image build run dev/Build-WindowsWorkerZip.ps1 first. Without the file the
+# build stops here.
+COPY worker-dist/graymoon-worker-windows.zip /worker/graymoon-worker-windows.zip
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-app
 WORKDIR /src

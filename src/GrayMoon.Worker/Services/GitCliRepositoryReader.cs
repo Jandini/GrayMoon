@@ -13,10 +13,12 @@ namespace GrayMoon.Worker.Services;
 /// (ref snapshot, commit-count probes, local-ref default-branch resolution) exactly as they were in
 /// <see cref="GitService"/>. Never mutates repository state and never contacts a remote.
 /// </summary>
-public sealed class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitCliRepositoryReader> logger, IRepositoryAccess? access = null) : IGitRepositoryReader
+public sealed partial class GitCliRepositoryReader(GitProcessRunner runner, ILogger<GitCliRepositoryReader> logger, IRepositoryAccess? access = null) : IGitRepositoryReader
 {
-    private static readonly Regex TrackAheadRegex = new(@"ahead (\d+)", RegexOptions.Compiled);
-    private static readonly Regex TrackBehindRegex = new(@"behind (\d+)", RegexOptions.Compiled);
+    [GeneratedRegex(@"ahead (\d+)")]
+    private static partial Regex TrackAheadRegex { get; }
+    [GeneratedRegex(@"behind (\d+)")]
+    private static partial Regex TrackBehindRegex { get; }
 
     /// <summary>
     /// Every read goes through the read lane: no per-repository write lock, and <c>--no-optional-locks</c> in front

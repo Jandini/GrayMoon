@@ -601,7 +601,7 @@ public sealed class WorkspaceRepositoryOperationsTests
 
         Assert.True(onBranch.Success, onBranch.Error);
         Assert.True(onDefault.Success, onDefault.Error);
-        Assert.Equal(["graymoon/workspace-setup", null], fixture.Remote.Branches.ToArray());
+        Assert.Equal(new List<string?> { "graymoon/workspace-setup", null }, fixture.Remote.Branches);
     }
 
     [Fact]
@@ -615,7 +615,7 @@ public sealed class WorkspaceRepositoryOperationsTests
             root.RepositoryId, "branch-restore", branchName: "graymoon/workspace-setup");
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(["graymoon/workspace-setup"], fixture.Remote.Branches.ToArray());
+        Assert.Equal(new List<string?> { "graymoon/workspace-setup" }, fixture.Remote.Branches);
         var attach = Assert.Single(fixture.Bridge.Sent, s => s.Command == "AttachWorkspaceRepository");
         Assert.Equal("graymoon/workspace-setup", ManifestTestFixture.ToJson(attach.Args).GetProperty("branchName").GetString());
     }

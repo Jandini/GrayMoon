@@ -457,6 +457,8 @@ GrayMoon.Worker/Commands                           ICommandHandler<TRequest, TRe
 Cli/Handlers/RunCommandHandler.cs                  AddSingleton<ICommandHandler<...>, ...>()
 Services/CommandDispatcher.cs                      constructor parameter + _executors entry
 Services/CommandJobFactory.cs                      DeserializeRequest case (without it the payload is not deserialized)
+Services/WorkerJsonContext.cs                      [JsonSerializable] for the request and the response type (Native AOT: a type missing here fails at run time)
+Jobs/CommandContracts.cs                           implement ICommandOutcome on a response with Success; the request interfaces for WorkspaceId, RepositoryName, WorkspaceName
 GrayMoon.Abstractions/Worker/WorkerHubMethods.cs   name constant (preferred; older commands use literals)
 Services/WorkerCommandPoolRouter.cs               pool selection, called from Hosted/SignalRConnectionHostedService.cs, see below
 App call site                                      IWorkerBridge.SendCommandAsync(name, args, ct), deserialize WorkerCommandResponse.Data

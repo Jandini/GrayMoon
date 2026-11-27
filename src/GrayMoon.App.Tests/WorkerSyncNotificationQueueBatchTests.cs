@@ -260,7 +260,7 @@ public sealed class WorkerSyncNotificationQueueBatchTests
 
         await host.Queue.StartAsync(CancellationToken.None);
         await Wait.UntilAsync(() => host.Handler.Log.Contains("complete 10: 3"));
-        Assert.Empty(host.Handler.Completed.Where(batch => batch[0].ContextId.Value == 20));
+        Assert.DoesNotContain(host.Handler.Completed, batch => batch[0].ContextId.Value == 20);
 
         finalization.SetResult(true);
         await host.Queue.WaitForPendingAsync(QueueHost.WorkspaceId, CancellationToken.None).WaitAsync(Timeout);

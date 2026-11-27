@@ -426,3 +426,6 @@ db/
 
 # Ad hoc test log files left at the repo root
 test-*.txt
+
+# The Windows Worker zip that the Docker image build copies in (dev/Build-WindowsWorkerZip.ps1)
+worker-dist/

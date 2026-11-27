@@ -6,7 +6,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// Attaches a remote repository to the Workspace root folder itself (the Workspace repository), either by cloning
 /// into an empty root or by initializing Git in a non-empty root and tracking the remote default branch.
 /// </summary>
-public sealed class AttachWorkspaceRepositoryRequest : WorkspaceCommandRequest
+public sealed class AttachWorkspaceRepositoryRequest : WorkspaceCommandRequest, IWorkspaceScopedRequest, IWorkspaceNamedRequest
 {
     /// <summary>Folder name under <see cref="WorkspaceCommandRequest.WorkspaceRoot"/>.</summary>
     [JsonPropertyName("workspaceName")]

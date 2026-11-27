@@ -1,6 +1,8 @@
 namespace GrayMoon.Common.Git;
 
 /// <summary>Bounded-concurrency and debounce tuning for the Git Changes feature. Configurable.</summary>
+// The properties are settable, not init-only: the Worker is a Native AOT exe whose generated configuration binder
+// skips init-only properties without an error (WorkerOptionsBindingTests).
 public sealed class GitChangesOptions
 {
     /// <summary>
@@ -9,10 +11,10 @@ public sealed class GitChangesOptions
     /// fan-out, and diff loads all gate on this one value rather than each carrying its own hard-coded
     /// limit. Default 8.
     /// </summary>
-    public int MaxParallelRepositoryOperations { get; init; } = 8;
+    public int MaxParallelRepositoryOperations { get; set; } = 8;
 
     /// <summary>Debounce window after a watcher event before running an authoritative status scan.</summary>
-    public int WatcherDebounceMilliseconds { get; init; } = 400;
+    public int WatcherDebounceMilliseconds { get; set; } = 400;
 
     /// <summary>
     /// Bound for one watcher-driven status scan (the fire-and-forget path from <c>MarkDirty</c>). Keeps a
@@ -20,17 +22,17 @@ public sealed class GitChangesOptions
     /// never reaches it. Individual git processes still have their own <c>GitProcessOptions</c> timeouts;
     /// this is the outer budget for the whole scan loop. Default 120.
     /// </summary>
-    public int WatcherScanTimeoutSeconds { get; init; } = 120;
+    public int WatcherScanTimeoutSeconds { get; set; } = 120;
 
     /// <summary>
     /// Delays before each retry of a failed or timed-out watcher-driven status scan, in order; after the last
     /// entry the Worker stops retrying until the next watcher event or App scan. Empty disables retries.
     /// Default 5, 30, 120.
     /// </summary>
-    public int[] WatcherScanRetryDelaysSeconds { get; init; } = [5, 30, 120];
+    public int[] WatcherScanRetryDelaysSeconds { get; set; } = [5, 30, 120];
 
     /// <summary>Idle time with no renewing operation before a repository's watcher lease is disposed.</summary>
-    public int WatcherIdleGraceMinutes { get; init; } = 10;
+    public int WatcherIdleGraceMinutes { get; set; } = 10;
 
     /// <summary>
     /// How often the Git-free watcher keeper (not the browser page) renews the Worker-side watchers of every
@@ -39,7 +41,7 @@ public sealed class GitChangesOptions
     /// An active workspace is any GrayMoon circuit currently on a <c>/workspaces/{id}/...</c> route
     /// (plus the configured workspace activity grace after leaving).
     /// </summary>
-    public int WatcherRenewalIntervalMinutes { get; init; } = 3;
+    public int WatcherRenewalIntervalMinutes { get; set; } = 3;
 
     /// <summary>
     /// How long a workspace stays "active" (and therefore in scope for background monitoring) after its
@@ -47,44 +49,44 @@ public sealed class GitChangesOptions
     /// <see cref="WatcherIdleGraceMinutes"/> so the App stops renewing a workspace slightly before its
     /// Worker-side watcher leases would idle out anyway. Default 8.
     /// </summary>
-    public int WorkspaceActivityGraceMinutes { get; init; } = 8;
+    public int WorkspaceActivityGraceMinutes { get; set; } = 8;
 
     /// <summary>
     /// When false (the cutover default), Git Changes snapshots are written only to the context tables.
     /// Set true to also write the legacy special-Workspace tables. Rollback is turning this back on.
     /// </summary>
-    public bool WriteLegacyGitChangesTables { get; init; }
+    public bool WriteLegacyGitChangesTables { get; set; }
 
     /// <summary>
     /// Internal hydration switch only (not a product inventory cap). At or below this total entry count
     /// the Changes page uses today's single-shot full hydration and default expand. Above it, summary-first
     /// open + lazy folder pages. Tuned from M0 (~1.5–2K is where full-circuit reload storms hurt). Default 1_500.
     /// </summary>
-    public int FullHydrationMaxEntries { get; init; } = 1_500;
+    public int FullHydrationMaxEntries { get; set; } = 1_500;
 
     /// <summary>
     /// Rows fetched per request when expanding a folder or paging the virtualizer in large mode.
     /// Scroll/expand continues until the prefix is exhausted. Default 200.
     /// </summary>
-    public int TreePageSize { get; init; } = 200;
+    public int TreePageSize { get; set; } = 200;
 
     /// <summary>
     /// Depth of folder summaries computed at persist time for Layer A badges. Reserved for Phase 3: nothing
     /// reads it yet. Default 2.
     /// </summary>
-    public int FolderRollupDepth { get; init; } = 2;
+    public int FolderRollupDepth { get; set; } = 2;
 
     /// <summary>
     /// Soft bound on retained flattened tree rows in large mode (evict collapsed page caches).
     /// Must stay at least <see cref="TreePageSize"/> plus overscan. Default 500.
     /// </summary>
-    public int CircuitVisibleRowBudget { get; init; } = 500;
+    public int CircuitVisibleRowBudget { get; set; } = 500;
 
     /// <summary>
     /// Per-repo paths inlined on one Worker→App SignalR message before chunked transfer (Phase 4).
     /// Placeholder until a byte budget is chosen from M0. Default 2_000.
     /// </summary>
-    public int SnapshotPathsInlineMax { get; init; } = 2_000;
+    public int SnapshotPathsInlineMax { get; set; } = 2_000;
 
     /// <summary>
     /// Most changed paths one status scan may report. A scan above it (typically a clone still checking out its working
@@ -93,25 +95,25 @@ public sealed class GitChangesOptions
     /// <c>MaximumReceiveMessageSize</c> (10 MB) makes the server close the connection, which put the Worker offline in a loop.
     /// Default 15_000.
     /// </summary>
-    public int MaxChangesPerSnapshot { get; init; } = 15_000;
+    public int MaxChangesPerSnapshot { get; set; } = 15_000;
 
     /// <summary>Timeout for one <c>EnsureGitChangesWatchers</c> call. Default 30 seconds.</summary>
-    public int WatcherEnsureTimeoutSeconds { get; init; } = 30;
+    public int WatcherEnsureTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
     /// How often each active context is audited with a real status scan (the repair path for a change a watcher
     /// missed). The watcher keepalive never depends on it. Default 5.
     /// </summary>
-    public int WatcherAuditIntervalMinutes { get; init; } = 5;
+    public int WatcherAuditIntervalMinutes { get; set; } = 5;
 
     /// <summary>Upper bound for one audit scan of one context. Default 900 seconds.</summary>
-    public int WatcherAuditTimeoutSeconds { get; init; } = 900;
+    public int WatcherAuditTimeoutSeconds { get; set; } = 900;
 
     /// <summary>Contexts audited at the same time across all workspaces. Default 2.</summary>
-    public int WatcherAuditMaxParallelContexts { get; init; } = 2;
+    public int WatcherAuditMaxParallelContexts { get; set; } = 2;
 
     /// <summary>Contexts renewed at the same time by one keeper tick. Default 4.</summary>
-    public int WatcherKeeperMaxParallelContexts { get; init; } = 4;
+    public int WatcherKeeperMaxParallelContexts { get; set; } = 4;
 
     /// <summary>True when <paramref name="totalEntries"/> should use summary-first + lazy pages.</summary>
     public bool UseLargeHydration(int totalEntries) =>

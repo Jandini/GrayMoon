@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class GetGitVersionAtBranchPointResponse
+public sealed class GetGitVersionAtBranchPointResponse : ICommandOutcome
 {
     /// <summary>True when both checks ran: the ancestry check answered and GitVersion versioned the parent branch at the commit.</summary>
     [JsonPropertyName("success")]

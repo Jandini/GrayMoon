@@ -15,7 +15,7 @@ public sealed class ListWorkspaceRootFoldersRequest : WorkspaceCommandRequest
 }
 
 /// <summary>Asks what one folder under the workspace root holds. Reads only.</summary>
-public sealed class InspectWorkspaceFolderRequest : WorkspaceCommandRequest
+public sealed class InspectWorkspaceFolderRequest : WorkspaceCommandRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }

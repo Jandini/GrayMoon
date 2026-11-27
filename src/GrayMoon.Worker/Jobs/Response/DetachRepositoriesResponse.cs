@@ -2,11 +2,14 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class DetachRepositoriesResponse
+public sealed class DetachRepositoriesResponse : ICommandOutcome
 {
     /// <summary>True only when no repository failed.</summary>
     [JsonPropertyName("success")]
     public bool Success { get; set; }
+
+    /// <summary>The failures are per repository, in <see cref="Results"/>; there is no message for the whole command.</summary>
+    string? ICommandOutcome.ErrorMessage => null;
 
     [JsonPropertyName("results")]
     public List<DetachRepositoriesResult> Results { get; set; } = [];

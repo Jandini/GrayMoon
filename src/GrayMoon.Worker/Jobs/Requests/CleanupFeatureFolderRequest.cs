@@ -6,7 +6,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// Deletes a removed Feature's leftover folder, or marks it pending deletion (<c>GRAYMOON-PENDING-DELETE.md</c>) when
 /// files are still in use. Sent once at the end of Remove Feature, and before Create Feature reuses the same name.
 /// </summary>
-public sealed class CleanupFeatureFolderRequest
+public sealed class CleanupFeatureFolderRequest : IWorkspaceNamedRequest
 {
     /// <summary>The Workspace's Feature storage root, ending in <c>&lt;Workspace&gt;\features</c>.</summary>
     [JsonPropertyName("featureStorageRoot")]

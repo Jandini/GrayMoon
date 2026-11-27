@@ -119,11 +119,7 @@ public sealed class SignalRConnectionHostedService(
                     httpOptions.Headers[WorkerSecretHeader.Name] = workerSecret;
             })
             .WithAutomaticReconnect(new FiveSecondRetryPolicy())
-            .AddJsonProtocol(options =>
-            {
-                options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-                options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
-            })
+            .AddJsonProtocol(options => WorkerJsonOptions.ConfigureHubPayload(options.PayloadSerializerOptions))
             .Build();
 
         _connection.On<string, string, JsonElement?, string?>(WorkerHubMethods.RequestCommand, (requestId, command, args, operationId) =>

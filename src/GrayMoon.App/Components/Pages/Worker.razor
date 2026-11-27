@@ -67,10 +67,6 @@
                             <small class="text-muted mt-2 d-block">
                                 The script will download, install, and start the worker service automatically.
                             </small>
-                            <p class="mb-0 small worker-runtime-note mt-2 d-block">
-                                The Windows service requires the .NET 10 (x64) runtime on the host.
-                                <a href="@WorkerDotnet10RuntimeUrl" target="_blank" rel="noopener noreferrer">Download the .NET 10 runtime</a>
-                            </p>
                             @if (WorkerConnectionTracker.LogonPasswordRequired)
                             {
                                 <p class="small text-danger mt-3 mb-0">The Windows password stored for the Worker service is no longer valid. Install again and enter your current Windows password.</p>
@@ -224,7 +220,6 @@
                 OnAbort="@(_waitingForReconnect ? EventCallback.Factory.Create(this, AbortWorkerUpdateWait) : default)" />
 
 @code {
-    private const string WorkerDotnet10RuntimeUrl = "https://aka.ms/dotnet-core-applaunch?framework=Microsoft.NETCore.App&framework_version=10.0.0&arch=x64&rid=win-x64&os=win10";
 
     private string installCommand = string.Empty;
     private string uninstallCommand = string.Empty;

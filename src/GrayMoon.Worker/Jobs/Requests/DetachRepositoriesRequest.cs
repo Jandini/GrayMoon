@@ -7,7 +7,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// folders and removes the Git hooks GrayMoon installed there. Nothing else on disk is touched. Paths are resolved
 /// from the workspace root, folder name and repository names; the App never sends absolute paths.
 /// </summary>
-public sealed class DetachRepositoriesRequest : WorkspaceCommandRequest
+public sealed class DetachRepositoriesRequest : WorkspaceCommandRequest, IWorkspaceScopedRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }
@@ -26,7 +26,7 @@ public sealed class DetachRepositoriesRequest : WorkspaceCommandRequest
     public bool WorkspaceRemoved { get; set; }
 }
 
-public sealed class DetachRepositoriesRepository
+public sealed class DetachRepositoriesRepository : IRepositoryNamedRequest
 {
     [JsonPropertyName("repositoryId")]
     public int RepositoryId { get; set; }

@@ -48,7 +48,7 @@ internal sealed class WorkerTokenProvider(
                 return null;
             }
 
-            var payload = await response.Content.ReadFromJsonAsync<ConnectorTokenResponse>(cancellationToken: cancellationToken);
+            var payload = await response.Content.ReadFromJsonAsync(WorkerJsonContext.Default.ConnectorTokenResponse, cancellationToken);
             if (payload == null || payload.ConnectorId <= 0 || string.IsNullOrWhiteSpace(payload.Token))
             {
                 _logger.LogWarning("WorkerTokenProvider: invalid payload for repo {RepositoryId}. ConnectorId={ConnectorId}, HasToken={HasToken}",
@@ -78,6 +78,6 @@ internal sealed class WorkerTokenProvider(
     {
     }
 
-    private sealed record ConnectorTokenResponse(int ConnectorId, string Token);
+    internal sealed record ConnectorTokenResponse(int ConnectorId, string Token);
 }
 

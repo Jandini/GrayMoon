@@ -128,7 +128,7 @@ public sealed class AgentEnvironmentStoreTests : IAsyncLifetime
         Assert.Equal(new AgentEnvironmentVariable(AiProviderIds.Cursor, "NODE_OPTIONS", "--use-system-ca"), first);
         Assert.Null(second);
         Assert.Equal(1, changes);
-        Assert.Equal([first], await NewStore().GetAsync());
+        Assert.Equal([first!], await NewStore().GetAsync());
     }
 
     [Fact]

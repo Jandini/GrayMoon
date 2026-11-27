@@ -9,11 +9,14 @@
 		<AssemblyName>graymoon-worker</AssemblyName>
 		<Authors>GrayMoon</Authors>
 		<Description>Host-side worker for GrayMoon: executes git and repository I/O operations.</Description>
-		<PackageType>DotnetTool</PackageType>
-		<PackAsTool>true</PackAsTool>
-		<ToolCommandName>graymoon-worker</ToolCommandName>
-		<PublishSingleFile>false</PublishSingleFile>
-		<SelfContained>false</SelfContained>
+		<!-- Published as a Native AOT exe: no .NET runtime on the host. The setting also turns on the trim and AOT
+		     analyzers in every build, and their warnings are errors: code that needs reflection at run time fails
+		     silently in the published exe. IL2104 (a referenced package has trim warnings) stays a warning: Serilog
+		     reports one for its object destructuring ({@Value} in a log template), which the Worker must not use;
+		     WorkerJsonContextTests holds that. See docs/architecture/02-system-architecture.md. -->
+		<PublishAot>true</PublishAot>
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2057;IL2067;IL2070;IL2072;IL2075;IL2087;IL2091;IL3000;IL3050;IL3053</WarningsAsErrors>
 		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
@@ -25,6 +28,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<InternalsVisibleTo Include="GrayMoon.Worker.Tests" />
+		<InternalsVisibleTo Include="graymoon-libgit2-aot-probe" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="appsettings.json">
@@ -44,7 +48,7 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 
-		<PackageReference Include="LibGit2Sharp" Version="0.32.0" />
+		<PackageReference Include="GrayMoon.LibGit2Sharp" Version="0.32.0-aot.3" />
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
 		<PackageReference Include="System.CommandLine" Version="2.0.2" />
 		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.*" />
