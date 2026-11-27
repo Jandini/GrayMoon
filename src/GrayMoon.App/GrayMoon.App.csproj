@@ -41,10 +41,12 @@
     GrayMoon.Desktop bundle script) - never on plain Build, so everyday F5/Ctrl+Shift+B stays fast.
     The Worker is a Native AOT exe (set in its project), so this needs the MSVC linker (Visual Studio
     C++ tools); the link step finds it through vswhere.exe, which the command puts on PATH.
+    The GrayMoon.Desktop bundle script passes SkipWorkerBundle=true and publishes the Worker itself:
+    on the GitHub runner the Worker publish fails (MSB4216) when it is started from inside this one.
     Windows-only (uses Compress-Archive); the Dockerfile's own build-worker stage still produces
     the Linux zip for the containerized deployment.
   -->
-  <Target Name="PublishWorkerBundle" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT'">
+  <Target Name="PublishWorkerBundle" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT' and '$(SkipWorkerBundle)' != 'true'">
     <PropertyGroup>
       <WorkerProj>$(MSBuildThisFileDirectory)..\GrayMoon.Worker\GrayMoon.Worker.csproj</WorkerProj>
       <WorkerPublishDir>$(IntermediateOutputPath)worker-publish</WorkerPublishDir>
