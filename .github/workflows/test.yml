@@ -83,3 +83,28 @@ jobs:
       - name: The Native AOT Worker connects and answers commands
         shell: pwsh
         run: ./dev/Test-WorkerAot.ps1 -WorkDir "${{ runner.temp }}\worker-aot"
+
+  # The same smoke test for the Linux exe, which the Docker image serves. The Worker writes its log under
+  # /usr/share/GrayMoon (it normally runs as a systemd service), so the runner user is given that folder.
+  worker-aot-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install the native linker and make the log folder writable
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+          sudo mkdir -p /usr/share/GrayMoon
+          sudo chown -R "$USER" /usr/share/GrayMoon
+
+      - name: The Native AOT Worker connects and answers commands
+        shell: pwsh
+        run: ./dev/Test-WorkerAot.ps1 -WorkDir "${{ runner.temp }}/worker-aot"
