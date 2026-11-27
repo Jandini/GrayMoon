@@ -60,7 +60,11 @@ public sealed class WorkspaceHookContextAttributor(
 
         var featureRepos = await db.WorkspaceFeatureRepositories
             .AsNoTracking()
-            .Where(r => r.WorkspaceRepositoryId == link.WorkspaceRepositoryId)
+            // A Removed row's worktree is gone (the Feature's other repositories are still being removed). A late
+            // event that names its path belongs to no context: attributing it would write state for a repository
+            // the Feature no longer has.
+            .Where(r => r.WorkspaceRepositoryId == link.WorkspaceRepositoryId
+                && r.State != WorkspaceFeatureRepositoryState.Removed)
             .Select(r => new { r.WorkspaceFeatureContextId, r.WorktreePath })
             .ToListAsync(cancellationToken);
 

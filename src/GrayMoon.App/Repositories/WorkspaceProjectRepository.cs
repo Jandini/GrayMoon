@@ -60,7 +60,13 @@ public sealed partial class WorkspaceProjectRepository(
         }).ToList();
     }
 
-    /// <summary>Updates MatchedConnectorId for workspace packages. Keys are ProjectId, values are ConnectorId (or null to clear).</summary>
+    /// <summary>
+    /// Updates MatchedConnectorId for workspace packages. Keys are ProjectId, values are ConnectorId (or null to clear).
+    /// The ids come from an earlier read and span every context of the Workspace, and a project merge of any of
+    /// those contexts may have removed a row since (a registry lookup takes seconds). So the rows are not loaded
+    /// and saved: each connector is written with one set-based UPDATE, which skips a row that is gone instead of
+    /// failing the whole save for the rows that are still there.
+    /// </summary>
     public async Task SetPackagesMatchedConnectorsAsync(int workspaceId, IReadOnlyDictionary<int, int?> projectIdToConnectorId, CancellationToken cancellationToken = default)
     {
         if (projectIdToConnectorId.Count == 0)
@@ -68,22 +74,44 @@ public sealed partial class WorkspaceProjectRepository(
             logger.LogTrace("SetPackagesMatchedConnectors: workspace {WorkspaceId}, no updates (empty map).", workspaceId);
             return;
         }
-        var projectIds = projectIdToConnectorId.Keys.ToList();
-        var projects = await dbContext.WorkspaceProjects
-            .Where(p => p.WorkspaceId == workspaceId && projectIds.Contains(p.ProjectId))
-            .ToListAsync(cancellationToken);
-        logger.LogTrace("SetPackagesMatchedConnectors: workspace {WorkspaceId}, loaded {Loaded} projects for {Requested} requested.", workspaceId, projects.Count, projectIds.Count);
-        foreach (var p in projects)
+
+        var projectIdsByConnector = projectIdToConnectorId
+            .GroupBy(kv => kv.Value, kv => kv.Key)
+            .Select(g => (ConnectorId: g.Key, ProjectIds: g.ToList()))
+            .ToList();
+
+        // Several statements are one change, as the single save was. A caller's own transaction is joined.
+        var ownsTransaction = projectIdsByConnector.Count > 1 && dbContext.Database.CurrentTransaction is null;
+        await using var transaction = ownsTransaction ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+        var updated = 0;
+        foreach (var (connectorId, projectIds) in projectIdsByConnector)
         {
-            if (projectIdToConnectorId.TryGetValue(p.ProjectId, out var connectorId))
-            {
-                var previous = p.MatchedConnectorId;
-                p.MatchedConnectorId = connectorId;
-                logger.LogTrace("SetPackagesMatchedConnectors: ProjectId={ProjectId} MatchedConnectorId {Previous} -> {ConnectorId}.", p.ProjectId, previous ?? -1, connectorId ?? -1);
-            }
+            updated += await dbContext.WorkspaceProjects
+                .Where(p => p.WorkspaceId == workspaceId && projectIds.Contains(p.ProjectId))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.MatchedConnectorId, connectorId), cancellationToken);
         }
-        await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogTrace("SetPackagesMatchedConnectors: persisted {Count} package(s) for workspace {WorkspaceId}.", projects.Count, workspaceId);
+
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
+
+        // The UPDATE goes past the change tracker. A row this context already tracks gets the stored value, so a
+        // later tracking query on the same (circuit-long) context does not hand out the old one.
+        foreach (var entry in dbContext.ChangeTracker.Entries<WorkspaceProject>().ToList())
+        {
+            if (entry.State is not (EntityState.Unchanged or EntityState.Modified)
+                || entry.Entity.WorkspaceId != workspaceId
+                || !projectIdToConnectorId.TryGetValue(entry.Entity.ProjectId, out var connectorId))
+                continue;
+
+            var property = entry.Property(p => p.MatchedConnectorId);
+            property.CurrentValue = connectorId;
+            property.OriginalValue = connectorId;
+            property.IsModified = false;
+        }
+
+        logger.LogTrace(
+            "SetPackagesMatchedConnectors: workspace {WorkspaceId}, updated {Updated} of {Requested} requested project(s); the others no longer exist.",
+            workspaceId, updated, projectIdToConnectorId.Count);
     }
 
     /// <summary>Gets all projects for repositories linked to the given workspace, across every Feature context. Prefer the context-scoped overload for anything that computes or persists a dependency graph.</summary>

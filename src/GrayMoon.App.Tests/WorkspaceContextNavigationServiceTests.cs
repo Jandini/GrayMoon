@@ -150,6 +150,46 @@ public sealed class WorkspaceContextNavigationServiceTests
         Assert.Equal("workspaces/19", href);
     }
 
+    // Browser back and forward change ?context= while the page stays open. Four context pages read the value once,
+    // so the grid kept the context that was left.
+    [Theory]
+    [InlineData(34, 34)]
+    // No value means the Workspace, also when a Feature is the stored selection.
+    [InlineData(null, 33)]
+    [InlineData(0, 33)]
+    // A context of another Workspace, or one that is gone.
+    [InlineData(1, 33)]
+    [InlineData(999, 33)]
+    public async Task A_changed_context_query_selects_that_Feature_or_the_Workspace_and_never_the_stored_selection(int? query, int expected)
+    {
+        var selected = new FakeSelected(new WorkspaceFeatureContextId(34));
+        var navigation = new TestNavigationManager("http://localhost/workspaces/19/actions?q=repo:EDX1");
+        var service = new WorkspaceContextNavigationService(new FakeResolver(), selected, navigation, NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        var info = await service.ResolveQueryChangeAsync(workspaceId: 19, contextQuery: query);
+
+        Assert.Equal(expected, info.ContextId.Value);
+        Assert.Equal(expected == 33, info.IsSpecialWorkspace);
+        Assert.Equal([(19, expected)], selected.SetCalls);
+        // The URL is the user's: it is never rewritten here.
+        Assert.Equal("http://localhost/workspaces/19/actions?q=repo:EDX1", navigation.Uri);
+    }
+
+    [Theory]
+    [InlineData(34, 34)]
+    [InlineData(999, 33)]
+    public async Task A_selected_context_that_no_longer_belongs_to_the_Workspace_resolves_to_the_Workspace(int selectedId, int expected)
+    {
+        var selected = new FakeSelected(null);
+        var service = new WorkspaceContextNavigationService(
+            new FakeResolver(), selected, new TestNavigationManager("http://localhost/workspaces/19/files"), NullLogger<WorkspaceContextNavigationService>.Instance);
+
+        var info = await service.ResolveSelectionAsync(19, new WorkspaceFeatureContextId(selectedId));
+
+        Assert.Equal(expected, info.ContextId.Value);
+        Assert.Empty(selected.SetCalls);
+    }
+
     private sealed class TestNavigationManager : NavigationManager
     {
         public TestNavigationManager(string uri) => Initialize("http://localhost/", uri);

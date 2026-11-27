@@ -38,9 +38,10 @@ public sealed class RemoveFeatureReportTests
 
         ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
         ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        // The Worker says why it kept the branch (failureKind) and which commit it is on; the text is for people.
         ctx.WorkerBridge.Respond(
             "DeleteBranch",
-            data: null,
+            data: new { success = false, errorMessage = "error: The branch 'feat-refresh' is not fully merged.", failureKind = "NotFullyMerged", branchSha = "1111111111111111111111111111111111111111" },
             success: false,
             error: "error: The branch 'feat-refresh' is not fully merged.");
 
@@ -55,7 +56,7 @@ public sealed class RemoveFeatureReportTests
         var repo = Assert.Single(result.RemoveFeatureReport!);
         Assert.True(repo.WorktreeRemoved);
         Assert.Equal(RemoveFeatureBranchOutcome.KeptUnmerged, repo.BranchOutcome);
-        Assert.Contains("not fully merged", repo.BranchMessage);
+        Assert.Contains("not in the default branch", repo.BranchMessage);
 
         await using var read = ctx.CreateScope();
         var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -116,7 +117,8 @@ public sealed class RemoveFeatureReportTests
             featureBranchHasUpstream = false,
             featureBranchAheadOfUpstream = (int?)null,
         });
-        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        // No details were reviewed: the branch the worktree was on comes from the inventory the Worker read to remove it.
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true, branch = "side", headSha = "2222222222222222222222222222222222222222" });
         ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
 
         await using var scope = ctx.CreateScope();
@@ -211,7 +213,9 @@ public sealed class RemoveFeatureReportTests
             new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
 
         Assert.True(result.Success, result.Error);
-        Assert.Single(result.RemoveFeatureReport!);
+        // The report names every repository of the Feature, also the one an earlier removal already removed.
+        Assert.Equal(2, result.RemoveFeatureReport!.Count);
+        Assert.All(result.RemoveFeatureReport!, r => Assert.True(r.WorktreeRemoved));
         Assert.DoesNotContain(
             ctx.WorkerBridge.Calls,
             c => c.Command == WorkerHubMethods.RemoveGitWorktree && GetWorktreePath(c.Args) == removedWorktreePath);
@@ -332,9 +336,12 @@ public sealed class RemoveFeatureReportTests
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
+        // Unlock is a consent for the lock the user saw: it is given with the reviewed details that showed it.
+        var plan = await ops.AnalyzeRemoveFeatureAsync(featureContextId);
+        Assert.True(Assert.Single(plan.Repositories).IsLocked);
         var result = await ops.RemoveFeatureAsync(
             featureContextId,
-            new RemoveFeatureOptions { AllowUnlockWorktrees = true });
+            new RemoveFeatureOptions { AllowUnlockWorktrees = true, AnalyzedPlan = plan });
 
         Assert.True(result.Success, result.Error);
         var call = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
@@ -510,7 +517,7 @@ public sealed class RemoveFeatureReportTests
             new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
 
         Assert.False(result.Success);
-        Assert.Equal("fatal: validation failed", result.Error);
+        Assert.Equal("graymoon-api: fatal: validation failed", result.Error);
         Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.CleanupFeatureFolder);
 
         await using var read = ctx.CreateScope();

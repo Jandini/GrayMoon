@@ -133,7 +133,7 @@ It contains:
 ```text
 IWorkspace*Operations
 OperationProgress
-OperationResult
+OperationResult (with the typed OperationOutcome: per target, per step, reason codes)
 operation DTOs
 automation-friendly contracts
 Workspaces/WorkspaceCapabilities + IWorkspaceCapabilitiesResolver
@@ -437,7 +437,7 @@ FeatureFinalizationCoordinator      barrier between seed and deferred hook syncs
 FeatureFolderCleanupService         pending-delete Feature folder sweeps through the Worker
 FeatureCodeGraphService             per-Feature CodeGraph index
 FeatureOperationLog                 Feature operation logging
-WorkspaceCheckoutRefresh            checkout refresh after Feature transitions
+WorkspaceRemoteRefresh              fetch-only refresh of the Workspace before a Feature removal
 WorkerPath                          Worker-host path joining (below)
 InspectWorktreeWorkerResponse / WorktreeDiskStatus   App view of Worker InspectWorktree
 ```

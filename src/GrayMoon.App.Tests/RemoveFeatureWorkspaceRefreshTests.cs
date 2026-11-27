@@ -134,33 +134,276 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
-    public async Task Workspace_refresh_syncs_the_current_branch_without_checkout()
+    public async Task Workspace_remote_refresh_fetches_and_stores_what_the_fetch_changes_without_a_Sync()
     {
+        // Merged upstream commits: the Workspace must show it is behind once the step has run, from a fetch alone.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await ctx.MutateLinkAsync(link =>
         {
             link.BranchName = "topic-A";
             link.DefaultBranchName = "main";
+            link.GitVersion = "1.0.0";
             link.OutgoingCommits = 0;
             link.IncomingCommits = 0;
+            link.DefaultBranchBehindCommits = 0;
+            link.DefaultBranchAheadCommits = 0;
             link.BranchHasUpstream = false;
         });
+        await SeedBranchRowsAsync(ctx, ("origin/merged-and-deleted", true), ("origin/main", true), ("topic-A", false));
 
-        ctx.WorkerBridge.Respond("SyncRepository", SyncResponse(branch: "topic-A", incoming: 3));
-        ctx.WorkerBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+        ctx.WorkerBridge.Respond("FetchCommits", new
+        {
+            success = true,
+            outgoingCommits = 0,
+            incomingCommits = 3,
+            hasUpstream = true,
+            defaultBranchBehind = 7,
+            defaultBranchAhead = 1,
+            commitCountsProbed = true,
+            tags = new[] { "v2.0.0", "v1.0.0" },
+            localBranches = new[] { "topic-A", "main" },
+            remoteBranches = new[] { "main", "topic-A" },
+            defaultBranch = "main",
+            branchesProbed = true,
+        });
 
         var special = await ctx.GetSpecialContextIdAsync();
+        var statusBefore = (await ctx.ReadLinkAsync()).SyncStatus;
         await using var scope = ctx.CreateScope();
-        var refresh = scope.ServiceProvider.GetRequiredService<IWorkspaceCheckoutRefresh>();
+        var refresh = scope.ServiceProvider.GetRequiredService<IWorkspaceRemoteRefresh>();
         await refresh.RunAsync(ctx.WorkspaceId, special);
 
-        Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == "SyncRepository");
+        // One fetch per repository and nothing else: no Sync, no GitVersion, no project or file-version work.
+        var counts = WorkerCommandCounts.Of(ctx.WorkerBridge);
+        counts.AssertCount("FetchCommits", 1);
+        Assert.Equal(["FetchCommits"], counts.Commands);
         AssertNoWorkspaceMutationCommands(ctx.WorkerBridge);
 
         var link = await ctx.ReadLinkAsync();
-        Assert.Equal("topic-A", link.BranchName);
         Assert.Equal(3, link.IncomingCommits);
+        Assert.Equal(7, link.DefaultBranchBehindCommits);
+        Assert.Equal(1, link.DefaultBranchAheadCommits);
         Assert.True(link.BranchHasUpstream);
+        // What is checked out and what was derived from it are not touched by a fetch.
+        Assert.Equal("topic-A", link.BranchName);
+        Assert.Equal("1.0.0", link.GitVersion);
+        Assert.Equal(statusBefore, link.SyncStatus);
+
+        var branches = await ctx.ReadBranchesAsync();
+        Assert.DoesNotContain(branches, b => b.BranchName == "origin/merged-and-deleted");
+        Assert.Contains(branches, b => b is { BranchName: "origin/topic-A", IsRemote: true });
+        Assert.Contains(branches, b => b is { BranchName: "v2.0.0", IsTag: true });
+        Assert.Contains(ctx.Broadcasts, b => b.Method == "WorkspaceSynced");
+    }
+
+    [Fact]
+    public async Task An_explicit_Sync_after_the_remote_refresh_changes_no_remote_observation()
+    {
+        // The explicit Sync is the oracle: what the fetch-only step stored about the remote is what a Sync stores.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.BranchName = "topic-A";
+            link.DefaultBranchName = "main";
+            link.IncomingCommits = 0;
+            link.BranchHasUpstream = false;
+        });
+        await SeedBranchRowsAsync(ctx, ("origin/merged-and-deleted", true));
+
+        string[] localBranches = ["topic-A", "main"];
+        string[] remoteBranches = ["main", "topic-A"];
+        string[] tags = ["v2.0.0", "v1.0.0"];
+        ctx.WorkerBridge.Respond("FetchCommits", new
+        {
+            success = true,
+            outgoingCommits = 2,
+            incomingCommits = 3,
+            hasUpstream = true,
+            defaultBranchBehind = 7,
+            defaultBranchAhead = 1,
+            commitCountsProbed = true,
+            tags,
+            localBranches,
+            remoteBranches,
+            defaultBranch = "main",
+            branchesProbed = true,
+        });
+        ctx.WorkerBridge.Respond("SyncRepository", new
+        {
+            success = true,
+            version = "2.0.0",
+            branch = "topic-A",
+            commit = "1111111111111111111111111111111111111111",
+            defaultBranch = "main",
+            outgoingCommits = 2,
+            incomingCommits = 3,
+            defaultBranchBehind = 7,
+            defaultBranchAhead = 1,
+            hasUpstream = true,
+            upstreamProbed = true,
+            localBranches,
+            remoteBranches,
+            tags,
+            projects = Array.Empty<object>(),
+        });
+        ctx.WorkerBridge.Respond("CheckFileVersions", new { success = true, files = Array.Empty<object>() });
+
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using (var scope = ctx.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<IWorkspaceRemoteRefresh>().RunAsync(ctx.WorkspaceId, special);
+        var afterFetch = await ReadRemoteObservationAsync(ctx);
+
+        await using (var scope = ctx.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<GrayMoon.App.Services.Git.WorkspaceGitService>()
+                .SyncAsync(ctx.WorkspaceId, special);
+        }
+
+        var afterSync = await ReadRemoteObservationAsync(ctx);
+        Assert.Equal(afterFetch, afterSync);
+        Assert.Equal("out=2 in=3 behind=7 ahead=1 upstream=True newerTag= | origin/main origin/topic-A | main* topic-A | v2.0.0 v1.0.0", afterSync);
+    }
+
+    [Fact]
+    public async Task A_repository_whose_fetch_fails_keeps_its_stored_counts_and_does_not_fail_the_refresh()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        await ctx.MutateLinkAsync(link =>
+        {
+            link.IncomingCommits = 4;
+            link.BranchHasUpstream = true;
+        });
+        await SeedBranchRowsAsync(ctx, ("origin/keep-me", true));
+        ctx.WorkerBridge.Respond("FetchCommits", new { success = false, errorMessage = "Git fetch failed." });
+
+        var special = await ctx.GetSpecialContextIdAsync();
+        await using var scope = ctx.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IWorkspaceRemoteRefresh>().RunAsync(ctx.WorkspaceId, special);
+
+        var link = await ctx.ReadLinkAsync();
+        Assert.Equal(4, link.IncomingCommits);
+        Assert.True(link.BranchHasUpstream);
+        Assert.Contains(await ctx.ReadBranchesAsync(), b => b.BranchName == "origin/keep-me");
+    }
+
+    [Fact]
+    public async Task Removals_that_arrive_together_share_one_remote_refresh()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var fetchStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var letFetchFinish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ctx.WorkerBridge.RespondAsync("FetchCommits", async (_, ct) =>
+        {
+            fetchStarted.TrySetResult();
+            await letFetchFinish.Task.WaitAsync(ct);
+            return new WorkerCommandResponse(true, new { success = true, commitCountsProbed = false }, null);
+        });
+
+        var special = await ctx.GetSpecialContextIdAsync();
+        var refresh = ctx.Resolve<IWorkspaceRemoteRefresh>();
+        var first = refresh.RunAsync(ctx.WorkspaceId, special);
+        await fetchStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var second = refresh.RunAsync(ctx.WorkspaceId, special);
+        letFetchFinish.SetResult();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(30));
+
+        WorkerCommandCounts.Of(ctx.WorkerBridge).AssertCount("FetchCommits", 1);
+    }
+
+    [Fact]
+    public async Task The_removal_queue_refreshes_the_Workspace_with_a_fetch_and_sends_no_Sync()
+    {
+        // Departure, queue and the removal itself: zero SyncRepository, and no GitVersion, project or file-version
+        // command for the Workspace. The one step before the removal is the fetch.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var featureContextId = await SeedRemovableFeatureAsync(ctx);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree());
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond("DeleteBranch", new { success = true });
+        ctx.WorkerBridge.Respond("FetchCommits", new
+        {
+            success = true,
+            outgoingCommits = 0,
+            incomingCommits = 6,
+            hasUpstream = true,
+            commitCountsProbed = true,
+        });
+
+        using var queue = new FeatureRemovalQueue(
+            ctx.Resolve<IServiceScopeFactory>(),
+            new NoFolderCleanup(),
+            ctx.Resolve<IWorkspaceRemoteRefresh>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureRemovalQueue>.Instance);
+        var completed = new TaskCompletionSource<FeatureRemovalCompleted>(TaskCreationOptions.RunContinuationsAsynchronously);
+        queue.Completed += c => completed.TrySetResult(c);
+        await queue.StartAsync(CancellationToken.None);
+        try
+        {
+            Assert.True(await queue.TryEnqueueAsync(
+                featureContextId,
+                new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true }));
+            var outcome = await completed.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(outcome.Result.Success, outcome.Result.Error);
+        }
+        finally
+        {
+            await queue.StopAsync(CancellationToken.None);
+        }
+
+        var counts = WorkerCommandCounts.Of(ctx.WorkerBridge);
+        counts.AssertNone(
+            "SyncRepository", "RefreshRepositoryVersion", "GetRepositoryVersion", "GetGitVersionAtDefaultTip",
+            "CheckFileVersions", "SyncRepositoryDependencies", "RefreshRepositoryProjects");
+        counts.AssertCount("FetchCommits", 1);
+        // The fetch ran before anything of the Feature was removed.
+        var commands = ctx.WorkerBridge.Calls.Select(c => c.Command).ToList();
+        Assert.True(
+            commands.IndexOf("FetchCommits") < commands.IndexOf(WorkerHubMethods.RemoveGitWorktree),
+            $"Expected the fetch before the removal: {string.Join(", ", commands)}");
+        Assert.Equal(6, (await ctx.ReadLinkAsync()).IncomingCommits);
+    }
+
+    private static async Task SeedBranchRowsAsync(SyncStateTestContext ctx, params (string Name, bool IsRemote)[] branches)
+    {
+        await using var scope = ctx.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        foreach (var (name, isRemote) in branches)
+        {
+            db.RepositoryBranches.Add(new RepositoryBranch
+            {
+                WorkspaceRepositoryId = ctx.WorkspaceRepositoryId,
+                BranchName = name,
+                IsRemote = isRemote,
+                LastSeenAt = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Everything a fetch can change, as one comparable line: counts, upstream, newer tag, then the remote, local and tag rows.</summary>
+    private static async Task<string> ReadRemoteObservationAsync(SyncStateTestContext ctx)
+    {
+        var link = await ctx.ReadLinkAsync();
+        var rows = await ctx.ReadBranchesAsync();
+        string Rows(Func<RepositoryBranch, bool> filter, Func<RepositoryBranch, object> order) => string.Join(
+            " ", rows.Where(filter).OrderBy(order).Select(b => b.BranchName + (b.IsDefault ? "*" : "")));
+        return $"out={link.OutgoingCommits} in={link.IncomingCommits} behind={link.DefaultBranchBehindCommits} ahead={link.DefaultBranchAheadCommits} "
+            + $"upstream={link.BranchHasUpstream} newerTag={link.HasNewerTag} | "
+            + $"{Rows(b => b.IsRemote && !b.IsTag, b => b.BranchName)} | {Rows(b => !b.IsRemote && !b.IsTag, b => b.BranchName)} | {Rows(b => b.IsTag, b => b.SortIndex)}";
+    }
+
+    private sealed class NoFolderCleanup : IFeatureFolderCleanupService
+    {
+        public void RequestSweep(int workspaceId)
+        {
+        }
+
+        public Task SweepAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public void ArmRetry(int workspaceId)
+        {
+        }
     }
 
     [Fact]
@@ -589,8 +832,12 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             featureContextId,
             new RemoveFeatureOptions { AllowDiscardUncommitted = true, AllowForceDeleteLocalBranches = true });
 
+        // Without a Worker nothing is attempted: the repository is kept and the result says why.
         Assert.False(result.Success);
-        Assert.Contains("Could not check", result.Error);
+        Assert.Contains("Worker not connected", result.Error);
+        var blocked = Assert.Single(result.Outcome!.Targets).Step(RemoveFeatureSteps.Worktree)!;
+        Assert.Equal(OperationOutcomeStatus.Blocked, blocked.Status);
+        Assert.Equal(OperationReasonCodes.WorkerUnavailable, blocked.ReasonCode);
         Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
         Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
     }
@@ -991,13 +1238,17 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
-    public async Task Remove_refuses_dirty_worktree_without_discard_authorization()
+    public async Task Remove_without_discard_authorization_keeps_a_dirty_worktree_and_never_forces()
     {
+        // The removal does not inspect first. It asks for a removal without force; the Worker keeps the folder and
+        // says why from the worktree's own status, and the result carries that reason and the consent it would need.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
-
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(isDirty: true, unstagedCount: 1));
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, _ => new WorkerCommandResponse(
+            false,
+            new { success = false, errorCode = "UncommittedChanges", errorMessage = "fatal: contains modified or untracked files", failureKind = "UncommittedChanges" },
+            "fatal: contains modified or untracked files"));
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1005,25 +1256,48 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
 
         Assert.False(result.Success);
         Assert.Contains("uncommitted changes", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+        var counts = WorkerCommandCounts.Of(ctx.WorkerBridge);
+        counts.AssertNone(WorkerHubMethods.InspectWorktree, "DeleteBranch", WorkerHubMethods.CleanupFeatureFolder);
+        var remove = Assert.Single(counts.ArgsOf(WorkerHubMethods.RemoveGitWorktree));
+        Assert.False(JsonSerializer.SerializeToElement(remove).GetProperty("force").GetBoolean());
+        Assert.False(JsonSerializer.SerializeToElement(remove).GetProperty("unlock").GetBoolean());
+
+        var step = Assert.Single(result.Outcome!.Targets).Step(RemoveFeatureSteps.Worktree)!;
+        Assert.Equal(OperationOutcomeStatus.Blocked, step.Status);
+        Assert.Equal(OperationReasonCodes.UncommittedChanges, step.ReasonCode);
+        Assert.Equal(OperationAuthorizations.DiscardUncommittedChanges, step.RequiredAuthorization);
     }
 
     [Fact]
-    public async Task Remove_refuses_unmerged_branch_without_force_authorization()
+    public async Task Remove_without_force_authorization_removes_the_worktree_and_keeps_an_unmerged_branch()
     {
+        // Branch deletion is its own decision. The folder goes; the branch with commits that are not merged stays
+        // and is reported as kept, and nothing is force-deleted.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedFeatureWithWorktreeNoPrAsync(ctx, worktreePath);
-
-        ctx.WorkerBridge.Respond(WorkerHubMethods.InspectWorktree, CleanInspectWorktree(aheadOfUpstream: 2, aheadOfDefault: 2));
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond(
+            "DeleteBranch",
+            data: new { success = false, errorMessage = "error: The branch 'feat-refresh' is not fully merged.", failureKind = "NotFullyMerged", branchSha = "1111111111111111111111111111111111111111" },
+            success: false,
+            error: "error: The branch 'feat-refresh' is not fully merged.");
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
         var result = await ops.RemoveFeatureAsync(featureContextId, new RemoveFeatureOptions());
 
-        Assert.False(result.Success);
-        Assert.Contains("force-deleting", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
+        Assert.True(result.Success, result.Error);
+        var report = Assert.Single(result.RemoveFeatureReport!);
+        Assert.True(report.WorktreeRemoved);
+        Assert.Equal(RemoveFeatureBranchOutcome.KeptUnmerged, report.BranchOutcome);
+        Assert.All(
+            WorkerCommandCounts.Of(ctx.WorkerBridge).ArgsOf("DeleteBranch"),
+            args => Assert.False(JsonSerializer.SerializeToElement(args).GetProperty("force").GetBoolean()));
+        var local = Assert.Single(result.Outcome!.Targets).Step(RemoveFeatureSteps.LocalBranch)!;
+        Assert.Equal(OperationOutcomeStatus.Blocked, local.Status);
+        Assert.Equal(OperationReasonCodes.UnmergedCommits, local.ReasonCode);
+        Assert.Equal(OperationAuthorizations.ForceDeleteLocalBranch, local.RequiredAuthorization);
     }
 
     [Fact]
@@ -1049,11 +1323,20 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
     }
 
     [Fact]
-    public async Task Remove_keeps_asking_when_a_merged_pull_request_does_not_cover_the_local_tip()
+    public async Task Remove_does_not_force_delete_when_a_merged_pull_request_does_not_cover_the_local_tip()
     {
+        // The reviewed details show a merged pull request whose head is another commit than the local tip: the
+        // local branch has commits the pull request never merged. Without the force consent it is deleted only if
+        // git itself calls it merged, and git does not.
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var worktreePath = @"C:\gm-test-root\.graymoon\test-ws\features\feat-refresh\graymoon-api";
         var featureContextId = await SeedMergedFeatureWithWorktreeAsync(ctx, worktreePath);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.RemoveGitWorktree, new { success = true });
+        ctx.WorkerBridge.Respond(
+            "DeleteBranch",
+            data: new { success = false, errorMessage = "error: The branch 'feat-refresh' is not fully merged.", failureKind = "NotFullyMerged", branchSha = "local-tip" },
+            success: false,
+            error: "error: The branch 'feat-refresh' is not fully merged.");
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -1061,9 +1344,10 @@ public sealed class RemoveFeatureWorkspaceRefreshTests
             featureContextId,
             new RemoveFeatureOptions { AnalyzedPlan = SquashMergedPlan(ctx.WorkspaceRepositoryId, "local-tip", "merged-head") });
 
-        Assert.False(result.Success);
-        Assert.Contains("force-deleting", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
+        Assert.True(result.Success, result.Error);
+        var delete = Assert.Single(ctx.WorkerBridge.Calls, c => c.Command == "DeleteBranch");
+        Assert.False(JsonSerializer.SerializeToElement(delete.Args).GetProperty("force").GetBoolean());
+        Assert.Equal(RemoveFeatureBranchOutcome.KeptUnmerged, Assert.Single(result.RemoveFeatureReport!).BranchOutcome);
     }
 
     private static RemoveFeaturePlan SquashMergedPlan(int workspaceRepositoryId, string localTip, string mergedHead) => new()

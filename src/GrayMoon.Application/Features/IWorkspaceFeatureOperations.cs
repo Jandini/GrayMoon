@@ -17,6 +17,19 @@ public interface IWorkspaceFeatureOperations
         CancellationToken cancellationToken = default,
         bool createCodeGraphIndex = false);
 
+    /// <summary>
+    /// What the Remove Feature dialog shows when it opens: stored facts only, with no Worker command and no pull
+    /// request refresh. The dialog can be confirmed from this alone; the removal does not use force.
+    /// </summary>
+    Task<RemoveFeatureSummary> GetRemoveFeatureSummaryAsync(
+        WorkspaceFeatureContextId featureContextId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The live details of every repository of the Feature (one Worker inspection each, and one pull request
+    /// refresh). Run on demand, when the user wants to review before removing or has to authorize a discard, an
+    /// unlock or a forced branch delete: those consents are only honoured for what this plan showed.
+    /// </summary>
     Task<RemoveFeaturePlan> AnalyzeRemoveFeatureAsync(
         WorkspaceFeatureContextId featureContextId,
         CancellationToken cancellationToken = default,
@@ -104,8 +117,10 @@ public sealed class RemoveFeatureOptions
     /// <summary>True when the user authorized unlocking locked worktrees before removal (D5).</summary>
     public bool AllowUnlockWorktrees { get; init; }
     /// <summary>
-    /// Plan already shown in the Remove dialog. When set and successful, Remove skips a second
-    /// analyze so the structural overlay can start immediately after the user clicks Remove.
+    /// The live details the user reviewed in the Remove dialog, when they did. Remove never analyzes on its own.
+    /// Without it nothing is forced: <see cref="AllowDiscardUncommitted"/>, <see cref="AllowUnlockWorktrees"/> and
+    /// <see cref="AllowForceDeleteLocalBranches"/> apply only to the repositories this plan showed with that risk,
+    /// at the commit it showed.
     /// </summary>
     public RemoveFeaturePlan? AnalyzedPlan { get; init; }
 }

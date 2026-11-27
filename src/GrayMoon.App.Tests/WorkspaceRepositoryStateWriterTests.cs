@@ -1,7 +1,9 @@
 using GrayMoon.Abstractions.Notifications;
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using GrayMoon.App.Services;
 using GrayMoon.App.Services.Workspaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GrayMoon.App.Tests;
@@ -297,6 +299,74 @@ public sealed class WorkspaceRepositoryStateWriterTests
         Assert.True(link.IsVersionUnresolved);
     }
 
+    /// <summary>
+    /// The first sync of a repository stores its state row. "In sync" on a row that is being inserted was replaced
+    /// by the column default ("sync"), so the row said "sync" while the link said "in sync"; the next write that
+    /// leaves the status alone (a branch made by Create Feature, a fetch) then copied "sync" onto the link, and the
+    /// whole Workspace turned red until the next Sync (logs of 2026-11-27).
+    /// </summary>
+    [Fact]
+    public async Task The_first_sync_stores_in_sync_and_a_later_write_that_leaves_the_status_keeps_it()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var specialContextId = (await ctx.GetSpecialContextIdAsync()).Value;
+        // A repository that was never synced has no state row yet.
+        await using (var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            await db.WorkspaceRepositoryContextStates
+                .Where(s => s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId)
+                .ExecuteDeleteAsync();
+        }
+
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { BranchName = "main", GitVersion = "1.0.0", GitVersionProbed = true, IdentityProbed = true, RemoteBranches = [] },
+            Derive);
+
+        Assert.Equal(RepoSyncStatus.InSync, (await ctx.ReadLinkAsync()).SyncStatus);
+        Assert.Equal(RepoSyncStatus.InSync, await ReadStateSyncStatusAsync(ctx, specialContextId));
+
+        // What a reference-transaction hook sends: nothing about the checkout, status left alone.
+        await ApplyAsync(ctx, new RepositoryStateSnapshot(), new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Leave });
+
+        Assert.Equal(RepoSyncStatus.InSync, (await ctx.ReadLinkAsync()).SyncStatus);
+        Assert.Equal(RepoSyncStatus.InSync, await ReadStateSyncStatusAsync(ctx, specialContextId));
+    }
+
+    /// <summary>
+    /// Databases written before the fix hold state rows that say "sync" next to a link that says "in sync". A write
+    /// that leaves the status alone must not copy that onto the link.
+    /// </summary>
+    [Fact]
+    public async Task A_write_that_leaves_the_status_does_not_copy_the_rows_status_onto_the_link()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var specialContextId = (await ctx.GetSpecialContextIdAsync()).Value;
+        await ApplyAsync(
+            ctx,
+            new RepositoryStateSnapshot { BranchName = "main", GitVersion = "1.0.0", GitVersionProbed = true, IdentityProbed = true, RemoteBranches = [] },
+            Derive);
+        await using (var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync())
+        {
+            await db.WorkspaceRepositoryContextStates
+                .Where(s => s.WorkspaceFeatureContextId == specialContextId && s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.SyncStatus, RepoSyncStatus.NeedsSync));
+        }
+
+        await ApplyAsync(ctx, new RepositoryStateSnapshot(), new RepositoryStateWriteOptions { SyncStatus = SyncStatusWrite.Leave });
+
+        Assert.Equal(RepoSyncStatus.InSync, (await ctx.ReadLinkAsync()).SyncStatus);
+    }
+
+    private static async Task<RepoSyncStatus> ReadStateSyncStatusAsync(SyncStateTestContext ctx, int contextId)
+    {
+        await using var db = await ctx.Resolve<IDbContextFactory<AppDbContext>>().CreateDbContextAsync();
+        return await db.WorkspaceRepositoryContextStates.AsNoTracking()
+            .Where(s => s.WorkspaceFeatureContextId == contextId && s.WorkspaceRepositoryId == ctx.WorkspaceRepositoryId)
+            .Select(s => s.SyncStatus)
+            .SingleAsync();
+    }
+
     [Fact]
     public async Task Repository_on_an_empty_remote_is_in_sync_after_a_completed_sync()
     {
@@ -374,6 +444,8 @@ public sealed class WorkspaceRepositoryStateWriterTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await ctx.MutateLinkAsync(l => l.DefaultBranchName = null);
+        // Not in sync yet: a status an earlier full sync established would be kept.
+        await ctx.SetStoredSyncStatusAsync(RepoSyncStatus.NeedsSync);
 
         await ApplyAsync(
             ctx,

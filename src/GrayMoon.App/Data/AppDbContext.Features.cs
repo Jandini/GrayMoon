@@ -94,9 +94,12 @@ public partial class AppDbContext
             entity.Property(s => s.EffectiveVersion).HasMaxLength(100);
             entity.Property(s => s.EffectiveVersionCommitSha).HasMaxLength(64);
             entity.Property(s => s.EffectiveVersionReasonCode).HasMaxLength(50);
+            entity.Property(s => s.EffectiveVersionEvidenceKey).HasMaxLength(64);
             entity.Property(s => s.SyncStatus)
+                // The sentinel is a value no row has. With a real status as the sentinel, a row inserted with that
+                // status got the column default instead: a first row stored as "in sync" was saved as "sync".
                 .HasDefaultValue(RepoSyncStatus.NeedsSync)
-                .HasSentinel(RepoSyncStatus.InSync);
+                .HasSentinel((RepoSyncStatus)(-1));
             entity.HasOne(s => s.WorkspaceFeatureContext)
                 .WithMany(c => c.RepositoryStates)
                 .HasForeignKey(s => s.WorkspaceFeatureContextId)

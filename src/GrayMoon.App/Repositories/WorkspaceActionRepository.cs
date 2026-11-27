@@ -42,10 +42,21 @@ public sealed class WorkspaceActionRepository(IDbContextFactory<AppDbContext> db
     /// Inserts or updates the action row for the given workspace-repo link. JSON is the source of truth; legacy scalar columns are cleared.
     /// Uses its own factory context so grid poll and push CI refresh can upsert different repositories on one circuit.
     /// </summary>
+    /// <remarks>
+    /// Two refreshes of one repository can store at once (several tabs after one hook broadcast). The one that saves
+    /// second reads again and stores its own workflows. A link that was removed meanwhile fails the foreign key,
+    /// which is not retried and reaches the caller: its row must not come back.
+    /// </remarks>
     public async Task UpsertAsync(int workspaceRepositoryId, IReadOnlyList<ActionStatusInfo> workflows, string? branchName, CancellationToken cancellationToken = default)
     {
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        await UpsertCoreAsync(dbContext, workspaceRepositoryId, workflows, branchName, cancellationToken);
+        await DbWriteConflict.RetryAsync(
+            async () =>
+            {
+                // A new context per attempt, so the retry decides from what is stored now.
+                await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                await UpsertCoreAsync(dbContext, workspaceRepositoryId, workflows, branchName, cancellationToken);
+            },
+            cancellationToken);
         logger.LogTrace("Upserted Actions for WorkspaceRepositoryId={WorkspaceRepositoryId}, Branch={Branch}, WorkflowCount={Count}",
             workspaceRepositoryId, branchName, workflows.Count);
     }
@@ -77,9 +88,22 @@ public sealed class WorkspaceActionRepository(IDbContextFactory<AppDbContext> db
     }
 
     /// <summary>Context-aware counterpart to <see cref="UpsertAsync"/> - writes <see cref="WorkspaceRepositoryContextAction"/> for the given Feature context instead of the special-Workspace-only link row.</summary>
+    /// <remarks>Same handling of a concurrent refresh, and of a removed context or link, as <see cref="UpsertAsync"/>.</remarks>
     public async Task UpsertContextAsync(
         int contextId, int workspaceRepositoryId, IReadOnlyList<ActionStatusInfo> workflows, string? branchName, CancellationToken cancellationToken = default)
     {
+        await DbWriteConflict.RetryAsync(
+            () => UpsertContextCoreAsync(contextId, workspaceRepositoryId, workflows, branchName, cancellationToken),
+            cancellationToken);
+        logger.LogTrace(
+            "Upserted context Actions for ContextId={ContextId}, WorkspaceRepositoryId={WorkspaceRepositoryId}, Branch={Branch}, WorkflowCount={Count}",
+            contextId, workspaceRepositoryId, branchName, workflows.Count);
+    }
+
+    private async Task UpsertContextCoreAsync(
+        int contextId, int workspaceRepositoryId, IReadOnlyList<ActionStatusInfo> workflows, string? branchName, CancellationToken cancellationToken)
+    {
+        // A new context per attempt, so the retry decides from what is stored now.
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var now = DateTime.UtcNow;
         var json = JsonSerializer.Serialize(workflows, JsonOptions);
@@ -108,9 +132,6 @@ public sealed class WorkspaceActionRepository(IDbContextFactory<AppDbContext> db
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogTrace(
-            "Upserted context Actions for ContextId={ContextId}, WorkspaceRepositoryId={WorkspaceRepositoryId}, Branch={Branch}, WorkflowCount={Count}",
-            contextId, workspaceRepositoryId, branchName, workflows.Count);
     }
 
     private static async Task UpsertCoreAsync(

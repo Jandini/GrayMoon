@@ -737,6 +737,35 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
     public async Task<(bool Success, string? ErrorMessage)> DeleteBranchAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
     {
+        var result = await DeleteBranchDetailedAsync(repoPath, branchName, isRemote, force, ct, skipHooks, bearerToken, expectedSha);
+        return (result.Success, result.ErrorMessage);
+    }
+
+    /// <inheritdoc />
+    public async Task<BranchDeleteResult> DeleteBranchDetailedAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks = false, string? bearerToken = null, string? expectedSha = null)
+    {
+        var details = new BranchDeleteDetails();
+        var (success, errorMessage) = await DeleteBranchCoreAsync(repoPath, branchName, isRemote, force, ct, skipHooks, bearerToken, expectedSha, details);
+        return new BranchDeleteResult(
+            success,
+            errorMessage,
+            success ? null : details.FailureKind ?? BranchDeleteFailureKinds.Failed,
+            details.BranchSha,
+            details.HasUpstream,
+            details.AlreadyAbsent);
+    }
+
+    /// <summary>What <see cref="DeleteBranchCoreAsync"/> learned on the way, for the detailed result.</summary>
+    private sealed class BranchDeleteDetails
+    {
+        public string? FailureKind { get; set; }
+        public string? BranchSha { get; set; }
+        public bool? HasUpstream { get; set; }
+        public bool AlreadyAbsent { get; set; }
+    }
+
+    private async Task<(bool Success, string? ErrorMessage)> DeleteBranchCoreAsync(string repoPath, string branchName, bool isRemote, bool force, CancellationToken ct, bool skipHooks, string? bearerToken, string? expectedSha, BranchDeleteDetails details)
+    {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
 
@@ -753,6 +782,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 && name.Equals(defaultBranch.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogWarning("Refusing to delete default branch {Branch} in {RepoPath}", name, repoPath);
+                details.FailureKind = BranchDeleteFailureKinds.Protected;
                 return (false, "Cannot delete the repository default branch.");
             }
 
@@ -771,6 +801,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                     if (await reader.RefExistsAsync(repoPath, trackingRef, ct))
                         await runner.RunAsync("git", $"{hooksPrefix}update-ref -d {trackingRef}", repoPath, ct);
                     logger.LogInformation("Git remote branch already absent on origin for {RepoPath}. Branch={Branch}; pruned stale tracking ref.", repoPath, name);
+                    details.AlreadyAbsent = true;
                     return (true, null);
                 }
 
@@ -799,6 +830,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                     if (IsRemoteBranchAlreadyDeleted(combined))
                     {
                         logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
+                        details.AlreadyAbsent = true;
                         return (true, null);
                     }
 
@@ -806,6 +838,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
                     if (IsForceWithLeaseRejected(combined))
                     {
+                        details.FailureKind = BranchDeleteFailureKinds.LeaseRefused;
                         logger.LogWarning(
                             "Git force-with-lease remote delete refused for {RepoPath}. Branch={Branch}",
                             repoPath, name);
@@ -832,6 +865,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
                 if (IsRemoteBranchAlreadyDeleted(combined))
                 {
                     logger.LogInformation("Git remote branch already deleted for {RepoPath}. Branch={Branch}", repoPath, name);
+                    details.AlreadyAbsent = true;
                     return (true, null);
                 }
                 CommandLineService.MirrorCombinedOutputAsStderr(stdout, stderr);
@@ -852,23 +886,39 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         // for the current branch. They were two processes, for every repository of a removed Feature.
         var localRef = $"refs/heads/{localName}";
         var (exitRef, stdoutRef, _) = await runner.RunAsync(
-            "git", ["for-each-ref", "--format=%(HEAD)%(refname)", "--", localRef], repoPath, null, ct, GitLockIntent.Read);
+            "git", ["for-each-ref", "--format=%(HEAD)%(refname)%09%(objectname)%09%(upstream)", "--", localRef], repoPath, null, ct, GitLockIntent.Read);
         // The pattern also lists branches below this name ("team" lists "team/login"), so the line must name this ref.
+        // Tab-separated: the HEAD marker ("*" or a space) and the ref, then the tip, then the upstream.
         var refLine = exitRef != 0
             ? null
             : (stdoutRef ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(l => l.TrimEnd('\r'))
-                .FirstOrDefault(l => l.Length == localRef.Length + 1 && l.EndsWith(localRef, StringComparison.Ordinal));
+                .Select(l => l.TrimEnd('\r').Split('\t'))
+                .FirstOrDefault(fields => fields[0].Length == localRef.Length + 1 && fields[0].EndsWith(localRef, StringComparison.Ordinal));
         if (refLine is null)
         {
             logger.LogWarning("Branch {Branch} does not exist in {RepoPath}", localName, repoPath);
+            details.FailureKind = BranchDeleteFailureKinds.NotFound;
             return (false, "Branch does not exist.");
         }
 
-        if (refLine[0] == '*')
+        details.BranchSha = refLine.Length > 1 && refLine[1].Length > 0 ? refLine[1] : null;
+        details.HasUpstream = refLine.Length > 2 && refLine[2].Length > 0;
+
+        if (refLine[0][0] == '*')
         {
             logger.LogWarning("Cannot delete current branch {Branch} in {RepoPath}", localName, repoPath);
+            details.FailureKind = BranchDeleteFailureKinds.CheckedOut;
             return (false, "Cannot delete the current branch. Check out another branch first.");
+        }
+
+        // The caller decided for a particular tip (the one it reviewed, or the one a merged pull request merged). A
+        // branch that has moved since is another branch as far as that decision goes, and is kept.
+        if (!string.IsNullOrWhiteSpace(expectedSha)
+            && !string.Equals(details.BranchSha, expectedSha.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning("Branch {Branch} in {RepoPath} is no longer at the expected commit; not deleting.", localName, repoPath);
+            details.FailureKind = BranchDeleteFailureKinds.TipChanged;
+            return (false, $"The branch '{localName}' has new commits since it was checked, so it was kept.");
         }
 
         // The reference-transaction hook reports the branch lists to the App. A caller that updates them itself skips it.
@@ -905,6 +955,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
             if (!mergedIntoDefault)
             {
                 logger.LogWarning("Branch {Branch} is not fully merged in {RepoPath}; not deleting.", localName, repoPath);
+                details.FailureKind = BranchDeleteFailureKinds.NotFullyMerged;
                 return (false, $"error: The branch '{localName}' is not fully merged.");
             }
 
@@ -1155,6 +1206,16 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
     {
         if (string.IsNullOrWhiteSpace(repoPath) || !Directory.Exists(repoPath) || string.IsNullOrWhiteSpace(branchName))
             return (false, "Invalid repository path or branch name");
+
+        // git reset moves whatever is checked out. The branch name comes from the caller's stored state, which is
+        // behind when the branch was switched outside GrayMoon: resetting then would move the other branch to this
+        // branch's remote ref and, without keepChanges, discard its commits and files. So the checkout is read
+        // first, and anything but the named branch is refused before git changes anything.
+        var checkedOut = await reader.GetCurrentBranchNameAsync(repoPath, ct);
+        if (string.IsNullOrWhiteSpace(checkedOut))
+            return (false, $"The repository is not on a branch, so the commits of '{branchName}' cannot be undone here. Nothing was changed.");
+        if (!string.Equals(checkedOut.Trim(), branchName.Trim(), StringComparison.Ordinal))
+            return (false, $"The repository is on branch '{checkedOut.Trim()}', not '{branchName.Trim()}'. Sync it and try again. Nothing was changed.");
 
         // A branch that was never pushed has no origin ref to go back to. Its outgoing commits are counted against
         // the no-upstream compare ref, so the undo goes back to where the branch left that ref. Never push here:

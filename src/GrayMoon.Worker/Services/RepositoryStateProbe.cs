@@ -20,6 +20,9 @@ public sealed class RepositoryStateProbe(
 
         var capabilities = options.Capabilities ?? RepositoryOperationCapabilities.LegacyFullEnrichment;
 
+        // Before the first read: everything in the snapshot was read at or after this point.
+        var captureStart = RepositoryStateCaptureClock.Next();
+
         // Start the csproj scan first; it is IO-bound and independent of every git call below.
         var projectsTask = options.IncludeProjects && capabilities.ShouldDiscoverProjects
             ? FindProjectsOrNullAsync(repoPath, ct)
@@ -125,6 +128,9 @@ public sealed class RepositoryStateProbe(
             UpstreamProbed = options.IncludeCommitCounts && (!hasBranch || counts.UpstreamProbed),
             BranchesProbed = branchesProbed,
             ProjectsProbed = projects != null,
+            CaptureSession = RepositoryStateCaptureClock.Session,
+            CaptureStart = captureStart,
+            CaptureEnd = RepositoryStateCaptureClock.Next(),
         };
 
         return new RepositoryStateCapture(snapshot, rawProjects);

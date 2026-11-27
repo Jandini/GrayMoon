@@ -15,7 +15,7 @@ public sealed class CreateFeatureHookSyncHoldTests
     public async Task Checkout_syncs_are_held_before_the_first_worktree_and_released_after_the_last()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        RespondToHeadCommits(ctx);
+        await RespondToHeadCommits(ctx);
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:wt" });
         ctx.WorkerBridge.Respond(WorkerHubMethods.HoldWorktreeHookSyncs, new { success = true });
 
@@ -41,7 +41,7 @@ public sealed class CreateFeatureHookSyncHoldTests
     public async Task The_hold_is_released_when_worktree_creation_throws()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
-        RespondToHeadCommits(ctx);
+        await RespondToHeadCommits(ctx);
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, _ => throw new InvalidOperationException("worker gone"));
         ctx.WorkerBridge.Respond(WorkerHubMethods.HoldWorktreeHookSyncs, new { success = true });
 
@@ -56,7 +56,8 @@ public sealed class CreateFeatureHookSyncHoldTests
 
     private static object? Arg(object args, string name) => args.GetType().GetProperty(name)?.GetValue(args);
 
-    private static void RespondToHeadCommits(SyncStateTestContext ctx) =>
+    private static Task RespondToHeadCommits(SyncStateTestContext ctx)
+    {
         ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -68,4 +69,6 @@ public sealed class CreateFeatureHookSyncHoldTests
                 ["graymoon-api"] = "develop",
             },
         });
+        return ctx.StoreHeadSnapshotAsCurrentStateAsync();
+    }
 }

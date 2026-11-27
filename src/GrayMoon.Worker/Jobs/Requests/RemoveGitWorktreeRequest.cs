@@ -35,6 +35,13 @@ public sealed class RemoveGitWorktreeRequest
     public bool Unlock { get; set; }
 
     /// <summary>
+    /// Optional, only read together with <see cref="Force"/>: the HEAD commit the worktree had when its changes were
+    /// reviewed. A worktree that is on another commit now is kept and reported as <c>ChangedSinceReview</c>.
+    /// </summary>
+    [JsonPropertyName("expectedHeadSha")]
+    public string? ExpectedHeadSha { get; set; }
+
+    /// <summary>
     /// Optional: the Workspace's persisted Feature storage root, ending in <c>&lt;Workspace&gt;\features</c>.
     /// Required, together with <see cref="FeatureRootPath"/>, before any leftover worktree files are deleted;
     /// without it, leftover files are only reported. An old App that does not send this gets today's

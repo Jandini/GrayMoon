@@ -30,4 +30,26 @@ public sealed class FetchCommitsResponse
 
     [JsonPropertyName("currentTag")]
     public string? CurrentTag { get; set; }
+
+    /// <summary>
+    /// The outgoing and incoming counts were computed (a failed git read leaves this false, and the App then keeps
+    /// what it has stored). False on a tag or a detached checkout: there is no branch to count.
+    /// </summary>
+    [JsonPropertyName("commitCountsProbed")]
+    public bool CommitCountsProbed { get; set; }
+
+    [JsonPropertyName("localBranches")]
+    public IReadOnlyList<string>? LocalBranches { get; set; }
+
+    /// <summary>Origin branches after the pruning fetch, without the <c>origin/</c> prefix.</summary>
+    [JsonPropertyName("remoteBranches")]
+    public IReadOnlyList<string>? RemoteBranches { get; set; }
+
+    /// <summary>The repository default branch without the <c>origin/</c> prefix, when known.</summary>
+    [JsonPropertyName("defaultBranch")]
+    public string? DefaultBranch { get; set; }
+
+    /// <summary>The tag and branch lists are complete and may replace what the App has stored.</summary>
+    [JsonPropertyName("branchesProbed")]
+    public bool BranchesProbed { get; set; }
 }

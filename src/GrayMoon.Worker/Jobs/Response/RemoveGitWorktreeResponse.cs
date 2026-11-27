@@ -39,4 +39,16 @@ public sealed class RemoveGitWorktreeResponse
     /// </summary>
     [JsonPropertyName("failureKind")]
     public string? FailureKind { get; set; }
+
+    /// <summary>The branch the removed worktree was on, from the inventory read before the removal; null when detached or when it was not registered.</summary>
+    [JsonPropertyName("branch")]
+    public string? Branch { get; set; }
+
+    /// <summary>The commit the removed worktree was on; null when it was not registered.</summary>
+    [JsonPropertyName("headSha")]
+    public string? HeadSha { get; set; }
+
+    /// <summary>Whether the removed worktree was on a detached HEAD; null when it was not registered.</summary>
+    [JsonPropertyName("wasDetached")]
+    public bool? WasDetached { get; set; }
 }

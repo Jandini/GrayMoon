@@ -126,42 +126,55 @@ public sealed class SyncCommandHandler(
         }
 
         // The queue is serial and a burst of hooks can hold a snapshot for minutes. A pull or sync that began after
-        // the snapshot arrived has read the checkout since, so the groups it wrote are newer than the snapshot's.
+        // the snapshot arrived has read the checkout since, so the groups it wrote are newer than the snapshot's. And
+        // of two hook snapshots the one the Worker captured first is the older one, whichever arrived first.
         if (receivedAt is { } received
             && scope.ServiceProvider.GetService<RepositoryStateFreshness>() is { } freshness)
         {
-            var current = freshness.WithoutSupersededGroups(contextId.Value, n.RepositoryId, snapshot, received);
-            if (current is null)
+            var verdict = freshness.Evaluate(contextId.Value, n.RepositoryId, snapshot, received, n.WorkspaceId);
+            if (verdict.Snapshot is null)
             {
                 logger.LogInformation(
-                    "SyncCommand: dropped a snapshot that a later operation superseded: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}, branch={Branch}",
+                    "SyncCommand: dropped a snapshot ({Why}): workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}, version={Version}, branch={Branch}",
+                    verdict.Duplicate ? "already applied" : "superseded by newer evidence",
                     n.WorkspaceId, contextId.Value.Value, n.RepositoryId, n.Version, n.Branch);
                 return;
             }
 
-            if (!ReferenceEquals(current, snapshot))
+            if (!ReferenceEquals(verdict.Snapshot, snapshot))
             {
                 logger.LogInformation(
-                    "SyncCommand: applying only the groups a later operation did not supersede: workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}",
-                    n.WorkspaceId, contextId.Value.Value, n.RepositoryId);
-                snapshot = current;
+                    "SyncCommand: applying only the groups newer evidence did not supersede ({Superseded} left out): workspace={WorkspaceId}, context={ContextId}, repo={RepositoryId}",
+                    verdict.Superseded, n.WorkspaceId, contextId.Value.Value, n.RepositoryId);
+                snapshot = verdict.Snapshot;
+            }
+
+            // Two captures overlapped on the Worker: neither is known to be the later one. The snapshot is applied
+            // (it may be the newer), and the repository is read again so that what is stored is not a guess.
+            if (verdict.Ambiguous != RepositoryFactGroups.None)
+            {
+                scope.ServiceProvider.GetService<IRepositoryStateReconciler>()?.Request(
+                    n.WorkspaceId, contextId.Value, n.RepositoryId, $"overlapping captures ({verdict.Ambiguous})");
             }
         }
 
         // A branch created or deleted outside GrayMoon reports the branch lists and nothing else. It is not a completed
         // sync: it must not derive sync status, look up pull requests or recompute dependencies for a checkout it never read.
         var refsOnly = snapshot.IsBranchRefsOnly;
-        await stateWriter.ApplyAsync(contextId.Value, n.WorkspaceId, n.RepositoryId, snapshot, new RepositoryStateWriteOptions
+        var written = await stateWriter.ApplyAsync(contextId.Value, n.WorkspaceId, n.RepositoryId, snapshot, new RepositoryStateWriteOptions
         {
             SyncStatus = refsOnly ? SyncStatusWrite.Leave : SyncStatusWrite.Derive,
             ErrorMessageForcesInSync = true,
             // A just-created Feature worktree is on a new local branch: it has no pull request to find.
             ReconcilePullRequest = !n.FreshWorktree && !refsOnly,
         });
+        // The context or the link was deleted while the notification waited: nothing was stored, nothing follows.
+        if (!written.Applied)
+            return;
 
         // From here the repository's state is stored: the completion of this context covers it, whatever happens below.
         observer.StateWritten(new AppliedSync(
-            n.WorkspaceId, contextId.Value, contextInfo.IsSpecialWorkspace, n.RepositoryId, NeedsRecompute: !refsOnly));
+            n.WorkspaceId, contextId.Value, contextInfo.IsSpecialWorkspace, n.RepositoryId, NeedsRecompute: !refsOnly, written.Changed));
 
         var branchWriter = scope.ServiceProvider.GetRequiredService<RepositoryBranchWriter>();
 
@@ -235,20 +248,60 @@ public sealed class SyncCommandHandler(
 
         try
         {
-            // Refs-only notifications report branch lists and nothing the recompute reads.
-            if (items.Any(i => i.NeedsRecompute))
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var coalescer = scope.ServiceProvider.GetRequiredService<SyncRecomputeCoalescer>();
+            var key = $"{workspaceId}:{contextId.Value}";
+
+            // The recompute reads the checked-out commit, the version and the projects. A notification that changed
+            // none of them (it confirmed the stored state, or changed commit counts, the upstream flag or branch
+            // lists only) leaves every derived value as it is. Refs-only notifications never need it.
+            var changed = RepositoryFactGroups.None;
+            var unknown = false;
+            foreach (var item in items.Where(i => i.NeedsRecompute))
+            {
+                if (item.Changed is { } groups)
+                    changed |= groups;
+                else
+                    unknown = true;
+            }
+
+            var needed = unknown || WorkspaceStateRecomputeScope.NeedsRecompute(changed);
+            // A recompute that failed earlier left the derived state behind the rows: this completion makes up for it.
+            var owed = coalescer.TakeOwed(key);
+            // So does a Workspace profile that changed since the last completion of this context: what is derived
+            // (versions, version file values, dependency state) depends on it.
+            var profile = await scope.ServiceProvider.GetRequiredService<GrayMoon.Application.Workspaces.IWorkspaceCapabilitiesResolver>().GetAsync(workspaceId);
+            var profileChanged = coalescer.ObserveProfile(key, $"{profile.Type}|{profile.VersioningMode}|{profile.CiProvider}");
+            owed |= profileChanged;
+            if (needed || owed)
             {
                 var recomputeSw = Stopwatch.StartNew();
-                await using var scope = scopeFactory.CreateAsyncScope();
                 var recomputeScope = scope.ServiceProvider.GetRequiredService<WorkspaceStateRecomputeScope>();
-                // The recompute is a full rebuild from the stored rows, so one run covers every state write before it.
-                // The coalescer keeps it from overlapping the recompute of a commit sync on the same context.
-                await scope.ServiceProvider.GetRequiredService<SyncRecomputeCoalescer>().RunAsync(
-                    $"{workspaceId}:{contextId.Value}",
-                    () => recomputeScope.RecomputeAsync(workspaceId, contextId));
+                var complete = true;
+                try
+                {
+                    // The recompute is a full rebuild from the stored rows, so one run covers every state write before it.
+                    // The coalescer keeps it from overlapping the recompute of a commit sync on the same context.
+                    await coalescer.RunAsync(key, async () => complete = await recomputeScope.RecomputeAsync(workspaceId, contextId));
+                }
+                catch
+                {
+                    coalescer.MarkOwed(key);
+                    throw;
+                }
+
+                if (!complete)
+                    coalescer.MarkOwed(key);
                 logger.LogDebug(
-                    "SyncCommand recompute for {Count} notification(s) took {ElapsedMs}ms: workspace={WorkspaceId}, context={ContextId}",
-                    items.Count, recomputeSw.ElapsedMilliseconds, workspaceId, contextId.Value);
+                    "SyncCommand recompute for {Count} notification(s) took {ElapsedMs}ms: workspace={WorkspaceId}, context={ContextId}, reason={Reason}, changed={Changed}, complete={Complete}",
+                    items.Count, recomputeSw.ElapsedMilliseconds, workspaceId, contextId.Value,
+                    unknown ? "change not reported" : needed ? "inputs changed" : profileChanged ? "Workspace profile changed" : "owed after a failed recompute", changed, complete);
+            }
+            else
+            {
+                logger.LogDebug(
+                    "SyncCommand recompute not needed for {Count} notification(s): workspace={WorkspaceId}, context={ContextId}, changed={Changed}",
+                    items.Count, workspaceId, contextId.Value, changed);
             }
         }
         finally

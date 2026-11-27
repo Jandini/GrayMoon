@@ -61,7 +61,20 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
     /// context there throws "A second operation was started on this context instance before a previous operation
     /// completed." and can leave the shared instance unusable for the rest of the circuit (e.g. the Git Changes page).
     /// </summary>
+    /// <remarks>
+    /// Every Upsert method of this class reads the row, decides and saves, and nothing serializes its callers
+    /// (the polling loop of each open tab, the hook sync, a forced refresh inside an operation). Each one
+    /// therefore runs its whole read-decide-save through <see cref="DbWriteConflict.RetryAsync(Func{Task}, CancellationToken)"/>
+    /// on a new context per attempt, so a caller that lost the race reads what the other one stored and still
+    /// stores what it was asked to store.
+    /// </remarks>
     public async Task UpsertAsync(int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken = default)
+    {
+        await DbWriteConflict.RetryAsync(() => UpsertOnceAsync(workspaceRepositoryId, pr, cancellationToken), cancellationToken);
+        logger.LogTrace("Upserted PR for WorkspaceRepositoryId={WorkspaceRepositoryId}, PR#={Number}", workspaceRepositoryId, pr?.Number);
+    }
+
+    private async Task UpsertOnceAsync(int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -97,7 +110,6 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogTrace("Upserted PR for WorkspaceRepositoryId={WorkspaceRepositoryId}, PR#={Number}", workspaceRepositoryId, pr?.Number);
     }
 
     /// <summary>
@@ -111,26 +123,31 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         if (items.Count == 0)
             return;
 
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
-        var existing = await dbContext.WorkspaceRepositoryPullRequests
-            .Where(prr => ids.Contains(prr.WorkspaceRepositoryId))
-            .ToListAsync(cancellationToken);
-        var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
-        var now = DateTime.UtcNow;
-        foreach (var (workspaceRepositoryId, pr) in items)
-        {
-            if (!byId.TryGetValue(workspaceRepositoryId, out var row))
+        await DbWriteConflict.RetryAsync(
+            async () =>
             {
-                row = new WorkspaceRepositoryPullRequest { WorkspaceRepositoryId = workspaceRepositoryId };
-                dbContext.WorkspaceRepositoryPullRequests.Add(row);
-                byId[workspaceRepositoryId] = row;
-            }
+                await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+                var existing = await dbContext.WorkspaceRepositoryPullRequests
+                    .Where(prr => ids.Contains(prr.WorkspaceRepositoryId))
+                    .ToListAsync(cancellationToken);
+                var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
+                var now = DateTime.UtcNow;
+                foreach (var (workspaceRepositoryId, pr) in items)
+                {
+                    if (!byId.TryGetValue(workspaceRepositoryId, out var row))
+                    {
+                        row = new WorkspaceRepositoryPullRequest { WorkspaceRepositoryId = workspaceRepositoryId };
+                        dbContext.WorkspaceRepositoryPullRequests.Add(row);
+                        byId[workspaceRepositoryId] = row;
+                    }
 
-            ApplyLegacy(row, pr, now);
-        }
+                    ApplyLegacy(row, pr, now);
+                }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            },
+            cancellationToken);
     }
 
     /// <summary>
@@ -139,6 +156,17 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
     /// doc §17. Pass null to remove the row (no PR / no branch to have one).
     /// </summary>
     public async Task UpsertContextAsync(int contextId, int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken = default)
+    {
+        await DbWriteConflict.RetryAsync(() => UpsertContextOnceAsync(contextId, workspaceRepositoryId, pr, cancellationToken), cancellationToken);
+        if (pr != null)
+        {
+            logger.LogTrace(
+                "Upserted context PR for ContextId={ContextId}, WorkspaceRepositoryId={WorkspaceRepositoryId}, PR#={Number}",
+                contextId, workspaceRepositoryId, pr.Number);
+        }
+    }
+
+    private async Task UpsertContextOnceAsync(int contextId, int workspaceRepositoryId, PullRequestInfo? pr, CancellationToken cancellationToken)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -187,9 +215,6 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        logger.LogTrace(
-            "Upserted context PR for ContextId={ContextId}, WorkspaceRepositoryId={WorkspaceRepositoryId}, PR#={Number}",
-            contextId, workspaceRepositoryId, pr.Number);
     }
 
     /// <summary>
@@ -204,42 +229,47 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         if (items.Count == 0)
             return;
 
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
-        var existing = await dbContext.WorkspaceRepositoryContextPullRequests
-            .Where(prr => prr.WorkspaceFeatureContextId == contextId && ids.Contains(prr.WorkspaceRepositoryId))
-            .ToListAsync(cancellationToken);
-        var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
-        var now = DateTime.UtcNow;
-        foreach (var (workspaceRepositoryId, pr) in items)
-        {
-            byId.TryGetValue(workspaceRepositoryId, out var row);
-            if (pr == null)
+        await DbWriteConflict.RetryAsync(
+            async () =>
             {
-                if (row != null)
+                await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+                var existing = await dbContext.WorkspaceRepositoryContextPullRequests
+                    .Where(prr => prr.WorkspaceFeatureContextId == contextId && ids.Contains(prr.WorkspaceRepositoryId))
+                    .ToListAsync(cancellationToken);
+                var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
+                var now = DateTime.UtcNow;
+                foreach (var (workspaceRepositoryId, pr) in items)
                 {
-                    dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
-                    byId.Remove(workspaceRepositoryId);
+                    byId.TryGetValue(workspaceRepositoryId, out var row);
+                    if (pr == null)
+                    {
+                        if (row != null)
+                        {
+                            dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
+                            byId.Remove(workspaceRepositoryId);
+                        }
+
+                        continue;
+                    }
+
+                    if (row == null)
+                    {
+                        row = new WorkspaceRepositoryContextPullRequest
+                        {
+                            WorkspaceFeatureContextId = contextId,
+                            WorkspaceRepositoryId = workspaceRepositoryId
+                        };
+                        dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
+                        byId[workspaceRepositoryId] = row;
+                    }
+
+                    ApplyContext(row, pr, now);
                 }
 
-                continue;
-            }
-
-            if (row == null)
-            {
-                row = new WorkspaceRepositoryContextPullRequest
-                {
-                    WorkspaceFeatureContextId = contextId,
-                    WorkspaceRepositoryId = workspaceRepositoryId
-                };
-                dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
-                byId[workspaceRepositoryId] = row;
-            }
-
-            ApplyContext(row, pr, now);
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            },
+            cancellationToken);
     }
 
     /// <summary>
@@ -253,27 +283,32 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         if (items.Count == 0)
             return;
 
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
-        var existing = await dbContext.WorkspaceRepositoryPullRequests
-            .Where(prr => ids.Contains(prr.WorkspaceRepositoryId))
-            .ToListAsync(cancellationToken);
-        var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
-        var now = DateTime.UtcNow;
-        foreach (var (workspaceRepositoryId, prs) in items)
-        {
-            if (!byId.TryGetValue(workspaceRepositoryId, out var row))
+        await DbWriteConflict.RetryAsync(
+            async () =>
             {
-                row = new WorkspaceRepositoryPullRequest { WorkspaceRepositoryId = workspaceRepositoryId };
-                dbContext.WorkspaceRepositoryPullRequests.Add(row);
-                byId[workspaceRepositoryId] = row;
-            }
+                await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+                var existing = await dbContext.WorkspaceRepositoryPullRequests
+                    .Where(prr => ids.Contains(prr.WorkspaceRepositoryId))
+                    .ToListAsync(cancellationToken);
+                var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
+                var now = DateTime.UtcNow;
+                foreach (var (workspaceRepositoryId, prs) in items)
+                {
+                    if (!byId.TryGetValue(workspaceRepositoryId, out var row))
+                    {
+                        row = new WorkspaceRepositoryPullRequest { WorkspaceRepositoryId = workspaceRepositoryId };
+                        dbContext.WorkspaceRepositoryPullRequests.Add(row);
+                        byId[workspaceRepositoryId] = row;
+                    }
 
-            ApplyLegacy(row, prs.Own, now);
-            ApplyParent(row, prs.Parent);
-        }
+                    ApplyLegacy(row, prs.Own, now);
+                    ApplyParent(row, prs.Parent);
+                }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            },
+            cancellationToken);
     }
 
     /// <summary>Fork-aware counterpart of <see cref="UpsertContextManyAsync"/>. A <see cref="BranchPullRequests"/> with neither slot deletes the row.</summary>
@@ -285,43 +320,48 @@ public sealed class WorkspacePullRequestRepository(IDbContextFactory<AppDbContex
         if (items.Count == 0)
             return;
 
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
-        var existing = await dbContext.WorkspaceRepositoryContextPullRequests
-            .Where(prr => prr.WorkspaceFeatureContextId == contextId && ids.Contains(prr.WorkspaceRepositoryId))
-            .ToListAsync(cancellationToken);
-        var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
-        var now = DateTime.UtcNow;
-        foreach (var (workspaceRepositoryId, prs) in items)
-        {
-            byId.TryGetValue(workspaceRepositoryId, out var row);
-            if (prs.Own == null && prs.Parent == null)
+        await DbWriteConflict.RetryAsync(
+            async () =>
             {
-                if (row != null)
+                await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var ids = items.Select(i => i.WorkspaceRepositoryId).Distinct().ToList();
+                var existing = await dbContext.WorkspaceRepositoryContextPullRequests
+                    .Where(prr => prr.WorkspaceFeatureContextId == contextId && ids.Contains(prr.WorkspaceRepositoryId))
+                    .ToListAsync(cancellationToken);
+                var byId = existing.ToDictionary(prr => prr.WorkspaceRepositoryId);
+                var now = DateTime.UtcNow;
+                foreach (var (workspaceRepositoryId, prs) in items)
                 {
-                    dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
-                    byId.Remove(workspaceRepositoryId);
+                    byId.TryGetValue(workspaceRepositoryId, out var row);
+                    if (prs.Own == null && prs.Parent == null)
+                    {
+                        if (row != null)
+                        {
+                            dbContext.WorkspaceRepositoryContextPullRequests.Remove(row);
+                            byId.Remove(workspaceRepositoryId);
+                        }
+
+                        continue;
+                    }
+
+                    if (row == null)
+                    {
+                        row = new WorkspaceRepositoryContextPullRequest
+                        {
+                            WorkspaceFeatureContextId = contextId,
+                            WorkspaceRepositoryId = workspaceRepositoryId
+                        };
+                        dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
+                        byId[workspaceRepositoryId] = row;
+                    }
+
+                    ApplyContext(row, prs.Own, now);
+                    ApplyParent(row, prs.Parent);
                 }
 
-                continue;
-            }
-
-            if (row == null)
-            {
-                row = new WorkspaceRepositoryContextPullRequest
-                {
-                    WorkspaceFeatureContextId = contextId,
-                    WorkspaceRepositoryId = workspaceRepositoryId
-                };
-                dbContext.WorkspaceRepositoryContextPullRequests.Add(row);
-                byId[workspaceRepositoryId] = row;
-            }
-
-            ApplyContext(row, prs.Own, now);
-            ApplyParent(row, prs.Parent);
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            },
+            cancellationToken);
     }
 
     private static void ApplyParent(WorkspaceRepositoryPullRequest row, PullRequestInfo? pr)

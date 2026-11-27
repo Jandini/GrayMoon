@@ -114,6 +114,41 @@ public sealed class PushUndoReturnCapabilitiesTests : IDisposable
         Assert.Null(notification.State.GitVersion);
     }
 
+    /// <summary>
+    /// A discarding undo puts the project files of the remote commit back and no git hook reports a reset, so the
+    /// App kept the projects and package references of the undone commits until the next Sync.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true, 1)]
+    // Keep changes: the files are as they were, the stored projects are still right.
+    [InlineData(true, true, 0)]
+    // A Workspace that does not discover projects has none to refresh.
+    [InlineData(false, false, 0)]
+    public async Task Undo_push_refresh_scans_projects_only_after_a_discarding_undo_in_a_workspace_that_discovers_them(
+        bool keepChanges, bool discoverProjects, int expectedScans)
+    {
+        var repoPath = await CloneOnFeatureBranchAsync();
+        var (projectScanner, versionProviders) = NewDoubles();
+        var command = new UndoPushCommand(_git, _reader, versionProviders, new DisconnectedHubProvider(), NullLogger<UndoPushCommand>.Instance, projectScanner);
+
+        var notification = await command.BuildPostResetNotificationAsync(
+            new UndoPushRequest
+            {
+                WorkspaceId = 1,
+                RepositoryId = 2,
+                KeepChanges = keepChanges,
+                Capabilities = RepositoryOperationCapabilities.For(calculateVersion: false, discoverProjects: discoverProjects),
+            },
+            repoPath,
+            "feature/x");
+
+        Assert.Equal(expectedScans, projectScanner.FindCalls);
+        Assert.Equal(expectedScans == 1, notification.State!.ProjectsProbed);
+        Assert.Equal(expectedScans == 1, notification.State.Projects is not null);
+        Assert.Equal(expectedScans == 1, notification.Projects is not null);
+        Assert.True(notification.State.IdentityProbed);
+    }
+
     [Fact]
     public async Task Push_refresh_for_basic_without_versioning_launches_no_gitversion_and_scans_no_projects()
     {

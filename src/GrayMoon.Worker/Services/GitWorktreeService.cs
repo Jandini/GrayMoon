@@ -359,7 +359,8 @@ public sealed class GitWorktreeService(
         CancellationToken ct,
         string? featureRootPath = null,
         string? featureStorageRoot = null,
-        bool unlock = false)
+        bool unlock = false,
+        string? expectedHeadSha = null)
     {
         if (string.IsNullOrWhiteSpace(mainRepositoryPath) || !Directory.Exists(mainRepositoryPath))
             return (false, false, "RepositoryNotFound", "Repository not found.", WorktreeResidueResult.None);
@@ -416,6 +417,36 @@ public sealed class GitWorktreeService(
             return (false, false, "CannotRemovePrimary", "Cannot remove the primary repository worktree.", WorktreeResidueResult.None);
         }
 
+        // A forced removal discards what the user reviewed. A worktree that is on another commit since then (new
+        // commits, a checkout) is not what was reviewed, and is kept. The commit is the one of the inventory just read.
+        if (force
+            && !string.IsNullOrWhiteSpace(expectedHeadSha)
+            && !string.Equals(existing.HeadSha, expectedHeadSha.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return (
+                false, false, WorktreeRemovalErrorCodes.ChangedSinceReview,
+                "The folder is on another commit than when its changes were reviewed, so nothing was discarded.",
+                WorktreeResidueResult.None);
+        }
+
+        // The lock is a fact of the inventory just read: it is not learned from the text of git's refusal.
+        if (existing.IsLocked && !unlock)
+        {
+            var reason = string.IsNullOrWhiteSpace(existing.LockReason) ? "" : $" Lock reason: {existing.LockReason.Trim()}.";
+            return (false, false, WorktreeRemovalErrorCodes.WorktreeLocked, $"The worktree is locked.{reason}", WorktreeResidueResult.None);
+        }
+
+        // What git worktree remove does not protect. It refuses modified and untracked files and submodules, and
+        // nothing else: a nested repository inside an ignored folder, a clean worktree in the middle of a rebase,
+        // merge or cherry-pick, and commits only a detached HEAD holds are all deleted with exit code 0 (git 2.55).
+        var guard = await CheckRemovalGuardsAsync(mainRepositoryPath, canonicalWorktreePath, existing, force, ct);
+        if (guard is { } blocked)
+        {
+            logger.LogWarning(
+                "Worktree {WorktreePath} was not removed: {Code}. {Message}", canonicalWorktreePath, blocked.Code, blocked.Message);
+            return (false, false, blocked.Code, blocked.Message, WorktreeResidueResult.None);
+        }
+
         // D5: unlock is only authorized after explicit consent, surfaced in the Remove dialog when
         // InspectWorktree reports the worktree as locked. A failed unlock (for example it was not
         // actually locked) is logged and the remove below is attempted anyway, so git reports the
@@ -450,11 +481,16 @@ public sealed class GitWorktreeService(
 
             if (GitWorktreeOccupancy.FindByPath(after, canonicalWorktreePath) != null)
             {
-                // Still registered: git genuinely refused (for example dirty without force).
+                // Still registered: git genuinely refused. Why is established from the worktree itself, not from
+                // the wording of git's message: a worktree that has changes was refused for them.
+                var refusedForChanges = !force && await HasUncommittedChangesAsync(canonicalWorktreePath, ct);
                 logger.LogError(
-                    "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}",
-                    mainRepositoryPath, canonicalWorktreePath, force, exitCode);
-                return (false, false, "GitFailed", gitError, WorktreeResidueResult.None);
+                    "Git worktree remove failed for {RepoPath}. Path={WorktreePath}, Force={Force}, ExitCode={ExitCode}, UncommittedChanges={UncommittedChanges}",
+                    mainRepositoryPath, canonicalWorktreePath, force, exitCode, refusedForChanges);
+                return (
+                    false, false,
+                    refusedForChanges ? WorktreeRemovalErrorCodes.UncommittedChanges : "GitFailed",
+                    gitError, WorktreeResidueResult.None);
             }
 
             // Git unregistered the worktree all the same. On Windows, deleting the directory itself can fail
@@ -471,8 +507,144 @@ public sealed class GitWorktreeService(
 
         var residue = await RemoveWorktreeResidueAsync(
             mainRepositoryPath, canonicalWorktreePath, featureRootPath, featureStorageRoot, isRegisteredWorktree: false, ct);
-        return (true, false, null, null, residue);
+        return (true, false, null, null, residue with { Registration = existing });
     }
+
+    /// <summary>
+    /// The checks a removal needs on top of git's own, under the exclusive claim and right before the command. Null
+    /// when the removal may go on.
+    /// <list type="bullet">
+    /// <item>A nested repository anywhere in the worktree stops the removal, with or without force: it may hold
+    /// commits that exist nowhere else, and it was never part of what a "discard uncommitted changes" consent showed.</item>
+    /// <item>Commits that only this worktree's detached HEAD holds stop it, with or without force: discarding
+    /// uncommitted changes is not dropping commits.</item>
+    /// <item>An unfinished merge, rebase or cherry-pick stops a non-force removal. With force the caller saw it
+    /// (the inspection reports it as a conflict) and authorized the discard.</item>
+    /// </list>
+    /// Ignored files are not a reason to stop: they are build output by the repository's own declaration and go
+    /// with the worktree, as git itself decides.
+    /// </summary>
+    private async Task<(string Code, string Message)?> CheckRemovalGuardsAsync(
+        string mainRepositoryPath,
+        string worktreePath,
+        GitWorktreeInfo registration,
+        bool force,
+        CancellationToken ct)
+    {
+        if (!Directory.Exists(worktreePath))
+            return null;
+
+        var nested = FindNestedRepository(worktreePath);
+        if (nested is not null)
+        {
+            return (
+                WorktreeRemovalErrorCodes.NestedRepository,
+                $"The folder contains another Git repository at '{nested}'. Move it out or delete it, then remove the Feature again.");
+        }
+
+        if (registration.IsDetached && !string.IsNullOrWhiteSpace(registration.HeadSha))
+        {
+            var preserved = await IsCommitHeldByARefAsync(mainRepositoryPath, registration.HeadSha!, ct);
+            if (preserved != true)
+            {
+                return (
+                    WorktreeRemovalErrorCodes.UnpreservedCommits,
+                    preserved == false
+                        ? $"The checked-out commit {Shorten(registration.HeadSha!)} is not on any branch or tag, so removing the folder would lose it. "
+                          + "Create a branch there (git branch <name>) or check out the Feature branch, then remove the Feature again."
+                        : "Could not check whether the checked-out commit is on a branch or tag, so the folder was kept.");
+            }
+        }
+
+        if (!force && await ProbeOperationInProgressAsync(worktreePath, ct) == true)
+        {
+            return (
+                WorktreeRemovalErrorCodes.OperationInProgress,
+                "A merge, rebase or cherry-pick is not finished in this folder. Finish or abort it, then remove the Feature again.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when a branch, a remote-tracking branch or a tag contains <paramref name="commit"/>; false when none
+    /// does; null when git could not answer. Another worktree's detached HEAD does not count: it is not a ref.
+    /// </summary>
+    private async Task<bool?> IsCommitHeldByARefAsync(string mainRepositoryPath, string commit, CancellationToken ct)
+    {
+        var (exitCode, stdout, stderr) = await runner.RunAsync(
+            "git",
+            ["for-each-ref", "--count=1", "--format=%(refname)", "--contains", commit.Trim(), "refs/heads", "refs/remotes", "refs/tags"],
+            mainRepositoryPath,
+            null,
+            ct,
+            GitLockIntent.Read);
+        if (exitCode != 0)
+        {
+            logger.LogWarning(
+                "Git for-each-ref --contains failed for {RepoPath}. ExitCode={ExitCode}, Output={Output}",
+                mainRepositoryPath, exitCode, CombineOutput(stdout, stderr));
+            return null;
+        }
+
+        return !string.IsNullOrWhiteSpace(stdout);
+    }
+
+    /// <summary>
+    /// The first folder below <paramref name="worktreePath"/> that is a Git repository or worktree of its own (it has
+    /// a <c>.git</c> folder or file), as a path relative to the worktree; null when there is none. The worktree's own
+    /// top-level <c>.git</c> file is not one. Never enters a junction or symbolic link, and does not look inside a
+    /// nested repository it found. Folders that cannot be read are skipped: git's removal fails on them anyway.
+    /// </summary>
+    internal static string? FindNestedRepository(string worktreePath)
+    {
+        var pending = new Stack<string>();
+        pending.Push(worktreePath);
+        while (pending.Count > 0)
+        {
+            var folder = pending.Pop();
+            IEnumerable<DirectoryInfo> children;
+            try
+            {
+                children = new DirectoryInfo(folder).EnumerateDirectories();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                if (child.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    continue;
+
+                // Git's own data is never walked. A folder is only entered after it was found to have no ".git", and
+                // the worktree's own top-level ".git" is a file (the primary checkout was refused before this).
+                if (string.Equals(child.Name, ".git", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var dotGit = Path.Combine(child.FullName, ".git");
+                if (Directory.Exists(dotGit) || File.Exists(dotGit))
+                    return Path.GetRelativePath(worktreePath, child.FullName);
+
+                pending.Push(child.FullName);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>True when the worktree has staged, unstaged, untracked or conflicted entries. A status that cannot be read is not evidence of changes.</summary>
+    private async Task<bool> HasUncommittedChangesAsync(string worktreePath, CancellationToken ct)
+    {
+        if (!Directory.Exists(worktreePath))
+            return false;
+
+        var status = await ProbeWorktreeStatusAsync(worktreePath, ct);
+        return status.Success && status.Staged + status.Unstaged + status.Untracked + status.Conflicts > 0;
+    }
+
+    private static string Shorten(string sha) => sha.Length > 10 ? sha[..10] : sha;
 
     /// <summary>
     /// After Git's own worktree removal, deletes any leftover files in <paramref name="worktreePath"/> with a

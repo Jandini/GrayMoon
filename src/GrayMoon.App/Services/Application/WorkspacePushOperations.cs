@@ -20,8 +20,34 @@ public sealed class WorkspacePushOperations(
     IWorkspaceRepositoryOperationPolicy operationPolicy,
     GrayMoon.App.Services.Policy.ArchivedRepositoryVerifier archivedVerifier,
     ILogger<WorkspacePushOperations> logger,
-    GrayMoon.App.Services.Versions.EffectiveVersionStartCheck effectiveVersionStartCheck) : IWorkspacePushOperations
+    GrayMoon.App.Services.Versions.EffectiveVersionStartCheck effectiveVersionStartCheck,
+    GrayMoon.App.Services.Worker.IWorkerSyncNotificationBarrier? syncNotificationBarrier = null,
+    AppBackgroundWorkStateService? appBackgroundWork = null) : IWorkspacePushOperations
 {
+    /// <summary>
+    /// The plan is built from stored state: the commit, the outgoing count and the effective version of every
+    /// repository. A Git event that is still waiting to be applied (a commit made a moment ago) is not in it yet, and a
+    /// plan built without it leaves that repository out as "nothing to push". So the plan waits for the events of the
+    /// Workspace that have arrived, as Update does, and counts them down in the overlay meanwhile.
+    /// </summary>
+    /// <returns>True when the wait was announced in the overlay, so the caller puts its own text back.</returns>
+    private async Task<bool> WaitForPendingSyncsAsync(int workspaceId, IProgress<OperationProgress>? progress, CancellationToken cancellationToken)
+    {
+        if (syncNotificationBarrier is null)
+            return false;
+
+        // With nothing waiting there is nothing to announce: the wait returns at once and the overlay keeps its text.
+        if (appBackgroundWork is null || appBackgroundWork.GetPendingCountForWorkspace(workspaceId) == 0)
+        {
+            await syncNotificationBarrier.WaitForPendingAsync(workspaceId, cancellationToken);
+            return false;
+        }
+
+        await GrayMoon.App.Services.Worker.PendingSyncNotificationWait.WaitAsync(
+                syncNotificationBarrier, appBackgroundWork, workspaceId, message => progress.Report(message), cancellationToken);
+        return true;
+    }
+
     /// <summary>
     /// The overlay text while the plan is built. Nothing is prepared: the plan checks which repositories to push (archived
     /// state, effective versions, selection). The version check then counts its GitVersion runs ("Checked x of y
@@ -36,6 +62,9 @@ public sealed class WorkspacePushOperations(
         CancellationToken cancellationToken = default,
         IProgress<OperationProgress>? progress = null)
     {
+        // Before the links are read: what the pending events store is part of the plan.
+        await WaitForPendingSyncsAsync(workspaceId, progress, cancellationToken);
+
         // A repository marked archived is left out of the plan, so ask the provider first whether it still is.
         progress.Report(CheckingVersionsMessage);
         await archivedVerifier.VerifyAsync(workspaceId, cancellationToken);
@@ -67,6 +96,10 @@ public sealed class WorkspacePushOperations(
         CancellationToken cancellationToken = default,
         IProgress<OperationProgress>? progress = null)
     {
+        // Nothing is pending any more when GetPlanAsync called this; a caller that brings its own links waits here.
+        if (await WaitForPendingSyncsAsync(workspaceId, progress, cancellationToken))
+            progress.Report(CheckingVersionsMessage);
+
         // Start check (effective versions, D3): the selection below reads the effective version kinds, so they are resolved
         // with fresh registry answers first. An unverifiable package stops the push before anything is pushed.
         var resolution = await effectiveVersionStartCheck.RunAsync(

@@ -20,7 +20,8 @@ public sealed class RemoveGitWorktreeCommand(IGitWorktreeService worktreeService
             cancellationToken,
             featureRootPath: request.FeatureRootPath,
             featureStorageRoot: request.FeatureStorageRoot,
-            unlock: request.Unlock);
+            unlock: request.Unlock,
+            expectedHeadSha: request.ExpectedHeadSha);
 
         return new RemoveGitWorktreeResponse
         {
@@ -33,6 +34,9 @@ public sealed class RemoveGitWorktreeCommand(IGitWorktreeService worktreeService
             ResidueSampleFiles = residue.ResidueSampleFiles.Count > 0 ? [.. residue.ResidueSampleFiles] : null,
             ResidueMessage = residue.ResidueMessage,
             FailureKind = success ? null : WorktreeRemovalFailureClassifier.Classify(errorCode, errorMessage).ToString(),
+            Branch = residue.Registration?.BranchName,
+            HeadSha = residue.Registration?.HeadSha,
+            WasDetached = residue.Registration?.IsDetached,
         };
     }
 }

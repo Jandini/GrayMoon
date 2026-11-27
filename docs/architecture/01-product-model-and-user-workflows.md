@@ -120,7 +120,7 @@ Workspace   the special context backed by the main checkouts (one per Workspace)
 Feature     a context backed by that Feature's worktrees
 ```
 
-The context is selected in the selector at the top of each Workspace page and is carried in the URL as `?context=<id>`. Internally it is a `WorkspaceFeatureContextId`, and every context-scoped operation receives it explicitly.
+The context is selected in the selector at the top of each Workspace page and is carried in the URL as `?context=<id>` (no value for the Workspace itself). Every page follows that value, so browser back and forward switch the context like the selector does. Internally it is a `WorkspaceFeatureContextId`, and every context-scoped operation receives it explicitly.
 
 ### Repository
 
@@ -919,7 +919,7 @@ A Feature runs the same flow in isolated worktrees:
 
 **Versions from default inside a Feature.** When versioning is on and a repository's Feature PR is merged, Sync in the Feature replaces that repository's version with the GitVersion of its `origin/<default>` tip (no checkout), so Update Dependencies writes default-branch versions into higher levels. This is why a Feature needs no per-level Return to Default.
 
-**Remove Feature.** The dialog analyzes every worktree live through the Worker and refreshes PRs once. It shows each authorization checkbox only when its risk exists, and Remove is enabled only when every shown box is ticked:
+**Remove Feature.** The dialog opens at once from what GrayMoon has stored and can be confirmed as it is: clean folders are removed, and a folder with uncommitted changes, a lock, an unfinished merge, a commit no branch holds or another repository inside it is kept and listed in the result, with nothing discarded. "Review details" checks every worktree live through the Worker and refreshes PRs once; it then shows each authorization checkbox only when its risk exists, and Remove is enabled only when every shown box is ticked:
 
 ```text
 "Permanently discard uncommitted changes in N repositories"         dirty, staged or conflicted worktrees

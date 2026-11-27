@@ -100,6 +100,8 @@ public sealed class SyncCommandHandlerTests
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         await ctx.MutateLinkAsync(l => l.DefaultBranchName = null);
+        // Not in sync yet: a hook keeps a status an earlier full sync established.
+        await ctx.SetStoredSyncStatusAsync(RepoSyncStatus.NeedsSync);
 
         await using var scope = ctx.CreateScope();
         var handler = scope.ServiceProvider.GetRequiredService<SyncCommandHandler>();

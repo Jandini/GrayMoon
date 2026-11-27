@@ -54,6 +54,7 @@ public sealed class RefsHookSyncCommand(
 
         // One listing, and null when git failed or the folder is gone. A failed read is "not probed", never an empty
         // list: the app replaces its branch rows with what is sent, so an empty list would delete all of them.
+        var captureStart = RepositoryStateCaptureClock.Next();
         var refs = await reader.GetRefSnapshotAsync(payload.RepositoryPath, cancellationToken);
         if (refs is null)
         {
@@ -72,7 +73,10 @@ public sealed class RefsHookSyncCommand(
             {
                 LocalBranches = [.. local],
                 RemoteBranches = [.. remote],
-                BranchesProbed = true
+                BranchesProbed = true,
+                CaptureSession = RepositoryStateCaptureClock.Session,
+                CaptureStart = captureStart,
+                CaptureEnd = RepositoryStateCaptureClock.Next()
             }
         };
         await connection.InvokeAsync(WorkerHubMethods.SyncCommand, notification, cancellationToken);

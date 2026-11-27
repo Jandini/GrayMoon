@@ -23,7 +23,7 @@ public sealed class CreateFeatureMonitoringPauseTests
         var pausedDuringCheckout = new List<bool>();
         var auditsDuringCheckout = new List<int>();
 
-        RespondToHeadCommits(ctx);
+        await RespondToHeadCommits(ctx);
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, _ =>
         {
             using var scope = ctx.CreateScope();
@@ -50,12 +50,79 @@ public sealed class CreateFeatureMonitoringPauseTests
     }
 
     [Fact]
+    public async Task Repair_pauses_monitoring_while_it_retries_worktrees_and_requests_one_scan_after()
+    {
+        // Repair checked worktrees out into a context whose watchers and audit were running: the same overflow and
+        // half-written status reads Create had before its pause.
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var pause = ctx.Resolve<IWorkspaceGitChangesMonitoringPause>();
+        var audits = ctx.Resolve<RecordingAuditScheduler>();
+        await RespondToHeadCommits(ctx);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = false, errorMessage = "disk full" });
+        WorkspaceFeatureContextId contextId;
+        await using (var createScope = ctx.CreateScope())
+        {
+            var created = await createScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>()
+                .CreateFeatureAsync(ctx.WorkspaceId, "feature/repaired", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+            Assert.False(created.Success);
+            contextId = created.ContextId!.Value;
+        }
+
+        var auditsBefore = audits.Requests.Count;
+        var pausedDuringCheckout = new List<bool>();
+        var auditsDuringCheckout = new List<int>();
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, _ =>
+        {
+            pausedDuringCheckout.Add(pause.IsPaused(contextId.Value));
+            auditsDuringCheckout.Add(audits.Requests.Count - auditsBefore);
+            return new WorkerCommandResponse(true, new { success = true, worktreePath = @"C:\wt" }, null);
+        });
+
+        await using var repairScope = ctx.CreateScope();
+        var repaired = await repairScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>().RepairFeatureAsync(contextId);
+
+        Assert.True(repaired.Success, repaired.Error);
+        Assert.Equal([true], pausedDuringCheckout);
+        Assert.Equal([0], auditsDuringCheckout);
+        Assert.False(pause.IsPaused(contextId.Value));
+        Assert.Equal(
+            [(ctx.WorkspaceId, contextId.Value, GitChangesAuditReason.FeatureCreated)],
+            audits.Requests.Skip(auditsBefore));
+    }
+
+    [Fact]
+    public async Task Repair_with_nothing_to_retry_pauses_nothing_and_requests_no_scan()
+    {
+        await using var ctx = await SyncStateTestContext.CreateAsync();
+        var audits = ctx.Resolve<RecordingAuditScheduler>();
+        await RespondToHeadCommits(ctx);
+        ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
+        WorkspaceFeatureContextId contextId;
+        await using (var createScope = ctx.CreateScope())
+        {
+            var created = await createScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>()
+                .CreateFeatureAsync(ctx.WorkspaceId, "feature/whole", WorkspaceFeatureBaseKindApplication.CurrentWorkspace);
+            Assert.True(created.Success, created.Error);
+            contextId = created.ContextId!.Value;
+        }
+
+        var auditsBefore = audits.Requests.Count;
+        var worktreeCalls = WorkerCommandCounts.Of(ctx.WorkerBridge).Count(WorkerHubMethods.CreateGitWorktree);
+
+        await using var repairScope = ctx.CreateScope();
+        await repairScope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>().RepairFeatureAsync(contextId);
+
+        Assert.Equal(auditsBefore, audits.Requests.Count);
+        Assert.Equal(worktreeCalls, WorkerCommandCounts.Of(ctx.WorkerBridge).Count(WorkerHubMethods.CreateGitWorktree));
+    }
+
+    [Fact]
     public async Task Monitoring_resumes_when_worktree_creation_throws()
     {
         await using var ctx = await SyncStateTestContext.CreateAsync();
         var pause = ctx.Resolve<IWorkspaceGitChangesMonitoringPause>();
 
-        RespondToHeadCommits(ctx);
+        await RespondToHeadCommits(ctx);
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, _ => throw new InvalidOperationException("worker gone"));
 
         await using var opsScope = ctx.CreateScope();
@@ -66,7 +133,8 @@ public sealed class CreateFeatureMonitoringPauseTests
         Assert.False(pause.IsPaused(result.ContextId!.Value.Value));
     }
 
-    private static void RespondToHeadCommits(SyncStateTestContext ctx) =>
+    private static Task RespondToHeadCommits(SyncStateTestContext ctx)
+    {
         ctx.WorkerBridge.Respond(WorkerHubMethods.GetHeadCommits, new
         {
             commits = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -78,4 +146,6 @@ public sealed class CreateFeatureMonitoringPauseTests
                 ["graymoon-api"] = "develop",
             },
         });
+        return ctx.StoreHeadSnapshotAsCurrentStateAsync();
+    }
 }

@@ -1,3 +1,4 @@
+using GrayMoon.App.Data;
 using GrayMoon.App.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -200,7 +201,15 @@ public sealed partial class WorkspaceProjectRepository
                 link.UnmatchedDeps = unmatched;
             }
         }
-        await dbContext.SaveChangesAsync(cancellationToken);
+        // A state row added above can have been stored by the state writer meanwhile: the stats then go onto that row.
+        await dbContext.SaveAdoptingStoredStateRowsAsync(
+            (lost, stored) =>
+            {
+                stored.DependencyLevel = lost.DependencyLevel;
+                stored.Dependencies = lost.Dependencies;
+                stored.UnmatchedDeps = lost.UnmatchedDeps;
+            },
+            cancellationToken);
         logger.LogDebug("Persistence: WorkspaceRepositoryContextStates DependencyLevel/Dependencies. WorkspaceId={WorkspaceId}, ContextId={ContextId}, LinkCount={Count}", workspaceId, workspaceFeatureContextId, links.Count);
     }
 }

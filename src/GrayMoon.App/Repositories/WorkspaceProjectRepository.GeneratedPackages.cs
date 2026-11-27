@@ -6,6 +6,65 @@ namespace GrayMoon.App.Repositories;
 public sealed partial class WorkspaceProjectRepository
 {
     /// <summary>
+    /// Takes the projection gate of every Feature context of the Workspace, by ascending context id. The Features
+    /// are read again after the gates were taken: one that was created while this waited is taken too, so the
+    /// caller never writes to a Feature's rows without that Feature's gate. A new context has a higher id than
+    /// the ones already held, so the order stays ascending. The caller holds the special context's gate already.
+    /// </summary>
+    private async Task<ProjectionGates> AcquireFeatureProjectionGatesAsync(int workspaceId, CancellationToken cancellationToken)
+    {
+        var gates = new ProjectionGates();
+        var taken = new HashSet<int>();
+        try
+        {
+            while (true)
+            {
+                var featureContextIds = await dbContext.WorkspaceFeatureContexts
+                    .AsNoTracking()
+                    .Where(c => c.WorkspaceId == workspaceId && c.Kind == WorkspaceFeatureContextKind.Feature)
+                    .OrderBy(c => c.WorkspaceFeatureContextId)
+                    .Select(c => c.WorkspaceFeatureContextId)
+                    .ToListAsync(cancellationToken);
+                var missing = featureContextIds.Where(id => !taken.Contains(id)).ToList();
+                if (missing.Count == 0)
+                    return gates;
+
+                foreach (var contextId in missing)
+                {
+                    gates.Add(await AcquireProjectionGateAsync(contextId, cancellationToken));
+                    taken.Add(contextId);
+                }
+            }
+        }
+        catch
+        {
+            gates.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Projection gates that are released together, the last one taken first.</summary>
+    private sealed class ProjectionGates : IDisposable
+    {
+        private readonly List<IDisposable> _gates = [];
+
+        public ProjectionGates()
+        {
+        }
+
+        public ProjectionGates(IDisposable gate) => _gates.Add(gate);
+
+        public void Add(IDisposable gate) => _gates.Add(gate);
+
+        public void Dispose()
+        {
+            for (var i = _gates.Count - 1; i >= 0; i--)
+                _gates[i].Dispose();
+            _gates.Clear();
+        }
+    }
+
+    /// <summary>
     /// Syncs virtual/generated NuGet package dependencies (packages with no physical package-producing .csproj,
     /// inferred from a configured .csproj version file whose version pattern resolves to a producer repository).
     /// For each resolved pair, ensures a generated <see cref="WorkspaceProject"/> row exists for the producer
@@ -59,6 +118,21 @@ public sealed partial class WorkspaceProjectRepository
         var specialContextId = await ResolveSpecialWorkspaceContextIdAsync(workspaceId, cancellationToken);
         var callerContextId = workspaceFeatureContextId ?? specialContextId;
         var ownsGeneratedRows = callerContextId == specialContextId;
+
+        // Everything below reads rows, decides from them and saves, so it runs under the projection gate like the
+        // project merges: a merge that replaced an edge or removed a project between the read and the save failed
+        // this save. The generated rows are the special Workspace context's, and every context reads them here
+        // (and removes duplicates of them), so that gate is always taken; a Feature also takes its own for its
+        // consumers' edges. The special Workspace context's own sync also writes to rows of every Feature (it adds
+        // the missing edge of a Feature's consumer, removes an edge whose consumer is gone and removes legacy
+        // Feature-scoped generated copies), and a Feature's merge replaces those rows under the Feature's gate
+        // alone, so that sync takes the gate of every Feature of the Workspace as well. Always in this order: the
+        // special context first, then Features by ascending id, so two calls cannot wait for each other. The gate
+        // is not reentrant: nothing below may call a gated writer, and no caller may hold any of these gates.
+        using var generatedRowsGate = await AcquireProjectionGateAsync(specialContextId, cancellationToken);
+        using var consumerGates = ownsGeneratedRows
+            ? await AcquireFeatureProjectionGatesAsync(workspaceId, cancellationToken)
+            : new ProjectionGates(await AcquireProjectionGateAsync(callerContextId, cancellationToken));
 
         var existingGenerated = await dbContext.WorkspaceProjects
             .Where(p => p.WorkspaceId == workspaceId && p.IsGenerated)

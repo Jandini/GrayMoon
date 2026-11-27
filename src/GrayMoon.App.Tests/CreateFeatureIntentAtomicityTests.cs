@@ -29,6 +29,7 @@ public sealed class CreateFeatureIntentAtomicityTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
 
         await using var scope = ctx.CreateScope();
         var ops = scope.ServiceProvider.GetRequiredService<IWorkspaceFeatureOperations>();
@@ -98,6 +99,7 @@ public sealed class CreateFeatureIntentAtomicityTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();
@@ -136,6 +138,7 @@ public sealed class CreateFeatureIntentAtomicityTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         // Echo success without overriding WorktreePath so the intent-built path stays on the row.
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true });
 
@@ -186,6 +189,7 @@ public sealed class CreateFeatureIntentAtomicityTests
                 ["graymoon-api"] = "develop",
             },
         });
+        await ctx.StoreHeadSnapshotAsCurrentStateAsync();
         ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
 
         await using var scope = ctx.CreateScope();

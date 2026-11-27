@@ -24,7 +24,8 @@ public sealed record EffectiveVersionDecision(
     string? CalculatedVersion,
     string? ResolvedForCommitSha,
     string ReasonCode,
-    string? Message);
+    string? Message,
+    string? EvidenceKey = null);
 
 /// <summary>The decisions of one <see cref="EffectiveVersionResolver.ResolveAsync"/> run.</summary>
 public sealed record EffectiveVersionResolution(IReadOnlyList<EffectiveVersionDecision> Decisions)
@@ -117,7 +118,7 @@ public sealed class EffectiveVersionResolver(
         var states = await dbContext.WorkspaceRepositoryContextStates
             .AsNoTracking()
             .Where(s => s.WorkspaceFeatureContextId == contextId.Value && linkIds.Contains(s.WorkspaceRepositoryId))
-            .Select(s => new StoredState(s.WorkspaceRepositoryId, s.HeadCommit, s.GitVersion, s.BranchName, s.EffectiveVersion, s.EffectiveVersionKind, s.EffectiveVersionCommitSha, s.EffectiveVersionReasonCode))
+            .Select(s => new StoredState(s.WorkspaceRepositoryId, s.HeadCommit, s.GitVersion, s.BranchName, s.EffectiveVersion, s.EffectiveVersionKind, s.EffectiveVersionCommitSha, s.EffectiveVersionReasonCode, s.EffectiveVersionEvidenceKey))
             .ToDictionaryAsync(s => s.WorkspaceRepositoryId, cancellationToken);
 
         // Without its own state row a repository has nothing to compare and nothing to write to (I6).
@@ -141,6 +142,8 @@ public sealed class EffectiveVersionResolver(
 
         var decisions = new Dictionary<int, EffectiveVersionDecision>();
         var probes = new List<Probe>();
+        // What each branch point check is made from: stored with its decision, and compared before one is reused.
+        var evidenceKeys = new Dictionary<int, string>();
         foreach (var candidate in candidates)
         {
             baselines.TryGetValue(candidate.WorkspaceRepositoryId, out var baseline);
@@ -150,14 +153,19 @@ public sealed class EffectiveVersionResolver(
                 // A read only snapshot is detached, and GitVersion on a detached HEAD does not give the version its
                 // branch published (a commit after a tag reads as the tag). Its version is the source branch's at its
                 // commit, with or without a consumer, so the grid shows it too.
+                var snapshotKey = string.IsNullOrWhiteSpace(candidate.HeadCommit)
+                    ? null
+                    : EvidenceKeyOf(new BranchBaseline(sourceBranch, candidate.HeadCommit.Trim()), []);
+                if (snapshotKey != null)
+                    evidenceKeys[candidate.RepositoryId] = snapshotKey;
                 if (!capabilities.UsesGitVersion || string.IsNullOrWhiteSpace(candidate.HeadCommit))
                     decisions[candidate.RepositoryId] = Own(candidate, EffectiveVersionReasonCodes.PolicyProtected, null);
-                else if (!bypassCache && StoredSnapshotDecision(candidate, states[candidate.WorkspaceRepositoryId], consumer.HasVersionConsumer) is { } storedSnapshot)
+                else if (!bypassCache && StoredSnapshotDecision(candidate, states[candidate.WorkspaceRepositoryId], consumer.HasVersionConsumer, snapshotKey!) is { } storedSnapshot)
                     decisions[candidate.RepositoryId] = storedSnapshot;
                 else
                     probes.Add(new Probe(
                         candidate, new BranchBaseline(sourceBranch, candidate.HeadCommit.Trim()), [],
-                        StoredParentVersion(candidate, states[candidate.WorkspaceRepositoryId]),
+                        StoredParentVersion(candidate, states[candidate.WorkspaceRepositoryId], snapshotKey!),
                         IsReferenceSnapshot: true, HasVersionConsumer: consumer.HasVersionConsumer));
                 continue;
             }
@@ -171,24 +179,29 @@ public sealed class EffectiveVersionResolver(
                 : !capabilities.UsesGitVersion ? EffectiveVersionReasonCodes.ParentVersionUnavailable
                 : null;
             if (reason != null)
+            {
                 decisions[candidate.RepositoryId] = Own(candidate, reason, null);
-            else if (!bypassCache && StoredProbeDecision(candidate, states[candidate.WorkspaceRepositoryId], required.Count > 0) is { } stored)
+                continue;
+            }
+
+            var evidenceKey = evidenceKeys[candidate.RepositoryId] = EvidenceKeyOf(baseline!, required);
+            if (!bypassCache && StoredProbeDecision(candidate, states[candidate.WorkspaceRepositoryId], required.Count > 0, evidenceKey) is { } stored)
                 decisions[candidate.RepositoryId] = stored;
             else
-                probes.Add(new Probe(candidate, baseline!, required, StoredParentVersion(candidate, states[candidate.WorkspaceRepositoryId])));
+                probes.Add(new Probe(candidate, baseline!, required, StoredParentVersion(candidate, states[candidate.WorkspaceRepositoryId], evidenceKey)));
         }
 
         if (probes.Count > 0)
         {
             foreach (var decision in await ProbeAsync(workspaceId, contextId, probes, bypassCache, progress, cancellationToken))
-                decisions[decision.RepositoryId] = decision;
+                decisions[decision.RepositoryId] = decision with { EvidenceKey = evidenceKeys.GetValueOrDefault(decision.RepositoryId) };
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         var ordered = candidates.Select(c => decisions[c.RepositoryId]).ToList();
         await stateWriter.WriteEffectiveVersionAsync(
             contextId,
-            ordered.Select(d => new EffectiveVersionWrite(d.WorkspaceRepositoryId, d.Kind, d.EffectiveVersion, d.ResolvedForCommitSha, d.ReasonCode)).ToList(),
+            ordered.Select(d => new EffectiveVersionWrite(d.WorkspaceRepositoryId, d.Kind, d.EffectiveVersion, d.ResolvedForCommitSha, d.ReasonCode, d.EvidenceKey)).ToList(),
             cancellationToken);
 
         if (progress != null && TerminalSinkContext.Current is { } terminal)
@@ -482,8 +495,15 @@ public sealed class EffectiveVersionResolver(
     /// branch point, which does not change for that commit. Null when nothing valid is stored, and for every other kind
     /// (an own version does not record the parent's), so the Worker calculates it.
     /// </summary>
-    private static string? StoredParentVersion(Candidate candidate, StoredState state) =>
+    /// <remarks>
+    /// It is the version of one parent branch at one commit: a decision stored for another parent branch or branch
+    /// point (the first half of the evidence key differs) does not give it. A decision stored before the key existed
+    /// has no key to compare and keeps the rule it was made under, the commit alone.
+    /// </remarks>
+    private static string? StoredParentVersion(Candidate candidate, StoredState state, string evidenceKey) =>
         EffectiveVersionRules.IsInherited(state.EffectiveVersionKind, state.EffectiveVersion, state.EffectiveVersionCommitSha, candidate.HeadCommit)
+        && (state.EffectiveVersionEvidenceKey is not { Length: >= BaselineKeyLength } storedKey
+            || string.Equals(storedKey[..BaselineKeyLength], evidenceKey[..BaselineKeyLength], StringComparison.Ordinal))
             ? state.EffectiveVersion!.Trim()
             : null;
 
@@ -527,10 +547,15 @@ public sealed class EffectiveVersionResolver(
     /// current HEAD for the same kind of consumers (packages to verify, or version-file tokens only), else null. Unresolved
     /// is never reused, so a registry that recovers is noticed on the next refresh.
     /// </summary>
-    private static EffectiveVersionDecision? StoredProbeDecision(Candidate candidate, StoredState state, bool hasRequiredPackages)
+    private static EffectiveVersionDecision? StoredProbeDecision(Candidate candidate, StoredState state, bool hasRequiredPackages, string evidenceKey)
     {
         if (string.IsNullOrWhiteSpace(candidate.HeadCommit)
             || !string.Equals(state.EffectiveVersionCommitSha?.Trim(), candidate.HeadCommit.Trim(), StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // Made from another parent branch, another branch point, another set of required packages or another registry
+        // mapping (or stored before the key existed): the check is made again.
+        if (!string.Equals(state.EffectiveVersionEvidenceKey, evidenceKey, StringComparison.Ordinal))
             return null;
 
         var kind = EffectiveVersionRules.KindOf(state.EffectiveVersionKind);
@@ -549,18 +574,50 @@ public sealed class EffectiveVersionResolver(
         return new EffectiveVersionDecision(
             candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
             kind.Value, kind == EffectiveVersionKind.Own ? candidate.GitVersion : state.EffectiveVersion!.Trim(), candidate.GitVersion,
-            candidate.HeadCommit, state.EffectiveVersionReasonCode!, null);
+            candidate.HeadCommit, state.EffectiveVersionReasonCode!, null, evidenceKey);
     }
+
+    /// <summary>
+    /// The key of what a branch point check is made from, besides the commit it is stored for: the parent branch, the
+    /// branch point, and each package that must be published with the registry it is mapped to. Equal inputs give an
+    /// equal key whatever order the packages are read in. The registry's answer is not part of it: availability is
+    /// time-dependent and is asked again by every operation start.
+    /// </summary>
+    /// <remarks>
+    /// Two halves of <see cref="BaselineKeyLength"/> characters: the parent branch with the branch point, which decide
+    /// the parent version, then the packages with their registries, which decide what must be verified.
+    /// </remarks>
+    internal static string EvidenceKeyOf(BranchBaseline baseline, IReadOnlyList<RequiredPackage> required)
+    {
+        var packages = new System.Text.StringBuilder("v1\n");
+        foreach (var package in required
+                     .Select(r => $"{r.PackageId.Trim().ToLowerInvariant()}={r.MatchedConnectorId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}")
+                     .Distinct(StringComparer.Ordinal)
+                     .Order(StringComparer.Ordinal))
+            packages.Append(package).Append('\n');
+
+        return Hash($"v1\n{baseline.ParentBranchName.Trim()}\n{baseline.BaseCommitSha.Trim().ToLowerInvariant()}") + Hash(packages.ToString());
+
+        static string Hash(string text) =>
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)))[..BaselineKeyLength];
+    }
+
+    /// <summary>The length of each half of an evidence key.</summary>
+    internal const int BaselineKeyLength = 16;
 
     /// <summary>
     /// The stored decision of a read only snapshot for its current HEAD, else null: its source branch version, or (only
     /// while nothing uses its version) the recorded reason that version could not be calculated. Unresolved is never
     /// reused, and neither is a decision made before snapshots had their own rule (<c>PolicyProtected</c>).
     /// </summary>
-    private static EffectiveVersionDecision? StoredSnapshotDecision(Candidate candidate, StoredState state, bool hasVersionConsumer)
+    private static EffectiveVersionDecision? StoredSnapshotDecision(Candidate candidate, StoredState state, bool hasVersionConsumer, string evidenceKey)
     {
         if (string.IsNullOrWhiteSpace(candidate.HeadCommit)
             || !string.Equals(state.EffectiveVersionCommitSha?.Trim(), candidate.HeadCommit.Trim(), StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // Taken from another source branch, or stored before the key existed.
+        if (!string.Equals(state.EffectiveVersionEvidenceKey, evidenceKey, StringComparison.Ordinal))
             return null;
 
         var kind = EffectiveVersionRules.KindOf(state.EffectiveVersionKind);
@@ -571,13 +628,13 @@ public sealed class EffectiveVersionResolver(
             return new EffectiveVersionDecision(
                 candidate.RepositoryId, candidate.WorkspaceRepositoryId, candidate.RepositoryName,
                 EffectiveVersionKind.InheritedUnverified, state.EffectiveVersion.Trim(), candidate.GitVersion, candidate.HeadCommit,
-                EffectiveVersionReasonCodes.ReferenceSnapshot, null);
+                EffectiveVersionReasonCodes.ReferenceSnapshot, null, evidenceKey);
         }
 
         return kind == EffectiveVersionKind.Own
             && !hasVersionConsumer
             && state.EffectiveVersionReasonCode is EffectiveVersionReasonCodes.BaselineNotOnRemoteParent or EffectiveVersionReasonCodes.ParentVersionUnavailable
-            ? Own(candidate, state.EffectiveVersionReasonCode, null)
+            ? Own(candidate, state.EffectiveVersionReasonCode, null) with { EvidenceKey = evidenceKey }
             : null;
     }
 
@@ -589,7 +646,8 @@ public sealed class EffectiveVersionResolver(
         string? EffectiveVersion,
         int? EffectiveVersionKind,
         string? EffectiveVersionCommitSha,
-        string? EffectiveVersionReasonCode);
+        string? EffectiveVersionReasonCode,
+        string? EffectiveVersionEvidenceKey);
 
     private sealed record Candidate(int RepositoryId, int WorkspaceRepositoryId, string RepositoryName, string? HeadCommit, string? GitVersion);
 

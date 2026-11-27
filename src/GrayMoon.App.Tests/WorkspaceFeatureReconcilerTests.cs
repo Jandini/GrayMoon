@@ -254,7 +254,6 @@ public sealed class WorkspaceFeatureReconcilerTests
             Assert.True(outcome.Result.Success, outcome.Result.Error);
             Assert.Contains(ctx.WorkerBridge.Calls, c => c.Command == WorkerHubMethods.RemoveGitWorktree);
             Assert.Equal([(ctx.WorkspaceId, specialContextId)], refresh.Ran);
-            Assert.Empty(refresh.Started);
         }
         finally
         {
@@ -262,16 +261,8 @@ public sealed class WorkspaceFeatureReconcilerTests
         }
     }
 
-    private sealed class RecordingRefresh : IWorkspaceCheckoutRefresh
+    private sealed class RecordingRefresh : IWorkspaceRemoteRefresh
     {
-        public List<(int WorkspaceId, int ContextId)> Started { get; } = [];
-
-        public void Start(int workspaceId, WorkspaceFeatureContextId contextId)
-        {
-            lock (Started)
-                Started.Add((workspaceId, contextId.Value));
-        }
-
         public List<(int WorkspaceId, int ContextId)> Ran { get; } = [];
 
         public TaskCompletionSource RunStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

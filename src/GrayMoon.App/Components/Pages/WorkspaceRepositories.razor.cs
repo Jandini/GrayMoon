@@ -237,7 +237,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     private Task OnRemoveFeatureAsync()
     {
         if (_isFeatureContext && _selectedContextId is WorkspaceFeatureContextId ctx)
-            BeginRemoveFeatureAnalysis(ctx);
+            OpenRemoveFeatureDialog(ctx);
         return Task.CompletedTask;
     }
 
@@ -247,7 +247,7 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     /// </summary>
     private Task OnRequestRemoveFeatureFromSelectorAsync(WorkspaceFeatureContextId contextId)
     {
-        BeginRemoveFeatureAnalysis(contextId);
+        OpenRemoveFeatureDialog(contextId);
         return Task.CompletedTask;
     }
 
@@ -258,61 +258,24 @@ public sealed partial class WorkspaceRepositories : IAsyncDisposable, IDisposabl
     /// </summary>
     private Task OnRequestFeatureCleanupFromBranchModalAsync(WorkspaceFeatureContextId featureContextId)
     {
-        BeginRemoveFeatureAnalysis(featureContextId);
+        OpenRemoveFeatureDialog(featureContextId);
         return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Runs remove analysis under the page LoadingOverlay/terminal, then opens the confirmation dialog
-    /// with the finished plan (no in-dialog "Checking..." spinner).
+    /// Opens the Remove Feature dialog at once. It shows what is stored about the Feature and can be confirmed as it
+    /// is: nothing is inspected live before it opens. The live details of every repository are read only when the
+    /// user asks for them in the dialog ("Review details").
     /// </summary>
-    private void BeginRemoveFeatureAnalysis(WorkspaceFeatureContextId contextId)
+    private void OpenRemoveFeatureDialog(WorkspaceFeatureContextId contextId)
     {
         if (IsJobRunning)
             return;
 
-        JobService.StartJob(PageJobKey, "Checking feature status...", async (job, ct) =>
-        {
-            try
-            {
-                var progress = new Progress<OperationProgress>(p =>
-                {
-                    if (p.Completed is int done && p.Total is int total && total > 0)
-                        job.ReportProgress($"Checked {done} of {total} repositories");
-                    else if (!string.IsNullOrWhiteSpace(p.Message))
-                        job.ReportProgress(p.Message);
-                });
-
-                var plan = await ScopedExecutor.ExecuteAsync<IWorkspaceFeatureOperations, RemoveFeaturePlan>(
-                    svc => svc.AnalyzeRemoveFeatureAsync(contextId, ct, progress));
-
-                if (!plan.Success)
-                {
-                    SafeInvoke(() => ToastService.ShowError(plan.Error ?? "Failed to prepare Feature removal."));
-                    return;
-                }
-
-                await InvokeAsync(() =>
-                {
-                    if (_disposed) return;
-                    _removeFeatureContextId = contextId;
-                    _removeFeaturePlan = plan;
-                    _removeFeatureModalVisible = true;
-                    StateHasChanged();
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                SafeInvoke(() => ToastService.Show("Feature status check cancelled."));
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Error analyzing Feature removal for context {ContextId}", contextId.Value);
-                SafeInvoke(() => ToastService.ShowError("Failed to prepare Feature removal."));
-                throw;
-            }
-        });
+        _removeFeatureContextId = contextId;
+        _removeFeaturePlan = null;
+        _removeFeatureModalVisible = true;
+        StateHasChanged();
     }
 
     private Task OnRemoveFeatureCancelAsync()

@@ -70,4 +70,12 @@ public sealed class WorkspaceRepositoryContextState
     /// <summary>Why the kind was chosen (<see cref="EffectiveVersionReasonCodes"/>).</summary>
     [MaxLength(50)]
     public string? EffectiveVersionReasonCode { get; set; }
+
+    /// <summary>
+    /// What a branch point decision was made from, besides the commit: the parent branch, the branch point and the
+    /// packages that had to be published, each with its registry. A stored decision is reused only while this is
+    /// unchanged. Null for a decision that needed no branch point check, and for one stored before this column existed.
+    /// </summary>
+    [MaxLength(64)]
+    public string? EffectiveVersionEvidenceKey { get; set; }
 }

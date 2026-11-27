@@ -423,6 +423,7 @@ public sealed class FileVersionStoredCommitTests
                 [EffectiveVersionScenario.ConsumerName] = "release/2.4",
             },
         });
+        await s.Ctx.StoreHeadSnapshotAsCurrentStateAsync();
         s.Ctx.WorkerBridge.Respond(WorkerHubMethods.CreateGitWorktree, new { success = true, worktreePath = @"C:\wt" });
         s.Ctx.WorkerBridge.Calls.Clear();
 
@@ -445,6 +446,9 @@ public sealed class FileVersionStoredCommitTests
         // recompute per notification a burst asked the registry (and waited for its timeout) once per repository.
         await using var s = await EffectiveVersionScenario.CreateAsync();
         s.Registry.TimesOut(EffectiveVersionScenario.PackageId);
+        // The repositories are not in sync yet, so each hook sync changes its row and the run owes a recompute.
+        await s.WithDbAsync(db => db.WorkspaceRepositoryContextStates
+            .ExecuteUpdateAsync(x => x.SetProperty(state => state.SyncStatus, RepoSyncStatus.NeedsSync)));
         s.Ctx.WorkerBridge.Calls.Clear();
         var lookupsBefore = s.Registry.Lookups;
         var queue = new WorkerSyncNotificationQueue(
