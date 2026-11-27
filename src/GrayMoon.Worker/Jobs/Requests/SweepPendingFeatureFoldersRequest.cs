@@ -5,7 +5,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// <summary>
 /// Background cleanup: deletes every Feature folder marked pending deletion directly under one Feature storage root.
 /// </summary>
-public sealed class SweepPendingFeatureFoldersRequest
+public sealed class SweepPendingFeatureFoldersRequest : IWorkspaceNamedRequest
 {
     /// <summary>The Workspace's Feature storage root, ending in <c>&lt;Workspace&gt;\features</c>.</summary>
     [JsonPropertyName("featureStorageRoot")]

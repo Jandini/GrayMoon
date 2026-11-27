@@ -3,7 +3,7 @@ using GrayMoon.Common.Git;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class CommitGitChangesResponse
+public sealed class CommitGitChangesResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

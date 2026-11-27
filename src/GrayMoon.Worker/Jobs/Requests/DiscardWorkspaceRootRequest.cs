@@ -7,7 +7,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// The Worker deletes only what it can prove the restore created: an empty folder, or a clean clone of
 /// <see cref="CloneUrl"/>.
 /// </summary>
-public sealed class DiscardWorkspaceRootRequest : WorkspaceCommandRequest
+public sealed class DiscardWorkspaceRootRequest : WorkspaceCommandRequest, IWorkspaceNamedRequest
 {
     /// <summary>Folder name under <see cref="WorkspaceCommandRequest.WorkspaceRoot"/>.</summary>
     [JsonPropertyName("workspaceName")]

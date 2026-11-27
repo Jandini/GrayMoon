@@ -15,7 +15,6 @@ namespace GrayMoon.Worker.Services;
 
 public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader, IGitIgnoreService ignore, IRepositoryAccess? access = null) : IGitService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? _emptyHooksPath;
 
@@ -250,7 +249,7 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
 
         try
         {
-            return (JsonSerializer.Deserialize<GitVersionResult>(stdout ?? "", JsonOptions), null);
+            return (JsonSerializer.Deserialize(stdout ?? "", WorkerJsonContext.Default.GitVersionResult), null);
         }
         catch (JsonException ex)
         {

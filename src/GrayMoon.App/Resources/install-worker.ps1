@@ -2,7 +2,7 @@
 # Downloads the worker and delegates all service management to graymoon-worker.exe.
 #
 # Run from a fresh Administrator PowerShell window.
-# The host must have the .NET 10 runtime installed.
+# The Worker is a self-contained exe: the host needs no .NET runtime.
 
 $ErrorActionPreference = 'Stop'
 
@@ -227,7 +227,7 @@ try {
     }
 
     if (-not (Test-Path -LiteralPath $workerExe)) {
-        Write-Host "ERROR: graymoon-worker.exe not found under $workerPath after extract. Install .NET 10 Runtime if the app fails to start." -ForegroundColor Red
+        Write-Host "ERROR: graymoon-worker.exe not found under $workerPath after extract." -ForegroundColor Red
         Complete-WorkerInstall -Code 1
         return 1
     }

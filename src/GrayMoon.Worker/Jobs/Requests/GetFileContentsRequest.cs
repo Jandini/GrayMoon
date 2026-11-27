@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Requests;
 
-public sealed class GetFileContentsRequest : WorkspaceCommandRequest
+public sealed class GetFileContentsRequest : WorkspaceCommandRequest, IRepositoryNamedRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")] public string? WorkspaceName { get; set; }
     [JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }

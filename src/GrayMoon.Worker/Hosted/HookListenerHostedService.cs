@@ -143,7 +143,7 @@ public sealed class HookListenerHostedService(
             try
             {
                 if (body.Length > 0)
-                    payload = JsonSerializer.Deserialize<NotifyPayload>(body);
+                    payload = JsonSerializer.Deserialize(body, WorkerStrictJsonContext.Default.NotifyPayload);
             }
             catch (JsonException)
             {

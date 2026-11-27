@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Requests;
 
-public sealed class ReturnToDefaultBranchRequest : WorkspaceCommandRequest
+public sealed class ReturnToDefaultBranchRequest : WorkspaceCommandRequest, IWorkspaceScopedRequest, IRepositoryNamedRequest, IWorkspaceNamedRequest
 {
     /// <summary>Optional. Lets the worker remember the workspace's capabilities for its git hooks.</summary>
     [JsonPropertyName("workspaceId")]

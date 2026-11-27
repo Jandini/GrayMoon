@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Requests;
 
-public sealed class UndoPushRequest : WorkspaceCommandRequest
+public sealed class UndoPushRequest : WorkspaceCommandRequest, IWorkspaceScopedRequest, IRepositoryNamedRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }

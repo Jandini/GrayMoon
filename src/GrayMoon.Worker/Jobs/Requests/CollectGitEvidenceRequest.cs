@@ -7,7 +7,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// Read-only Git evidence for one AI generation: every repository of one workspace commit or one shared pull request,
 /// collected in one request so the App makes a single round trip.
 /// </summary>
-public sealed class CollectGitEvidenceRequest : WorkspaceCommandRequest
+public sealed class CollectGitEvidenceRequest : WorkspaceCommandRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }

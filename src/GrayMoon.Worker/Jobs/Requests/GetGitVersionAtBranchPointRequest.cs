@@ -7,7 +7,7 @@ namespace GrayMoon.Worker.Jobs.Requests;
 /// branch was created at), from whatever the repository has checked out, and whether that commit is on
 /// <c>origin/&lt;parent&gt;</c>. Never fetches and never changes the checkout.
 /// </summary>
-public sealed class GetGitVersionAtBranchPointRequest : WorkspaceCommandRequest
+public sealed class GetGitVersionAtBranchPointRequest : WorkspaceCommandRequest, IRepositoryNamedRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")]
     public string? WorkspaceName { get; set; }

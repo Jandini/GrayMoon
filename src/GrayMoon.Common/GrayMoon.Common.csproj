@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>GrayMoon.Common</RootNamespace>
     <LangVersion>latest</LangVersion>
+    <!-- The Worker compiles this project into a Native AOT exe, so the trim and AOT analyzers run here too. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

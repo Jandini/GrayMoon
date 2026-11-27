@@ -133,7 +133,7 @@ internal sealed class WorkspaceCapabilityProvider(
                 return (null, false);
             }
 
-            var payload = await response.Content.ReadFromJsonAsync<RepositoryOperationCapabilities>(cancellationToken: cancellationToken);
+            var payload = await response.Content.ReadFromJsonAsync(WorkerJsonContext.Default.RepositoryOperationCapabilities, cancellationToken);
             if (payload == null)
             {
                 logger.LogWarning("WorkspaceCapabilityProvider: empty payload for workspace {WorkspaceId}.", workspaceId);

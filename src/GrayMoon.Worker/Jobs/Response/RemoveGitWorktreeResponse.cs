@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Response;
 
-public sealed class RemoveGitWorktreeResponse
+public sealed class RemoveGitWorktreeResponse : ICommandOutcome
 {
     [JsonPropertyName("success")]
     public bool Success { get; set; }

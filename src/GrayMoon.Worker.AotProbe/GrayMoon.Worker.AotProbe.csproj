@@ -31,7 +31,7 @@
     <RestoreAdditionalProjectSources>$(LibGit2SharpOverrideSource)</RestoreAdditionalProjectSources>
   </PropertyGroup>
   <ItemGroup Condition="'$(LibGit2SharpOverrideVersion)' != ''">
-    <PackageReference Include="LibGit2Sharp" Version="$(LibGit2SharpOverrideVersion)" />
+    <PackageReference Include="GrayMoon.LibGit2Sharp" Version="$(LibGit2SharpOverrideVersion)" />
   </ItemGroup>
 
 </Project>

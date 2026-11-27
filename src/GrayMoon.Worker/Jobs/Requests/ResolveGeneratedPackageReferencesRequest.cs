@@ -2,13 +2,13 @@ using System.Text.Json.Serialization;
 
 namespace GrayMoon.Worker.Jobs.Requests;
 
-public sealed class ResolveGeneratedPackageReferencesRequest : WorkspaceCommandRequest
+public sealed class ResolveGeneratedPackageReferencesRequest : WorkspaceCommandRequest, IWorkspaceNamedRequest
 {
     [JsonPropertyName("workspaceName")] public string? WorkspaceName { get; set; }
     [JsonPropertyName("files")] public List<ResolveGeneratedPackageReferencesItem>? Files { get; set; }
 }
 
-public sealed class ResolveGeneratedPackageReferencesItem
+public sealed class ResolveGeneratedPackageReferencesItem : IRepositoryNamedRequest
 {
     [JsonPropertyName("repositoryName")] public string? RepositoryName { get; set; }
     [JsonPropertyName("filePath")] public string? FilePath { get; set; }
