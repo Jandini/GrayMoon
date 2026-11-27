@@ -47,7 +47,7 @@ public sealed partial class WorkspaceLinkDeletionConventionTests
     [Fact]
     public void Every_allowed_file_still_exists_and_still_names_the_detacher_or_is_reached_through_it()
     {
-        var files = SourceFiles().ToDictionary(Path.GetFileName, f => f, StringComparer.OrdinalIgnoreCase);
+        var files = SourceFiles().ToDictionary(f => Path.GetFileName(f), f => f, StringComparer.OrdinalIgnoreCase);
         foreach (var name in Allowed.Keys)
             Assert.True(files.ContainsKey(name), $"{name} is on the allow-list but no longer exists; remove the entry.");
 
