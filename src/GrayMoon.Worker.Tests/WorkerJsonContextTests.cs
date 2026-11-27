@@ -339,3 +339,27 @@ public class WorkerLogTemplateConventionTests
             .Select(f => (Path.GetFileName(f), File.ReadAllText(f)));
     }
 }
+
+/// <summary>
+/// The Native AOT exe cannot compile a regular expression at run time, so <c>RegexOptions.Compiled</c> gives an
+/// interpreted, slower expression there. The Worker's expressions are generated at build time instead.
+/// </summary>
+public class WorkerRegexConventionTests
+{
+    [Fact]
+    public void No_regular_expression_asks_for_run_time_compilation()
+    {
+        var src = WorkerSourceRoot();
+        var violations = new[] { "GrayMoon.Worker", "GrayMoon.Common", "GrayMoon.Abstractions" }
+            .SelectMany(project => Directory.EnumerateFiles(Path.Combine(src, project), "*.cs", SearchOption.AllDirectories))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(f => File.ReadAllText(f).Contains("RegexOptions.Compiled", StringComparison.Ordinal))
+            .Select(Path.GetFileName)
+            .ToList();
+
+        Assert.True(violations.Count == 0, "Use a [GeneratedRegex] partial property instead of RegexOptions.Compiled in: " + string.Join(", ", violations));
+    }
+
+    private static string WorkerSourceRoot([CallerFilePath] string thisFile = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFile)!, ".."));
+}

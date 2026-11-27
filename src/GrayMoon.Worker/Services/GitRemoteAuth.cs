@@ -11,16 +11,16 @@ namespace GrayMoon.Worker.Services;
 /// delivery differs: <c>GIT_CONFIG_*</c> environment variables (git 2.31+, keeps the secret off the command
 /// line) or, for older git, <c>-c</c> arguments.
 /// </summary>
-internal static class GitRemoteAuth
+internal static partial class GitRemoteAuth
 {
     /// <summary><c>GIT_CONFIG_COUNT</c>/<c>GIT_CONFIG_KEY_n</c>/<c>GIT_CONFIG_VALUE_n</c> were added in git 2.31.</summary>
     internal static readonly Version MinimumEnvConfigVersion = new(2, 31);
 
-    private static readonly Regex GitVersionRegex = new(@"git version (\d+)\.(\d+)", RegexOptions.Compiled);
+    [GeneratedRegex(@"git version (\d+)\.(\d+)")]
+    private static partial Regex GitVersionRegex { get; }
 
-    private static readonly Regex AuthFailureRegex = new(
-        @"authentication failed|could not read (username|password)|terminal prompts disabled|invalid username or password|bad credentials|http(?:s)? (?:401|403)|error: 40[13]|requested url returned error: 40[13]|repository not found|remote: permission to .* denied|access denied",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"authentication failed|could not read (username|password)|terminal prompts disabled|invalid username or password|bad credentials|http(?:s)? (?:401|403)|error: 40[13]|requested url returned error: 40[13]|repository not found|remote: permission to .* denied|access denied", RegexOptions.IgnoreCase)]
+    private static partial Regex AuthFailureRegex { get; }
 
     internal static string BuildAuthHeaderValue(string bearerToken)
     {

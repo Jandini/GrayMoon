@@ -75,13 +75,7 @@ internal static class RunCommandHandler
             [$"{WorkerOptions.SectionName}:{nameof(WorkerOptions.MaxConcurrentCommands)}"] = options.MaxConcurrentCommands.ToString(),
         });
 
-        builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection(WorkerOptions.SectionName));
-        builder.Services.Configure<GitChangesOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitChanges"));
-        builder.Services.Configure<GitProcessOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitProcess"));
-        // ProcessExecutionOptions.DefaultTimeoutSeconds mirrors GitProcessOptions.DefaultTimeoutSeconds -
-        // same "GitProcess" section, so CommandLineService's own fallback timeout stays in sync with the
-        // tier GitProcessRunner resolves for local/fast git operations.
-        builder.Services.Configure<ProcessExecutionOptions>(builder.Configuration.GetSection($"{WorkerOptions.SectionName}:GitProcess"));
+        builder.Services.AddWorkerOptions(builder.Configuration);
 
         // Same casing as the App (%ProgramData%\GrayMoon\Logs) so support greps one folder.
         var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GrayMoon", "Logs");

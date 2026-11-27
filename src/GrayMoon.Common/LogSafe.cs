@@ -6,7 +6,7 @@ namespace GrayMoon.Common;
 /// <summary>
 /// Redacts git http.extraHeader credentials in strings so they are safe to log.
 /// </summary>
-public static class LogSafe
+public static partial class LogSafe
 {
     private const string Replacement = "***";
 
@@ -28,9 +28,8 @@ public static class LogSafe
     }
 
     // Covers a header echoed outside the http.extraHeader="..." form (GIT_TRACE_CURL output, GIT_CONFIG_VALUE_n dumps, etc.).
-    private static readonly Regex AuthorizationHeaderRegex = new(
-        @"(?<prefix>Authorization:\s*(?:Basic|Bearer)\s+)[A-Za-z0-9+/=._~-]+",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"(?<prefix>Authorization:\s*(?:Basic|Bearer)\s+)[A-Za-z0-9+/=._~-]+", RegexOptions.IgnoreCase)]
+    private static partial Regex AuthorizationHeaderRegex { get; }
 
     private static string RedactHttpExtraHeader(string s)
     {

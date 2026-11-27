@@ -20,7 +20,7 @@ namespace GrayMoon.Worker.Services;
 /// global MSBuild property rather than the project file.
 /// A property group, property, or <c>Target</c> that carries a Condition is skipped. A value that still contains <c>$(...)</c> does not change the effective value.
 /// </remarks>
-public static class ProjectPackagingResolver
+public static partial class ProjectPackagingResolver
 {
     public const int MaxImportDepth = 16;
 
@@ -31,9 +31,8 @@ public static class ProjectPackagingResolver
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     // The parent chain people write at the top of Directory.Build.props / Directory.Build.targets.
-    private static readonly Regex ParentChainImport = new(
-        @"^\$\(\s*\[MSBuild\]::GetPathOfFileAbove\(\s*'(?<file>Directory\.Build\.(?:props|targets))'\s*,\s*'\$\(MSBuildThisFileDirectory\)\.\./'\s*\)\s*\)$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    [GeneratedRegex(@"^\$\(\s*\[MSBuild\]::GetPathOfFileAbove\(\s*'(?<file>Directory\.Build\.(?:props|targets))'\s*,\s*'\$\(MSBuildThisFileDirectory\)\.\./'\s*\)\s*\)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ParentChainImport { get; }
 
     public readonly record struct PackagingProperties(string? PackageId, bool? IsPackable);
 

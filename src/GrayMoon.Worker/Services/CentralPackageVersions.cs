@@ -12,24 +12,21 @@ namespace GrayMoon.Worker.Services;
 /// Only the nearest file is used (no parent import chain), and only an unconditional <c>PackageVersion</c> with a literal
 /// <c>Version</c> counts. A value that contains <c>$(...)</c> is read as-is and never rewritten.
 /// </remarks>
-public static class CentralPackageVersions
+public static partial class CentralPackageVersions
 {
     public const string FileName = "Directory.Packages.props";
 
     private static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    private static readonly Regex PackageVersionElementRegex = new(
-        @"<PackageVersion\b.*?(?:/>|</PackageVersion\s*>)",
-        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    [GeneratedRegex(@"<PackageVersion\b.*?(?:/>|</PackageVersion\s*>)", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
+    private static partial Regex PackageVersionElementRegex { get; }
 
-    private static readonly Regex IncludeAttributeRegex = new(
-        @"\b(?:Include|Update)\s*=\s*""([^""]*)""",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"\b(?:Include|Update)\s*=\s*""([^""]*)""", RegexOptions.IgnoreCase)]
+    private static partial Regex IncludeAttributeRegex { get; }
 
-    private static readonly Regex VersionAttributeRegex = new(
-        @"(\bVersion\s*=\s*"")[^""]*("")",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"(\bVersion\s*=\s*"")[^""]*("")", RegexOptions.IgnoreCase)]
+    private static partial Regex VersionAttributeRegex { get; }
 
     /// <summary>Nearest <c>Directory.Packages.props</c> at or above the project directory, never above the repository root.</summary>
     public static string? FindPropsFile(string projectPath, string repositoryRoot)

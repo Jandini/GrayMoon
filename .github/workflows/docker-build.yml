@@ -33,11 +33,11 @@ jobs:
       # The same command as in the build job: the App accepts only a Worker of its own version.
       - name: Determine version
         id: gitversion
-        shell: bash
+        shell: pwsh
         run: |
-          VERSION=$(dotnet gitversion /nofetch /verbosity quiet /showvariable InformationalVersion)
-          test -n "$VERSION"
-          echo "SemVer=$VERSION" >> $GITHUB_OUTPUT
+          $version = dotnet gitversion /nofetch /verbosity quiet /showvariable InformationalVersion
+          if (-not $version) { throw 'GitVersion returned no version.' }
+          "SemVer=$version" >> $env:GITHUB_OUTPUT
 
       - name: Build the Windows Worker zip
         shell: pwsh

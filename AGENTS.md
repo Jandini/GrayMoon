@@ -496,6 +496,11 @@ runs on the thread pool while the dispatcher may be rendering the page.
      `Jobs/CommandContracts.cs` (`ICommandOutcome`, `IWorkspaceScopedRequest`,
      `IRepositoryNamedRequest`, `IWorkspaceNamedRequest`); a type that has the
      property implements the interface (`CommandContractConventionTests`).
+   - An options class bound from configuration has `{ get; set; }` properties.
+     The generated binder skips an `init` property without an error, and the
+     setting then has no effect (`WorkerOptionsBindingTests`).
+   - Regular expressions are `[GeneratedRegex]` partial properties, not
+     `RegexOptions.Compiled`, which the AOT exe can only interpret.
    - No `{@Value}` in a log template: Serilog reads the object by reflection.
      Log the JSON text from `WorkerJsonOptions.SerializeResponse` or the
      single values.

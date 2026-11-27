@@ -13,7 +13,7 @@ using static GrayMoon.Worker.Services.GitCliOutput;
 
 namespace GrayMoon.Worker.Services;
 
-public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader, IGitIgnoreService ignore, IRepositoryAccess? access = null) : IGitService
+public sealed partial class GitService(IOptions<WorkerOptions> options, ILogger<GitService> logger, GitProcessRunner runner, IGitRepositoryReader reader, IGitIgnoreService ignore, IRepositoryAccess? access = null) : IGitService
 {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _safeRepoCache = new(StringComparer.OrdinalIgnoreCase);
     private static string? _emptyHooksPath;
@@ -414,9 +414,8 @@ public sealed class GitService(IOptions<WorkerOptions> options, ILogger<GitServi
         return missing;
     }
 
-    private static readonly Regex MissingRemoteRefRegex = new(
-        @"couldn't find remote ref (\S+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"couldn't find remote ref (\S+)", RegexOptions.IgnoreCase)]
+    private static partial Regex MissingRemoteRefRegex { get; }
 
 
 

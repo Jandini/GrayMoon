@@ -7,14 +7,13 @@ namespace GrayMoon.Common.Git;
 /// matches the same repository or connector on another regardless of clone protocol, host casing or a
 /// trailing <c>.git</c>. Unparsable input is returned trimmed so identical strings still compare equal.
 /// </summary>
-public static class RepositoryUrlIdentity
+public static partial class RepositoryUrlIdentity
 {
     private const string ApiV3Suffix = "/api/v3";
 
     // git@host:owner/repo.git (scp-like syntax, no scheme).
-    private static readonly Regex ScpLike = new(
-        @"^(?:[^@/\s:]+@)?(?<host>[^@/\s:]+):(?<path>(?!//).+)$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^(?:[^@/\s:]+@)?(?<host>[^@/\s:]+):(?<path>(?!//).+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex ScpLike { get; }
 
     /// <summary>Scheme and host (lower-case, default port dropped) plus any path with <c>/api/v3</c> and the trailing slash removed.</summary>
     public static string NormalizeConnectorUrl(string? url)
